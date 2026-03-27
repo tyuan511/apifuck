@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "fuckapi",
+  "productName": "apifuck",
   "version": "0.1.0",
-  "identifier": "me.tangge.fuckapi",
+  "identifier": "me.tangge.apifuck",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,9 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "fuckapi",
+        "title": "apifuck",
         "width": 1200,
-        "height": 800
+        "height": 800,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 24
+        }
       }
     ],
     "security": {

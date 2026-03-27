@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
-const APP_CONFIG_DIR: &str = ".fuckapi";
+const APP_CONFIG_DIR: &str = ".apifuck";
+const LEGACY_APP_CONFIG_DIR: &str = ".fuckapi";
 const APP_CONFIG_FILE: &str = "config.json";
 const DEFAULT_WORKSPACE_DIR: &str = "workspace";
 const APP_CONFIG_SCHEMA_VERSION: u32 = 1;
@@ -141,7 +142,21 @@ fn app_config_root() -> AppResult<PathBuf> {
     let home_dir = home_dir().ok_or_else(|| {
         AppError::InvalidInput("could not determine the current user's home directory".to_string())
     })?;
-    Ok(home_dir.join(APP_CONFIG_DIR))
+    let new_root = home_dir.join(APP_CONFIG_DIR);
+    let legacy_root = home_dir.join(LEGACY_APP_CONFIG_DIR);
+
+    if new_root.exists() {
+        return Ok(new_root);
+    }
+
+    if legacy_root.exists() {
+        match fs::rename(&legacy_root, &new_root) {
+            Ok(_) => return Ok(new_root),
+            Err(_) => return Ok(legacy_root),
+        }
+    }
+
+    Ok(new_root)
 }
 
 fn default_workspace_path_from_root(root: &Path) -> PathBuf {
@@ -233,7 +248,7 @@ mod tests {
         let updated = update_app_config_at(
             &config_path,
             UpdateAppConfigInput {
-                last_opened_workspace_path: Some("/tmp/fuckapi-workspace".to_string()),
+                last_opened_workspace_path: Some("/tmp/apifuck-workspace".to_string()),
                 theme: AppTheme::Dark,
             },
         )
@@ -242,7 +257,7 @@ mod tests {
         assert!(matches!(updated.theme, AppTheme::Dark));
         assert_eq!(
             updated.last_opened_workspace_path.as_deref(),
-            Some("/tmp/fuckapi-workspace")
+            Some("/tmp/apifuck-workspace")
         );
 
         let reloaded = read_app_config_at(&config_path).expect("reload config");
