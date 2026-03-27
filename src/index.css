@@ -121,11 +121,15 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
+  .lucide {
+    width: 1rem;
+    height: 1rem;
+  }
   body {
     @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
-    }
+  }
 }
