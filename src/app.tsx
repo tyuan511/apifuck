@@ -1,5 +1,4 @@
 import type { ReactNode, RefObject } from 'react'
-import type { AppConfig, AppTheme } from '@/lib/app-config'
 import type {
   ApiDefinition,
   ApiSummary,
@@ -12,17 +11,19 @@ import type {
   WorkspaceSnapshot,
 } from '@/lib/workspace'
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  EllipsisIcon,
+  FilePlusIcon,
   FolderIcon,
   FolderOpenIcon,
+  FolderPlusIcon,
   Loader2Icon,
-  MonitorIcon,
-  MoonStarIcon,
   PlusIcon,
   SaveIcon,
   SendHorizonalIcon,
-  SunIcon,
+  Settings2Icon,
   XIcon,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
@@ -48,15 +49,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  openStartupWorkspace,
-  updateAppConfig,
-} from '@/lib/app-config'
+import { openStartupWorkspace } from '@/lib/app-config'
 import { cn } from '@/lib/utils'
 import {
   createApi,
@@ -76,7 +81,6 @@ type TreeSelection
   = | { type: 'collection', id: string, parentCollectionId: string | null }
     | { type: 'api', id: string, parentCollectionId: string | null }
 interface RequestEditorDraft extends ApiDefinition {}
-interface ThemeOption { label: string, value: AppTheme, icon: ReactNode }
 
 interface OpenRequestTab {
   requestId: string
@@ -106,17 +110,11 @@ const editorTabs: Array<{ value: EditorPanelTab, label: string }> = [
   { value: 'docs', label: 'Docs' },
   { value: 'mock', label: 'Mock' },
 ]
-const themeOptions: ThemeOption[] = [
-  { label: 'System', value: 'system', icon: <MonitorIcon className="size-4" /> },
-  { label: 'Light', value: 'light', icon: <SunIcon className="size-4" /> },
-  { label: 'Dark', value: 'dark', icon: <MoonStarIcon className="size-4" /> },
-]
 
 export function App() {
   const { setTheme } = useTheme()
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
 
-  const [appConfig, setAppConfig] = useState<AppConfig | null>(null)
   const [workspacePath, setWorkspacePath] = useState('')
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot | null>(null)
   const [isBooting, setIsBooting] = useState(true)
@@ -141,6 +139,7 @@ export function App() {
   const [collectionDialogOpen, setCollectionDialogOpen] = useState(false)
   const [collectionNameDraft, setCollectionNameDraft] = useState('')
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
+  const [requestDialogParentCollectionId, setRequestDialogParentCollectionId] = useState<string | null>(null)
   const [requestNameDraft, setRequestNameDraft] = useState('')
   const [requestMethodDraft, setRequestMethodDraft] = useState('GET')
   const [requestUrlDraft, setRequestUrlDraft] = useState('https://example.com')
@@ -169,7 +168,6 @@ export function App() {
         }
 
         startTransition(() => {
-          setAppConfig(startup.appConfig)
           setWorkspacePath(startup.workspacePath)
           setWorkspace(startup.workspaceSnapshot)
           setActiveProjectId(startup.workspaceSnapshot.lastOpenedProjectId)
@@ -287,15 +285,6 @@ export function App() {
     const snapshot = await openWorkspace(workspacePath)
     setWorkspace(snapshot)
     return snapshot
-  }
-
-  async function persistTheme(nextTheme: AppTheme) {
-    setTheme(nextTheme)
-    const saved = await updateAppConfig({
-      lastOpenedWorkspacePath: appConfig?.lastOpenedWorkspacePath ?? workspacePath,
-      theme: nextTheme,
-    })
-    setAppConfig(saved)
   }
 
   function toggleCollection(collectionId: string) {
@@ -575,7 +564,7 @@ export function App() {
       return
     }
 
-    const parentCollectionId = getCreationParentCollectionId(selectedTreeNode)
+    const parentCollectionId = null
     await runTask(async () => {
       const collection = await createCollection({
         projectId: activeProject.metadata.id,
@@ -603,7 +592,7 @@ export function App() {
       return
     }
 
-    const parentCollectionId = getCreationParentCollectionId(selectedTreeNode)
+    const parentCollectionId = requestDialogParentCollectionId
     const input: CreateApiInput = {
       projectId: activeProject.metadata.id,
       parentCollectionId: parentCollectionId ?? undefined,
@@ -629,6 +618,7 @@ export function App() {
         parentCollectionId,
       })
       setRequestDialogOpen(false)
+      setRequestDialogParentCollectionId(null)
       setRequestNameDraft('')
       setRequestMethodDraft('GET')
       setRequestUrlDraft('https://example.com')
@@ -637,7 +627,7 @@ export function App() {
 
   const shellClassName = 'h-screen bg-background text-foreground'
   const shellColumns = {
-    gridTemplateColumns: 'clamp(260px, 24vw, 320px) minmax(0, 1fr)',
+    gridTemplateColumns: 'clamp(248px, 23vw, 308px) minmax(0, 1fr)',
   } as const
 
   if (isBooting) {
@@ -657,31 +647,23 @@ export function App() {
     <main className={shellClassName}>
       <div className="grid h-full min-h-0" style={shellColumns}>
         <ProjectSidebar
-          appConfig={appConfig}
           activeProjectId={activeProjectId}
           collapsedCollectionIds={collapsedCollectionIds}
-          currentProjectCollectionNames={currentProjectCollectionNames}
-          isBusy={isBusy}
           openRequestTabs={openRequestTabs}
           projects={workspace?.projects ?? []}
           selectedTreeNode={selectedTreeNode}
-          themeOptions={themeOptions}
-          workspace={workspace}
-          workspacePath={workspacePath}
-          onCreateCollection={() => setCollectionDialogOpen(true)}
+          onCreateCollection={() => {
+            setCollectionDialogOpen(true)
+          }}
           onCreateProject={() => setProjectDialogOpen(true)}
-          onCreateRequest={() => setRequestDialogOpen(true)}
+          onCreateRequest={(parentCollectionId) => {
+            setRequestDialogParentCollectionId(parentCollectionId)
+            setRequestDialogOpen(true)
+          }}
           onOpenRequest={openRequestFromSummary}
           onProjectChange={(projectId) => {
             setActiveProjectId(projectId)
             setSelectedTreeNode(null)
-          }}
-          onThemeChange={(theme) => {
-            void persistTheme(theme).then(() => {
-              toast.success('主题偏好已保存到 ~/.fuckapi/config.json')
-            }).catch((error) => {
-              toast.error(error instanceof Error ? error.message : String(error))
-            })
           }}
           onToggleCollection={toggleCollection}
           onTreeSelectionChange={setNodeSelection}
@@ -736,7 +718,7 @@ export function App() {
       <CreateCollectionDialog
         name={collectionNameDraft}
         open={collectionDialogOpen}
-        parentLabel={describeParentSelection(selectedTreeNode, currentProjectCollectionNames)}
+        parentLabel="project root"
         onNameChange={setCollectionNameDraft}
         onOpenChange={setCollectionDialogOpen}
         onSubmit={() => {
@@ -748,11 +730,16 @@ export function App() {
         method={requestMethodDraft}
         name={requestNameDraft}
         open={requestDialogOpen}
-        parentLabel={describeParentSelection(selectedTreeNode, currentProjectCollectionNames)}
+        parentLabel={describeCollectionParent(requestDialogParentCollectionId, currentProjectCollectionNames)}
         url={requestUrlDraft}
         onMethodChange={setRequestMethodDraft}
         onNameChange={setRequestNameDraft}
-        onOpenChange={setRequestDialogOpen}
+        onOpenChange={(open) => {
+          setRequestDialogOpen(open)
+          if (!open) {
+            setRequestDialogParentCollectionId(null)
+          }
+        }}
         onSubmit={() => {
           void handleCreateRequest()
         }}
@@ -764,22 +751,15 @@ export function App() {
 
 interface ProjectSidebarProps {
   activeProjectId: string | null
-  appConfig: AppConfig | null
   collapsedCollectionIds: string[]
-  currentProjectCollectionNames: Map<string, string>
-  isBusy: boolean
   openRequestTabs: OpenRequestTab[]
   projects: WorkspaceSnapshot['projects']
   selectedTreeNode: TreeSelection | null
-  themeOptions: ThemeOption[]
-  workspace: WorkspaceSnapshot | null
-  workspacePath: string
   onCreateCollection: () => void
   onCreateProject: () => void
-  onCreateRequest: () => void
+  onCreateRequest: (parentCollectionId: string | null) => void
   onOpenRequest: (summary: ApiSummary, parentCollectionId: string | null) => void
   onProjectChange: (projectId: string) => void
-  onThemeChange: (theme: AppTheme) => void
   onToggleCollection: (collectionId: string) => void
   onTreeSelectionChange: (selection: TreeSelection | null) => void
 }
@@ -789,63 +769,81 @@ function ProjectSidebar(props: ProjectSidebarProps) {
 
   return (
     <aside className="flex min-h-0 flex-col border-r border-border/70 bg-sidebar/50">
-      <div className="border-b border-border/70 px-4 py-4">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-              Project
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {activeProject?.metadata.slug ?? 'No project selected'}
+      <div className="border-b border-border/70 px-3 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold tracking-tight">
+              {activeProject?.metadata.name ?? 'No project selected'}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={props.onCreateProject}>
-            <PlusIcon />
-            New
-          </Button>
-        </div>
 
-        <Select
-          value={activeProject?.metadata.id ?? ''}
-          onValueChange={(value) => {
-            if (value) {
-              props.onProjectChange(value)
-            }
-          }}
-        >
-          <SelectTrigger className="w-full justify-between">
-            <SelectValue placeholder="Choose a project" />
-          </SelectTrigger>
-          <SelectContent>
-            {props.projects.map(project => (
-              <SelectItem key={project.metadata.id} value={project.metadata.id}>
-                <span className="flex flex-col items-start gap-0">
-                  <span>{project.metadata.name}</span>
-                  <span className="text-xs text-muted-foreground">{project.metadata.slug}</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={(
+                <Button size="icon-sm" variant="ghost" />
+              )}
+            >
+              <EllipsisIcon />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-72">
+              <div className="flex items-center justify-between px-2 py-1.5">
+                <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  Projects
                 </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="border-b border-border/70 px-4 py-3">
-        <div className="flex gap-2">
-          <Button className="flex-1" size="sm" variant="outline" onClick={props.onCreateCollection}>
-            <PlusIcon />
-            New Collection
-          </Button>
-          <Button className="flex-1" size="sm" onClick={props.onCreateRequest}>
-            <PlusIcon />
-            New Request
-          </Button>
+                <button
+                  type="button"
+                  onClick={props.onCreateProject}
+                  className="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                >
+                  <PlusIcon className="size-4" />
+                </button>
+              </div>
+              <DropdownMenuSeparator />
+              {props.projects.map(project => (
+                <DropdownMenuItem
+                  key={project.metadata.id}
+                  onClick={() => props.onProjectChange(project.metadata.id)}
+                  className="justify-between"
+                >
+                  <span className="flex min-w-0 flex-col items-start gap-0">
+                    <span className="truncate">{project.metadata.name}</span>
+                    <span className="text-xs text-muted-foreground">{project.metadata.slug}</span>
+                  </span>
+                  {project.metadata.id === activeProject?.metadata.id && (
+                    <CheckIcon className="size-4 text-emerald-500" />
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-3 py-4">
+      <div className="min-h-0 flex-1 overflow-auto px-2.5 py-3">
+        <div className="mb-2 flex items-center justify-between px-0.5">
+          <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
+            Requests
+          </span>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={props.onCreateCollection}
+              className="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            >
+              <FolderPlusIcon className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => props.onCreateRequest(null)}
+              className="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            >
+              <FilePlusIcon className="size-4" />
+            </button>
+          </div>
+        </div>
         {activeProject
           ? (
-              <div className="space-y-2">
+              <div className="space-y-1">
                 {activeProject.children.length > 0
                   ? activeProject.children.map(node => (
                       <RequestTreeNode
@@ -854,6 +852,7 @@ function ProjectSidebar(props: ProjectSidebarProps) {
                         node={node}
                         openRequestTabs={props.openRequestTabs}
                         selectedTreeNode={props.selectedTreeNode}
+                        onCreateRequest={props.onCreateRequest}
                         onOpenRequest={props.onOpenRequest}
                         onToggleCollection={props.onToggleCollection}
                         onTreeSelectionChange={props.onTreeSelectionChange}
@@ -865,28 +864,14 @@ function ProjectSidebar(props: ProjectSidebarProps) {
           : <SidebarEmptyState title="No projects" body="Create your first project to open the workbench." />}
       </div>
 
-      <div className="border-t border-border/70 px-4 py-4">
-        <div className="mb-3 flex rounded-xl border border-border/70 bg-background/70 p-1">
-          {props.themeOptions.map(option => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => props.onThemeChange(option.value)}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs transition',
-                props.appConfig?.theme === option.value
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-              )}
-            >
-              {option.icon}
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Workspace</p>
-        <p className="mt-2 text-sm font-medium">{props.workspace?.name ?? 'Untitled workspace'}</p>
-        <p className="mt-1 break-all text-xs leading-5 text-muted-foreground">{props.workspacePath}</p>
+      <div className="border-t border-border/70 px-3 py-3">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        >
+          <Settings2Icon className="size-4" />
+          设置
+        </button>
       </div>
     </aside>
   )
@@ -897,6 +882,7 @@ interface RequestTreeNodeProps {
   node: TreeNode
   openRequestTabs: OpenRequestTab[]
   selectedTreeNode: TreeSelection | null
+  onCreateRequest: (parentCollectionId: string | null) => void
   onOpenRequest: (summary: ApiSummary, parentCollectionId: string | null) => void
   onToggleCollection: (collectionId: string) => void
   onTreeSelectionChange: (selection: TreeSelection | null) => void
@@ -910,6 +896,7 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
     openRequestTabs,
     parentCollectionId = null,
     selectedTreeNode,
+    onCreateRequest,
     onOpenRequest,
     onToggleCollection,
     onTreeSelectionChange,
@@ -926,12 +913,12 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
             onTreeSelectionChange({ type: 'collection', id: node.id, parentCollectionId })
           }}
           className={cn(
-            'flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-accent',
+            'flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-left transition hover:bg-accent',
             isSelected && 'bg-accent text-foreground',
           )}
         >
           <span
-            className="flex size-5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+            className="flex size-4 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
             onClick={(event) => {
               event.stopPropagation()
               onToggleCollection(node.id)
@@ -940,11 +927,29 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
             {isCollapsed ? <ChevronRightIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
           </span>
           {isCollapsed ? <FolderIcon className="size-4 text-muted-foreground" /> : <FolderOpenIcon className="size-4 text-muted-foreground" />}
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">{node.name}</span>
-          <span className="text-xs text-muted-foreground">{node.children.length}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{node.name}</span>
+          <span className="text-[11px] text-muted-foreground">{node.children.length}</span>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(event) => {
+              event.stopPropagation()
+              onCreateRequest(node.id)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                event.stopPropagation()
+                onCreateRequest(node.id)
+              }
+            }}
+            className="rounded-md p-1 text-muted-foreground transition hover:bg-background hover:text-foreground"
+          >
+            <FilePlusIcon className="size-4" />
+          </span>
         </button>
         {!isCollapsed && node.children.length > 0 && (
-          <div className="ml-5 border-l border-border/60 pl-2">
+          <div className="ml-4 border-l border-border/60 pl-1.5">
             {node.children.map(child => (
               <RequestTreeNode
                 key={child.id}
@@ -953,6 +958,7 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
                 openRequestTabs={openRequestTabs}
                 parentCollectionId={node.id}
                 selectedTreeNode={selectedTreeNode}
+                onCreateRequest={onCreateRequest}
                 onOpenRequest={onOpenRequest}
                 onToggleCollection={onToggleCollection}
                 onTreeSelectionChange={onTreeSelectionChange}
@@ -974,12 +980,12 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
         onOpenRequest(node, parentCollectionId)
       }}
       className={cn(
-        'mt-1 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left transition hover:bg-accent',
+        'mt-0.5 flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-left transition hover:bg-accent',
         isSelected && 'bg-accent text-foreground',
       )}
     >
       <MethodBadge method={node.method} subtle />
-      <span className="min-w-0 flex-1 truncate text-sm">{node.name}</span>
+      <span className="min-w-0 flex-1 truncate text-[13px]">{node.name}</span>
       {isOpen && <span className="size-2 rounded-full bg-primary" />}
     </button>
   )
@@ -1046,7 +1052,7 @@ function RequestWorkspace(props: RequestWorkspaceProps) {
                   ref={props.splitContainerRef}
                   className="grid min-h-0 flex-1"
                   style={{
-                    gridTemplateRows: `minmax(280px, ${props.splitRatio}fr) 8px minmax(220px, ${1 - props.splitRatio}fr)`,
+                    gridTemplateRows: `minmax(250px, ${props.splitRatio}fr) 8px minmax(200px, ${1 - props.splitRatio}fr)`,
                   }}
                 >
                   <RequestEditorTabs
@@ -1061,7 +1067,7 @@ function RequestWorkspace(props: RequestWorkspaceProps) {
                     aria-label="Resize request and response panes"
                     onMouseDown={props.onStartDraggingSplit}
                     className={cn(
-                      'group relative mx-4 my-1 rounded-full bg-transparent transition',
+                      'group relative mx-3 my-0.5 rounded-full bg-transparent transition',
                       props.isDraggingSplit ? 'cursor-row-resize' : 'cursor-row-resize hover:bg-accent/50',
                     )}
                   >
@@ -1076,8 +1082,8 @@ function RequestWorkspace(props: RequestWorkspaceProps) {
           : (
               <div className="grid flex-1 place-items-center">
                 <div className="max-w-md text-center">
-                  <p className="text-lg font-medium">打开一个请求开始工作</p>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  <p className="text-base font-medium">打开一个请求开始工作</p>
+                  <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
                     左侧点击请求节点会在这里打开一个持久化标签页。编辑后的草稿会保留在本地内存，保存后再写回工作空间文件。
                   </p>
                 </div>
@@ -1115,13 +1121,13 @@ interface RequestTabsBarProps {
 
 function RequestTabsBar(props: RequestTabsBarProps) {
   return (
-    <div className="flex min-h-12 items-center gap-2 overflow-x-auto border-b border-border/70 px-4 py-2">
+    <div className="flex min-h-10 items-center gap-1.5 overflow-x-auto border-b border-border/70 px-3 py-1.5">
       {props.openRequestTabs.length > 0
         ? props.openRequestTabs.map(tab => (
             <div
               key={tab.requestId}
               className={cn(
-                'group flex min-w-[180px] items-center gap-2 rounded-xl border px-3 py-2 transition',
+                'group flex min-w-[168px] items-center gap-1.5 rounded-lg border px-2.5 py-1.5 transition',
                 props.activeRequestId === tab.requestId
                   ? 'border-primary/40 bg-primary/5'
                   : 'border-transparent bg-muted/50 hover:border-border/80 hover:bg-accent',
@@ -1130,10 +1136,10 @@ function RequestTabsBar(props: RequestTabsBarProps) {
               <button
                 type="button"
                 onClick={() => props.onFocusRequestTab(tab.requestId)}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
               >
                 <MethodBadge method={tab.method} subtle />
-                <span className="min-w-0 truncate text-sm font-medium">{tab.title}</span>
+                <span className="min-w-0 truncate text-[13px] font-medium">{tab.title}</span>
                 {tab.dirty && <span className="size-2 rounded-full bg-amber-500" />}
               </button>
               <button
@@ -1145,7 +1151,7 @@ function RequestTabsBar(props: RequestTabsBarProps) {
               </button>
             </div>
           ))
-        : <span className="text-sm text-muted-foreground">No request tabs open</span>}
+        : <span className="text-[13px] text-muted-foreground">No request tabs open</span>}
     </div>
   )
 }
@@ -1161,15 +1167,15 @@ interface RequestHeaderBarProps {
 
 function RequestHeaderBar(props: RequestHeaderBarProps) {
   return (
-    <div className="border-b border-border/70 px-4 py-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="border-b border-border/70 px-3 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div>
-          <p className="text-lg font-semibold tracking-tight">{props.draft.name}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{props.draft.slug}</p>
+          <p className="text-base font-semibold tracking-tight">{props.draft.name}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{props.draft.slug}</p>
         </div>
         <span
           className={cn(
-            'rounded-full px-2.5 py-1 text-xs font-medium',
+            'rounded-full px-2 py-0.5 text-[11px] font-medium',
             props.hasUnsavedChanges
               ? 'bg-amber-500/10 text-amber-600 dark:text-amber-300'
               : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
@@ -1179,7 +1185,7 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 xl:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
         <Select
           value={props.draft.method}
           onValueChange={(value) => {
@@ -1188,7 +1194,7 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
             }
           }}
         >
-          <SelectTrigger className="w-[124px]">
+          <SelectTrigger size="sm" className="w-[112px]">
             <SelectValue placeholder="Method" />
           </SelectTrigger>
           <SelectContent>
@@ -1201,17 +1207,17 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
         </Select>
 
         <Input
-          className="min-w-[320px] flex-1"
+          className="h-8 min-w-[280px] flex-1 text-sm"
           value={props.draft.url}
           onChange={event => props.onChangeDraft(draft => ({ ...draft, url: event.target.value }))}
           placeholder="https://api.example.com/v1/users"
         />
 
-        <Button disabled={props.isBusy} onClick={props.onSendRequest}>
+        <Button size="sm" disabled={props.isBusy} onClick={props.onSendRequest}>
           <SendHorizonalIcon />
           Send
         </Button>
-        <Button disabled={props.isBusy || !props.hasUnsavedChanges} variant="outline" onClick={props.onSaveRequest}>
+        <Button size="sm" disabled={props.isBusy || !props.hasUnsavedChanges} variant="outline" onClick={props.onSaveRequest}>
           <SaveIcon />
           Save
         </Button>
@@ -1229,11 +1235,11 @@ interface RequestEditorTabsProps {
 
 function RequestEditorTabs(props: RequestEditorTabsProps) {
   return (
-    <div className="min-h-0 overflow-hidden border-b border-border/70 px-4 py-4">
+    <div className="min-h-0 overflow-hidden border-b border-border/70 px-3 py-3">
       <Tabs value={props.activeTab} onValueChange={value => props.onActiveTabChange(value as EditorPanelTab)} className="h-full">
-        <TabsList variant="line" className="mb-4">
+        <TabsList variant="line" className="mb-3">
           {editorTabs.map(tab => (
-            <TabsTrigger key={tab.value} value={tab.value}>
+            <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 py-0.5 text-[13px]">
               {tab.label}
             </TabsTrigger>
           ))}
@@ -1302,10 +1308,10 @@ interface ResponsePaneProps {
 function ResponsePane(props: ResponsePaneProps) {
   if (!props.response) {
     return (
-      <div className="grid min-h-0 place-items-center px-4 py-6">
+      <div className="grid min-h-0 place-items-center px-3 py-5">
         <div className="max-w-md text-center">
-          <p className="text-base font-medium">响应会在这里出现</p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          <p className="text-sm font-medium">响应会在这里出现</p>
+          <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
             发送请求后，这里会展示状态码、耗时、响应大小和自动识别的内容视图。
           </p>
         </div>
@@ -1315,7 +1321,7 @@ function ResponsePane(props: ResponsePaneProps) {
 
   return (
     <div className="flex min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-4 py-3 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2 text-[11px] text-muted-foreground">
         <ResponseMetaBadge label="Status" value={props.response.status !== null ? String(props.response.status) : 'Pending'} />
         <ResponseMetaBadge label="Duration" value={`${props.response.durationMs} ms`} />
         <ResponseMetaBadge label="Size" value={formatBytes(props.response.sizeBytes)} />
@@ -1323,7 +1329,7 @@ function ResponsePane(props: ResponsePaneProps) {
         {props.response.responseType && <ResponseMetaBadge label="View" value={props.response.responseType.toUpperCase()} />}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+      <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
         {props.response.isLoading
           ? (
               <div className="grid h-full place-items-center">
@@ -1335,7 +1341,7 @@ function ResponsePane(props: ResponsePaneProps) {
             )
           : props.response.error
             ? (
-                <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
                   {props.response.error}
                 </div>
               )
@@ -1349,7 +1355,7 @@ function ResponsePane(props: ResponsePaneProps) {
 
 function JsonResponseView(props: { body: string }) {
   return (
-    <pre className="overflow-auto rounded-2xl border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6">
+    <pre className="overflow-auto rounded-xl border border-border/70 bg-muted/40 p-3 font-mono text-xs leading-5">
       {props.body}
     </pre>
   )
@@ -1357,7 +1363,7 @@ function JsonResponseView(props: { body: string }) {
 
 function TextResponseView(props: { body: string }) {
   return (
-    <pre className="overflow-auto rounded-2xl border border-border/70 bg-muted/40 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words">
+    <pre className="overflow-auto rounded-xl border border-border/70 bg-muted/40 p-3 font-mono text-xs leading-5 whitespace-pre-wrap break-words">
       {props.body || 'No response body'}
     </pre>
   )
@@ -1381,20 +1387,20 @@ function KeyValueTable(props: KeyValueTableProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{props.emptyLabel}</p>
-        <Button size="sm" variant="outline" onClick={props.onAdd}>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[13px] text-muted-foreground">{props.emptyLabel}</p>
+        <Button size="xs" variant="outline" onClick={props.onAdd}>
           <PlusIcon />
           Add row
         </Button>
       </div>
 
-      <div className="min-h-0 space-y-2 overflow-auto pr-1">
+      <div className="min-h-0 space-y-1.5 overflow-auto pr-1">
         {props.rows.length > 0
           ? props.rows.map(row => (
               <div
                 key={row.id}
-                className="grid grid-cols-[32px_minmax(0,_1fr)_minmax(0,_1fr)_36px] items-center gap-2 rounded-2xl border border-border/70 bg-muted/30 p-2"
+                className="grid grid-cols-[28px_minmax(0,_1fr)_minmax(0,_1fr)_32px] items-center gap-1.5 rounded-xl border border-border/70 bg-muted/30 p-1.5"
               >
                 <div className="flex items-center justify-center">
                   <Checkbox checked={row.enabled} onCheckedChange={checked => updateRow(row.id, current => ({ ...current, enabled: Boolean(checked) }))} />
@@ -1412,14 +1418,14 @@ function KeyValueTable(props: KeyValueTableProps) {
                 <button
                   type="button"
                   onClick={() => removeRow(row.id)}
-                  className="rounded-lg p-2 text-muted-foreground transition hover:bg-background hover:text-foreground"
+                  className="rounded-md p-1.5 text-muted-foreground transition hover:bg-background hover:text-foreground"
                 >
                   <XIcon className="size-4" />
                 </button>
               </div>
             ))
           : (
-              <div className="grid min-h-[120px] place-items-center rounded-2xl border border-dashed border-border/70 text-sm text-muted-foreground">
+              <div className="grid min-h-[100px] place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
                 {props.emptyLabel}
               </div>
             )}
@@ -1435,9 +1441,9 @@ function BodyEditor(props: {
   const body = props.draft.request.body
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-muted-foreground">Body mode</span>
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span className="text-[13px] text-muted-foreground">Body mode</span>
         <Select
           value={body.mode}
           onValueChange={(value) => {
@@ -1452,7 +1458,7 @@ function BodyEditor(props: {
             }
           }}
         >
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger size="sm" className="w-[164px]">
             <SelectValue placeholder="Choose mode" />
           </SelectTrigger>
           <SelectContent>
@@ -1464,14 +1470,14 @@ function BodyEditor(props: {
       </div>
 
       {body.mode === 'none' && (
-        <div className="grid min-h-[160px] place-items-center rounded-2xl border border-dashed border-border/70 text-sm text-muted-foreground">
+        <div className="grid min-h-[140px] place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
           This request currently sends no body.
         </div>
       )}
 
       {body.mode === 'raw' && (
         <Textarea
-          className="min-h-[240px] flex-1 font-mono text-xs"
+          className="min-h-[220px] flex-1 font-mono text-xs"
           value={body.raw}
           onChange={event => props.onChangeDraft(draft => ({
             ...draft,
@@ -1486,7 +1492,7 @@ function BodyEditor(props: {
 
       {body.mode === 'json' && (
         <Textarea
-          className="min-h-[240px] flex-1 font-mono text-xs"
+          className="min-h-[220px] flex-1 font-mono text-xs"
           value={body.json}
           onChange={event => props.onChangeDraft(draft => ({
             ...draft,
@@ -1509,8 +1515,8 @@ function DocsEditor(props: {
   const docs = props.draft.documentation
 
   return (
-    <div className="grid h-full min-h-0 gap-4 lg:grid-cols-2">
-      <div className="space-y-3">
+    <div className="grid h-full min-h-0 gap-3 lg:grid-cols-2">
+      <div className="space-y-2.5">
         <LabelBlock label="Summary">
           <Input
             value={docs.summary}
@@ -1541,9 +1547,9 @@ function DocsEditor(props: {
             placeholder="User"
           />
         </LabelBlock>
-        <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-muted/30 px-4 py-3">
+        <div className="flex items-center justify-between rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
           <div>
-            <p className="text-sm font-medium">Deprecated</p>
+            <p className="text-[13px] font-medium">Deprecated</p>
             <p className="text-xs text-muted-foreground">Mark this request as legacy or scheduled for removal.</p>
           </div>
           <Switch
@@ -1557,7 +1563,7 @@ function DocsEditor(props: {
       </div>
       <LabelBlock label="Description" className="h-full">
         <Textarea
-          className="min-h-[240px] h-full font-mono text-xs"
+          className="min-h-[220px] h-full font-mono text-xs"
           value={docs.description}
           onChange={event => props.onChangeDraft(draft => ({
             ...draft,
@@ -1578,11 +1584,11 @@ function MockEditor(props: {
   const mockBodyText = serializeMockBody(mock.body)
 
   return (
-    <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[320px_1fr]">
-      <div className="space-y-4">
-        <div className="flex items-center justify-between rounded-2xl border border-border/70 bg-muted/30 px-4 py-3">
+    <div className="grid h-full min-h-0 gap-3 lg:grid-cols-[300px_1fr]">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
           <div>
-            <p className="text-sm font-medium">Mock enabled</p>
+            <p className="text-[13px] font-medium">Mock enabled</p>
             <p className="text-xs text-muted-foreground">Use this saved response for future mock features.</p>
           </div>
           <Switch
@@ -1630,7 +1636,7 @@ function MockEditor(props: {
 
       <LabelBlock label="Mock Body" className="h-full">
         <Textarea
-          className="min-h-[260px] h-full font-mono text-xs"
+          className="min-h-[220px] h-full font-mono text-xs"
           value={mockBodyText}
           onChange={event => props.onChangeDraft(draft => ({
             ...draft,
@@ -1659,7 +1665,7 @@ function CreateProjectDialog(props: {
           <DialogTitle>Create Project</DialogTitle>
           <DialogDescription>Projects appear in the left selector and own their own request tree.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="space-y-3">
           <LabelBlock label="Project name">
             <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="Core APIs" />
           </LabelBlock>
@@ -1732,11 +1738,11 @@ function CreateRequestDialog(props: {
             .
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="space-y-3">
           <LabelBlock label="Request name">
             <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="Health Check" />
           </LabelBlock>
-          <div className="grid gap-4 sm:grid-cols-[140px_1fr]">
+          <div className="grid gap-3 sm:grid-cols-[128px_1fr]">
             <LabelBlock label="Method">
               <Select
                 value={props.method}
@@ -1776,7 +1782,7 @@ function MethodBadge(props: { method: string, subtle?: boolean }) {
   return (
     <span
       className={cn(
-        'inline-flex h-6 items-center rounded-full px-2 text-[11px] font-semibold uppercase tracking-[0.16em]',
+        'inline-flex h-5 items-center rounded-full px-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]',
         props.subtle ? 'bg-primary/10 text-primary' : 'bg-primary text-primary-foreground',
       )}
     >
@@ -1787,7 +1793,7 @@ function MethodBadge(props: { method: string, subtle?: boolean }) {
 
 function ResponseMetaBadge(props: { label: string, value: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2.5 py-1">
+    <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 py-0.5">
       <span className="text-muted-foreground">
         {props.label}
         :
@@ -1799,7 +1805,7 @@ function ResponseMetaBadge(props: { label: string, value: string }) {
 
 function LabelBlock(props: { children: ReactNode, className?: string, label: string }) {
   return (
-    <div className={cn('space-y-2', props.className)}>
+    <div className={cn('space-y-1.5', props.className)}>
       <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
         {props.label}
       </label>
@@ -1810,9 +1816,9 @@ function LabelBlock(props: { children: ReactNode, className?: string, label: str
 
 function SidebarEmptyState(props: { title: string, body: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border/70 px-4 py-6 text-center">
+    <div className="rounded-xl border border-dashed border-border/70 px-3 py-5 text-center">
       <p className="font-medium">{props.title}</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{props.body}</p>
+      <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{props.body}</p>
     </div>
   )
 }
@@ -1853,18 +1859,7 @@ function findCollectionName(nodes: TreeNode[], collectionId: string): string {
   return ''
 }
 
-function getCreationParentCollectionId(selection: TreeSelection | null) {
-  if (!selection) {
-    return null
-  }
-  if (selection.type === 'collection') {
-    return selection.id
-  }
-  return selection.parentCollectionId
-}
-
-function describeParentSelection(selection: TreeSelection | null, collectionNames: Map<string, string>) {
-  const parentCollectionId = getCreationParentCollectionId(selection)
+function describeCollectionParent(parentCollectionId: string | null, collectionNames: Map<string, string>) {
   if (!parentCollectionId) {
     return 'project root'
   }
