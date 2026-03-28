@@ -264,7 +264,7 @@ export function createDefaultRequest(): RequestDefinition {
       apiKey: { key: '', value: '', addTo: 'header' },
     },
     body: {
-      mode: 'none',
+      mode: 'json',
       raw: '',
       json: '',
       formData: [],

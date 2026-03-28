@@ -168,6 +168,21 @@ export function getProjectMonogram(value: string) {
   return compact.slice(0, 2).toUpperCase()
 }
 
+export function getProjectDisplayName(project: WorkspaceSnapshot['projects'][number] | null | undefined) {
+  if (!project) {
+    return '未选择项目'
+  }
+
+  const normalizedName = project.metadata.name.trim().toLowerCase()
+  const normalizedSlug = project.metadata.slug.trim().toLowerCase()
+
+  if (normalizedSlug === 'default' && ['default', '默认项目'].includes(normalizedName)) {
+    return '默认项目'
+  }
+
+  return project.metadata.name
+}
+
 export function getMethodBadgeTone(method: string) {
   switch (method.toUpperCase()) {
     case 'GET':

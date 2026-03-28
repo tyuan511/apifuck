@@ -25,12 +25,25 @@ pub enum AppTheme {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OpenRequestTab {
+    pub request_id: String,
+    pub title: String,
+    pub method: String,
+    pub dirty: bool,
+    pub last_focused_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub schema_version: u32,
     pub created_at: String,
     pub updated_at: String,
     pub last_opened_workspace_path: Option<String>,
     pub theme: AppTheme,
+    #[serde(default)]
+    pub open_request_tabs: Vec<OpenRequestTab>,
+    pub active_request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +51,13 @@ pub struct AppConfig {
 pub struct UpdateAppConfigInput {
     pub last_opened_workspace_path: Option<String>,
     pub theme: AppTheme,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTabStateInput {
+    pub open_request_tabs: Vec<OpenRequestTab>,
+    pub active_request_id: Option<String>,
 }
 
 pub fn read_app_config() -> AppResult<AppConfig> {
@@ -50,6 +70,27 @@ pub fn resolve_startup_workspace_path() -> AppResult<PathBuf> {
 
 pub fn update_app_config(input: UpdateAppConfigInput) -> AppResult<AppConfig> {
     update_app_config_at(&app_config_path()?, input)
+}
+
+pub fn read_tab_state() -> AppResult<(Vec<OpenRequestTab>, Option<String>)> {
+    let config = read_app_config()?;
+    Ok((config.open_request_tabs, config.active_request_id))
+}
+
+pub fn update_tab_state(input: UpdateTabStateInput) -> AppResult<AppConfig> {
+    let path = app_config_path()?;
+    let current = read_app_config_at(&path)?;
+    let next = AppConfig {
+        schema_version: current.schema_version,
+        created_at: current.created_at,
+        updated_at: now_iso_string(),
+        last_opened_workspace_path: current.last_opened_workspace_path,
+        theme: current.theme,
+        open_request_tabs: input.open_request_tabs,
+        active_request_id: input.active_request_id,
+    };
+    write_json_file(&path, &next)?;
+    Ok(next)
 }
 
 pub fn update_last_opened_workspace_path(path: Option<String>) -> AppResult<AppConfig> {
@@ -83,6 +124,8 @@ fn update_app_config_at(path: &Path, input: UpdateAppConfigInput) -> AppResult<A
             .last_opened_workspace_path
             .and_then(|value| normalize_optional_string(&value)),
         theme: input.theme,
+        open_request_tabs: current.open_request_tabs,
+        active_request_id: current.active_request_id,
     };
     write_json_file(path, &next)?;
     Ok(next)
@@ -111,6 +154,8 @@ fn default_app_config() -> AppConfig {
         updated_at: now,
         last_opened_workspace_path: None,
         theme: AppTheme::System,
+        open_request_tabs: Vec::new(),
+        active_request_id: None,
     }
 }
 
