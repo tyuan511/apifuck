@@ -11,7 +11,7 @@ use std::{
 use app_config::{
     read_app_config as read_app_config_storage, resolve_startup_workspace_path,
     update_app_config as update_app_config_storage, update_last_opened_workspace_path, AppConfig,
-    UpdateAppConfigInput,
+    OpenRequestTab, UpdateAppConfigInput, UpdateTabStateInput,
 };
 use error::{AppError, AppResult};
 use http::{
@@ -88,6 +88,16 @@ fn read_app_config() -> AppResult<AppConfig> {
 #[tauri::command]
 fn update_app_config(input: UpdateAppConfigInput) -> AppResult<AppConfig> {
     update_app_config_storage(input)
+}
+
+#[tauri::command]
+fn read_tab_state() -> AppResult<(Vec<OpenRequestTab>, Option<String>)> {
+    app_config::read_tab_state()
+}
+
+#[tauri::command]
+fn update_tab_state(input: UpdateTabStateInput) -> AppResult<AppConfig> {
+    app_config::update_tab_state(input)
 }
 
 #[tauri::command]
@@ -204,6 +214,8 @@ pub fn run() {
             open_startup_workspace,
             read_app_config,
             update_app_config,
+            read_tab_state,
+            update_tab_state,
             open_workspace,
             bootstrap_workspace,
             create_project,

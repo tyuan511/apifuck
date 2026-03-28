@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "apifuck",
+  "productName": "ApiFuck",
   "version": "0.1.0",
   "identifier": "me.tangge.apifuck",
   "build": {
@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "apifuck",
+        "title": "ApiFuck",
         "width": 1200,
         "height": 800,
+        "minWidth": 1000,
+        "minHeight": 720,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "trafficLightPosition": {

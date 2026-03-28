@@ -7,7 +7,7 @@ export function MethodBadge(props: { method: string, subtle?: boolean }) {
   return (
     <span
       className={cn(
-        'inline-flex h-5 items-center rounded-full px-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]',
+        'inline-flex h-5 items-center rounded-sm px-1.5 text-[10px] font-semibold uppercase',
         props.subtle ? tone.subtle : tone.solid,
       )}
     >

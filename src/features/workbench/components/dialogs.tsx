@@ -87,6 +87,43 @@ export function CreateCollectionDialog(props: {
   )
 }
 
+export function EditCollectionDialog(props: {
+  description: string
+  name: string
+  open: boolean
+  onDescriptionChange: (value: string) => void
+  onNameChange: (value: string) => void
+  onOpenChange: (open: boolean) => void
+  onSubmit: () => void
+}) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>编辑目录</DialogTitle>
+          <DialogDescription>修改目录名称和描述。</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <LabelBlock label="目录名称">
+            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="鉴权" />
+          </LabelBlock>
+          <LabelBlock label="描述（可选）">
+            <Textarea
+              value={props.description}
+              onChange={event => props.onDescriptionChange(event.target.value)}
+              placeholder="补充这个目录的用途或备注。"
+            />
+          </LabelBlock>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => props.onOpenChange(false)}>取消</Button>
+          <Button onClick={props.onSubmit}>保存修改</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function CreateRequestDialog(props: {
   description: string
   name: string

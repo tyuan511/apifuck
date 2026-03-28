@@ -19,6 +19,7 @@ import type {
 import { startTransition } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
+import { updateTabState } from '@/lib/app-config'
 import {
   createApi,
   createCollection,
@@ -27,10 +28,12 @@ import {
   createDefaultRequest,
   createProject,
   deleteNode,
+  moveNode,
   openWorkspace,
   readApi,
   sendRequest,
   updateApi,
+  updateCollection,
 } from '@/lib/workspace'
 import {
   areApiDefinitionsEqual,
@@ -62,13 +65,16 @@ interface WorkbenchState {
   requestResponses: Record<string, ResponseState>
   activeEditorTab: EditorPanelTab
   splitRatio: number
-  isDraggingSplit: boolean
   projectDialogOpen: boolean
   projectNameDraft: string
   projectDescriptionDraft: string
   collectionDialogOpen: boolean
   collectionDialogParentCollectionId: string | null
   collectionNameDraft: string
+  editCollectionDialogOpen: boolean
+  editingCollectionId: string | null
+  editCollectionNameDraft: string
+  editCollectionDescriptionDraft: string
   requestDialogOpen: boolean
   requestDialogParentCollectionId: string | null
   requestNameDraft: string
@@ -84,9 +90,9 @@ interface WorkbenchState {
 
 interface WorkbenchActions {
   hydrateWorkspace: (payload: WorkbenchBootPayload) => void
+  hydrateTabState: (tabs: OpenRequestTab[], activeRequestId: string | null) => void
   setIsBooting: (value: boolean) => void
   setSplitRatio: (value: number) => void
-  setIsDraggingSplit: (value: boolean) => void
   setActiveEditorTab: (value: EditorPanelTab) => void
   ensureActiveProject: () => void
   ensureTreeSelection: () => void
@@ -94,6 +100,7 @@ interface WorkbenchActions {
   setNodeSelection: (selection: TreeSelection | null) => void
   setActiveProject: (projectId: string | null) => void
   focusRequestTab: (requestId: string) => void
+  reorderRequestTabs: (tabs: OpenRequestTab[]) => void
   openCreateProjectDialog: () => void
   closeCreateProjectDialog: () => void
   setProjectNameDraft: (value: string) => void
@@ -103,6 +110,11 @@ interface WorkbenchActions {
   closeCreateCollectionDialog: () => void
   setCollectionNameDraft: (value: string) => void
   handleCreateCollection: () => Promise<void>
+  openEditCollectionDialog: (node: CollectionTreeNode) => void
+  closeEditCollectionDialog: () => void
+  setEditCollectionNameDraft: (value: string) => void
+  setEditCollectionDescriptionDraft: (value: string) => void
+  handleEditCollection: () => Promise<void>
   openCreateRequestDialog: (parentCollectionId: string | null) => void
   closeCreateRequestDialog: () => void
   setRequestNameDraft: (value: string) => void
@@ -127,9 +139,11 @@ interface WorkbenchActions {
   requestDeleteCollection: (node: CollectionTreeNode) => void
   clearPendingCollectionDeletion: () => void
   handleDeleteCollection: () => Promise<void>
+  moveTreeNode: (nodeId: string, targetParentCollectionId: string | null, position: number) => Promise<void>
   refreshWorkspaceInternal: () => Promise<WorkspaceSnapshot | null>
-  setRequestLoaded: (definition: ApiDefinition) => void
+  setRequestLoaded: (definition: ApiDefinition, setActiveTab?: boolean) => void
   syncRequestState: (definition: ApiDefinition) => void
+  syncTabState: () => void
   removeDeletedRequestStateInternal: (
     requestIds: string[],
     collectionIds: string[],
@@ -156,13 +170,16 @@ const initialState: WorkbenchState = {
   requestResponses: {},
   activeEditorTab: 'query',
   splitRatio: 0.55,
-  isDraggingSplit: false,
   projectDialogOpen: false,
   projectNameDraft: '',
   projectDescriptionDraft: '',
   collectionDialogOpen: false,
   collectionDialogParentCollectionId: null,
   collectionNameDraft: '',
+  editCollectionDialogOpen: false,
+  editingCollectionId: null,
+  editCollectionNameDraft: '',
+  editCollectionDescriptionDraft: '',
   requestDialogOpen: false,
   requestDialogParentCollectionId: null,
   requestNameDraft: '',
@@ -226,6 +243,10 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         collectionDialogOpen: false,
         collectionDialogParentCollectionId: null,
         collectionNameDraft: '',
+        editCollectionDialogOpen: false,
+        editingCollectionId: null,
+        editCollectionNameDraft: '',
+        editCollectionDescriptionDraft: '',
         requestDialogOpen: false,
         requestDialogParentCollectionId: null,
         requestNameDraft: '',
@@ -241,16 +262,19 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     })
   },
 
+  hydrateTabState(tabs, activeRequestId) {
+    set({
+      openRequestTabs: tabs,
+      activeRequestId,
+    })
+  },
+
   setIsBooting(value) {
     set({ isBooting: value })
   },
 
   setSplitRatio(value) {
     set({ splitRatio: value })
-  },
-
-  setIsDraggingSplit(value) {
-    set({ isDraggingSplit: value })
   },
 
   setActiveEditorTab(value) {
@@ -336,6 +360,19 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         },
       })
     }
+
+    get().syncTabState()
+  },
+
+  reorderRequestTabs(tabs) {
+    set(state => ({
+      activeRequestId: tabs.some(tab => tab.requestId === state.activeRequestId)
+        ? state.activeRequestId
+        : tabs.at(0)?.requestId ?? null,
+      openRequestTabs: tabs,
+    }))
+
+    get().syncTabState()
   },
 
   openCreateProjectDialog() {
@@ -439,6 +476,55 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       }))
       get().closeCreateCollectionDialog()
     }, '集合已创建')
+  },
+
+  openEditCollectionDialog(node) {
+    set({
+      editCollectionDialogOpen: true,
+      editingCollectionId: node.id,
+      editCollectionNameDraft: node.name,
+      editCollectionDescriptionDraft: node.description,
+    })
+  },
+
+  closeEditCollectionDialog() {
+    set({
+      editCollectionDialogOpen: false,
+      editingCollectionId: null,
+      editCollectionNameDraft: '',
+      editCollectionDescriptionDraft: '',
+    })
+  },
+
+  setEditCollectionNameDraft(value) {
+    set({ editCollectionNameDraft: value })
+  },
+
+  setEditCollectionDescriptionDraft(value) {
+    set({ editCollectionDescriptionDraft: value })
+  },
+
+  async handleEditCollection() {
+    const {
+      editCollectionDescriptionDraft,
+      editCollectionNameDraft,
+      editingCollectionId,
+    } = get()
+    const name = editCollectionNameDraft.trim()
+    if (!editingCollectionId || !name) {
+      toast.error('请填写目录名称')
+      return
+    }
+
+    await runTask(set, async () => {
+      await updateCollection({
+        id: editingCollectionId,
+        name,
+        description: editCollectionDescriptionDraft.trim(),
+      })
+      await get().refreshWorkspaceInternal()
+      get().closeEditCollectionDialog()
+    }, '目录已更新')
   },
 
   openCreateRequestDialog(parentCollectionId) {
@@ -774,6 +860,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
       return nextState
     })
+
+    get().syncTabState()
   },
 
   clearPendingCloseRequest() {
@@ -814,6 +902,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const nextWorkspace = await get().refreshWorkspaceInternal()
       get().removeDeletedRequestStateInternal([deletion.id], [], nextWorkspace)
       set({ pendingRequestDeletion: null })
+      get().syncTabState()
     }, '请求已删除')
   },
 
@@ -847,7 +936,38 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         collapsedCollectionIds: state.collapsedCollectionIds.filter(id => !deletion.collectionIds.includes(id)),
         pendingCollectionDeletion: null,
       }))
+      get().syncTabState()
     }, '目录已删除')
+  },
+
+  async moveTreeNode(nodeId, targetParentCollectionId, position) {
+    const { activeProjectId, workspace } = get()
+    const activeProject = getActiveProject(workspace, activeProjectId)
+
+    if (!activeProject) {
+      toast.error('请先选择项目')
+      return
+    }
+
+    await runTask(set, async () => {
+      await moveNode({
+        nodeId,
+        targetProjectId: activeProject.metadata.id,
+        targetCollectionId: targetParentCollectionId ?? undefined,
+        position,
+      })
+
+      await get().refreshWorkspaceInternal()
+
+      set(state => ({
+        collapsedCollectionIds: targetParentCollectionId
+          ? state.collapsedCollectionIds.filter(id => id !== targetParentCollectionId)
+          : state.collapsedCollectionIds,
+        selectedTreeNode: state.selectedTreeNode && state.selectedTreeNode.id === nodeId
+          ? { ...state.selectedTreeNode, parentCollectionId: targetParentCollectionId }
+          : state.selectedTreeNode,
+      }))
+    })
   },
 
   async refreshWorkspaceInternal() {
@@ -861,7 +981,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     return snapshot
   },
 
-  setRequestLoaded(definition) {
+  setRequestLoaded(definition, setActiveTab = true) {
     const draft = cloneApiDefinition(definition)
     const saved = cloneApiDefinition(definition)
 
@@ -887,9 +1007,11 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         openRequestTabs: existing
           ? state.openRequestTabs.map(tab => (tab.requestId === definition.id ? nextTab : tab))
           : [...state.openRequestTabs, nextTab],
-        activeRequestId: definition.id,
+        activeRequestId: setActiveTab ? definition.id : state.activeRequestId,
       }
     })
+
+    get().syncTabState()
   },
 
   syncRequestState(definition) {
@@ -953,6 +1075,13 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           : state.pendingRequestDeletion,
       }
 
+      if (state.editingCollectionId && removedCollectionIds.has(state.editingCollectionId)) {
+        nextState.editCollectionDialogOpen = false
+        nextState.editingCollectionId = null
+        nextState.editCollectionNameDraft = ''
+        nextState.editCollectionDescriptionDraft = ''
+      }
+
       if (editingRequestId && removedRequestIds.has(editingRequestId)) {
         nextState.editRequestDialogOpen = false
         nextState.editingRequestId = null
@@ -986,6 +1115,16 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       }
 
       return nextState
+    })
+  },
+
+  syncTabState() {
+    const { openRequestTabs, activeRequestId } = get()
+    updateTabState({
+      openRequestTabs,
+      activeRequestId,
+    }).catch((error) => {
+      console.error('Failed to sync tab state:', error)
     })
   },
 })

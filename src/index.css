@@ -82,6 +82,9 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    --scrollbar-thumb: color-mix(in oklab, var(--foreground) 16%, transparent);
+    --scrollbar-thumb-hover: color-mix(in oklab, var(--foreground) 28%, transparent);
+    --scrollbar-track: transparent;
 }
 
 .dark {
@@ -116,11 +119,16 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --scrollbar-thumb: color-mix(in oklab, var(--foreground) 22%, transparent);
+    --scrollbar-thumb-hover: color-mix(in oklab, var(--foreground) 34%, transparent);
+    --scrollbar-track: transparent;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
   }
   .lucide {
     width: 1rem;
@@ -132,4 +140,32 @@
   html {
     @apply font-sans;
   }
+  *:hover {
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  *::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    background-clip: padding-box;
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+  *:hover::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+}
+
+.monaco-editor .margin {
+  padding-left: 8px;
 }

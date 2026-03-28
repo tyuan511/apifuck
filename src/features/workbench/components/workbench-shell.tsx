@@ -1,4 +1,3 @@
-import type { RefObject } from 'react'
 import { useWorkbenchShell } from '../hooks/use-workbench-shell'
 import { isMacOSDesktop } from '../types'
 import {
@@ -7,12 +6,13 @@ import {
   CreateCollectionDialog,
   CreateProjectDialog,
   CreateRequestDialog,
+  EditCollectionDialog,
   EditRequestDialog,
 } from './dialogs'
 import { ProjectSidebar } from './project-sidebar'
 import { RequestWorkspace } from './request-workspace'
 
-export function WorkbenchShell(props: { splitContainerRef: RefObject<HTMLDivElement | null> }) {
+export function WorkbenchShell() {
   const shell = useWorkbenchShell()
 
   return (
@@ -33,7 +33,9 @@ export function WorkbenchShell(props: { splitContainerRef: RefObject<HTMLDivElem
           onCreateRequest={shell.openCreateRequestDialog}
           onDeleteCollection={shell.requestDeleteCollection}
           onDeleteRequest={shell.requestDeleteRequest}
+          onEditCollection={shell.openEditCollectionDialog}
           onEditRequest={shell.openEditRequestDialog}
+          onMoveTreeNode={shell.moveTreeNode}
           onOpenRequest={(summary, parentCollectionId) => { void shell.openRequestFromSummary(summary, parentCollectionId) }}
           onProjectChange={shell.setActiveProject}
           onToggleCollection={shell.toggleCollection}
@@ -48,11 +50,9 @@ export function WorkbenchShell(props: { splitContainerRef: RefObject<HTMLDivElem
           activeResponse={shell.activeResponse}
           dirtyRequestIds={shell.dirtyRequestIds}
           isBusy={shell.isBusy}
-          isDraggingSplit={shell.isDraggingSplit}
           isMacOSDesktop={isMacOSDesktop}
           openRequestTabs={shell.openRequestTabs}
           pendingCloseRequestId={shell.pendingCloseRequestId}
-          splitContainerRef={props.splitContainerRef}
           splitRatio={shell.splitRatio}
           onActiveEditorTabChange={shell.setActiveEditorTab}
           onChangeDraft={shell.updateRequestDraft}
@@ -60,9 +60,10 @@ export function WorkbenchShell(props: { splitContainerRef: RefObject<HTMLDivElem
           onCloseRequestTab={shell.requestCloseRequestTab}
           onConfirmCloseRequestTab={shell.confirmCloseRequestTab}
           onFocusRequestTab={shell.focusRequestTab}
+          onReorderRequestTabs={shell.reorderRequestTabs}
           onSaveRequest={() => { void shell.handleSaveRequest() }}
           onSendRequest={() => { void shell.handleSendRequest() }}
-          onStartDraggingSplit={() => shell.setIsDraggingSplit(true)}
+          onSplitRatioChange={shell.setSplitRatio}
         />
       </div>
 
@@ -91,6 +92,20 @@ export function WorkbenchShell(props: { splitContainerRef: RefObject<HTMLDivElem
           }
         }}
         onSubmit={() => { void shell.handleCreateCollection() }}
+      />
+
+      <EditCollectionDialog
+        description={shell.editCollectionDescriptionDraft}
+        name={shell.editCollectionNameDraft}
+        open={shell.editCollectionDialogOpen}
+        onDescriptionChange={shell.setEditCollectionDescriptionDraft}
+        onNameChange={shell.setEditCollectionNameDraft}
+        onOpenChange={(open) => {
+          if (!open) {
+            shell.closeEditCollectionDialog()
+          }
+        }}
+        onSubmit={() => { void shell.handleEditCollection() }}
       />
 
       <CreateRequestDialog
