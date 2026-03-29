@@ -1,23 +1,21 @@
 import { useTheme } from 'next-themes'
 import { useEffect } from 'react'
 import { toast } from 'sonner'
-import { openStartupWorkspace, readTabState } from '@/lib/app-config'
-import { readApi } from '@/lib/workspace'
+import { openStartupProject, readTabState } from '@/lib/app-config'
+import { readApi } from '@/lib/project'
 import { useWorkbenchStore } from '../store/workbench-store'
 import { findApiLocation } from '../utils'
 
 export function useWorkbenchBootstrap() {
   const { setTheme } = useTheme()
 
-  const activeProjectId = useWorkbenchStore(state => state.activeProjectId)
   const selectedTreeNode = useWorkbenchStore(state => state.selectedTreeNode)
-  const workspace = useWorkbenchStore(state => state.workspace)
-  const hydrateWorkspace = useWorkbenchStore(state => state.hydrateWorkspace)
+  const project = useWorkbenchStore(state => state.project)
+  const hydrateProject = useWorkbenchStore(state => state.hydrateProject)
   const hydrateTabState = useWorkbenchStore(state => state.hydrateTabState)
   const setRequestLoaded = useWorkbenchStore(state => state.setRequestLoaded)
   const syncTabState = useWorkbenchStore(state => state.syncTabState)
   const setIsBooting = useWorkbenchStore(state => state.setIsBooting)
-  const ensureActiveProject = useWorkbenchStore(state => state.ensureActiveProject)
   const ensureTreeSelection = useWorkbenchStore(state => state.ensureTreeSelection)
 
   useEffect(() => {
@@ -26,23 +24,24 @@ export function useWorkbenchBootstrap() {
     async function bootstrapWorkbench() {
       setIsBooting(true)
       try {
-        const startup = await openStartupWorkspace()
+        const startup = await openStartupProject()
         if (cancelled) {
           return
         }
 
-        hydrateWorkspace({
-          workspacePath: startup.workspacePath,
-          workspaceSnapshot: startup.workspaceSnapshot,
+        hydrateProject({
+          projectPath: startup.projectPath,
+          projectSnapshot: startup.projectSnapshot,
+          recentProjectPaths: startup.appConfig.recentProjectPaths,
         })
         setTheme(startup.appConfig.theme)
 
         // Restore saved tab state and load tab content
         const [savedTabs, savedActiveId] = await readTabState()
-        if (savedTabs.length > 0 && startup.workspaceSnapshot) {
-          // Filter tabs to only include requests that still exist in workspace
+        if (savedTabs.length > 0 && startup.projectSnapshot) {
+          // Filter tabs to only include requests that still exist in project
           const validTabs = savedTabs.filter(tab =>
-            findApiLocation(startup.workspaceSnapshot, tab.requestId) !== null,
+            findApiLocation(startup.projectSnapshot, tab.requestId) !== null,
           )
 
           // Ensure active tab is a valid one
@@ -93,13 +92,9 @@ export function useWorkbenchBootstrap() {
     return () => {
       cancelled = true
     }
-  }, [hydrateWorkspace, hydrateTabState, setRequestLoaded, syncTabState, setIsBooting, setTheme])
-
-  useEffect(() => {
-    ensureActiveProject()
-  }, [activeProjectId, ensureActiveProject, workspace])
+  }, [hydrateProject, hydrateTabState, setRequestLoaded, syncTabState, setIsBooting, setTheme])
 
   useEffect(() => {
     ensureTreeSelection()
-  }, [activeProjectId, ensureTreeSelection, selectedTreeNode, workspace])
+  }, [ensureTreeSelection, project, selectedTreeNode])
 }

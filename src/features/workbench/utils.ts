@@ -5,10 +5,10 @@ import type {
   ApiSummary,
   CollectionTreeNode,
   KeyValue,
+  ProjectSnapshot,
   SendRequestResponse,
   TreeNode,
-  WorkspaceSnapshot,
-} from '@/lib/workspace'
+} from '@/lib/project'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   canUseTauriWindowDrag,
@@ -19,17 +19,6 @@ import {
 // Static regex patterns for URL parsing (avoid re-compilation on each call)
 const protocolRegex = /^https?:\/\//i
 const hostnameRegex = /^[^/]+\.[^/]/
-
-export function getActiveProject(workspace: WorkspaceSnapshot | null, activeProjectId: string | null) {
-  if (!workspace) {
-    return null
-  }
-
-  return workspace.projects.find(project => project.metadata.id === activeProjectId)
-    ?? workspace.projects.find(project => project.metadata.id === workspace.lastOpenedProjectId)
-    ?? workspace.projects[0]
-    ?? null
-}
 
 export function collectCollectionIds(nodes: TreeNode[]): string[] {
   return nodes.flatMap((node) => {
@@ -319,7 +308,7 @@ export function getProjectMonogram(value: string) {
   return compact.slice(0, 2).toUpperCase()
 }
 
-export function getProjectDisplayName(project: WorkspaceSnapshot['projects'][number] | null | undefined) {
+export function getProjectDisplayName(project: ProjectSnapshot | null | undefined) {
   if (!project) {
     return '未选择项目'
   }
@@ -332,6 +321,28 @@ export function getProjectDisplayName(project: WorkspaceSnapshot['projects'][num
   }
 
   return project.metadata.name
+}
+
+export function getProjectDisplayNameFromPath(path: string, activeProject?: ProjectSnapshot | null, activeProjectPath?: string) {
+  if (activeProject && activeProjectPath === path) {
+    return getProjectDisplayName(activeProject)
+  }
+
+  const normalizedPath = path.replace(/\\/g, '/')
+  const segments = normalizedPath.split('/').filter(Boolean)
+  const folderName = segments.at(-1) ?? path
+
+  if (folderName.trim().toLowerCase() === 'default') {
+    return '默认项目'
+  }
+
+  return folderName
+}
+
+export function isDefaultProjectPath(path: string) {
+  const normalizedPath = path.replace(/\\/g, '/')
+  const segments = normalizedPath.split('/').filter(Boolean)
+  return (segments.at(-1) ?? '').trim().toLowerCase() === 'default'
 }
 
 export function getMethodBadgeTone(method: string) {
@@ -392,20 +403,10 @@ export function hasVisibleResponse(response: ResponseState) {
 }
 
 export function findApiLocation(
-  workspace: WorkspaceSnapshot,
+  project: ProjectSnapshot,
   apiId: string,
-): { projectId: string, parentCollectionId: string | null, summary: ApiSummary } | null {
-  for (const project of workspace.projects) {
-    const location = findApiLocationInProject(project.children, apiId)
-    if (location) {
-      return {
-        projectId: project.metadata.id,
-        parentCollectionId: location.parentCollectionId,
-        summary: location.summary,
-      }
-    }
-  }
-  return null
+): { parentCollectionId: string | null, summary: ApiSummary } | null {
+  return findApiLocationInProject(project.children, apiId)
 }
 
 export function findApiLocationInProject(

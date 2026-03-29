@@ -159,17 +159,9 @@ export interface ProjectSnapshot {
   environments: Environment[]
 }
 
-export interface WorkspaceSnapshot {
-  schemaVersion: number
-  workspaceId: string
-  createdAt: string
-  updatedAt: string
-  name: string
-  defaultProjectId: string
-  lastOpenedProjectId: string
-  projectOrder: string[]
-  settings: Record<string, unknown>
-  projects: ProjectSnapshot[]
+export interface BootstrapProjectInput {
+  path: string
+  project?: CreateProjectInput
 }
 
 export interface CreateProjectInput {
@@ -310,16 +302,20 @@ export function createDefaultMock(): ApiMock {
   }
 }
 
-export function bootstrapWorkspace(path: string) {
-  return invoke<WorkspaceSnapshot>('bootstrap_workspace', { path })
+export function bootstrapProject(path: string, project?: CreateProjectInput) {
+  return invoke<ProjectSnapshot>('bootstrap_project', { path, input: project ?? null })
 }
 
-export function openWorkspace(path: string) {
-  return invoke<WorkspaceSnapshot>('open_workspace', { path })
+export function openProject(path: string) {
+  return invoke<ProjectSnapshot>('open_project', { path })
 }
 
-export function createProject(input: CreateProjectInput) {
-  return invoke<ProjectMetadata>('create_project', { input })
+export function readProjectSummary(path: string) {
+  return invoke<ProjectMetadata>('read_project_summary', { path })
+}
+
+export function deleteProjectFiles(path: string) {
+  return invoke<void>('delete_project_files', { path })
 }
 
 export function updateProject(input: UpdateProjectInput) {

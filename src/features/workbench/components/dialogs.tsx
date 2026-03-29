@@ -1,4 +1,4 @@
-import type { PendingCollectionDeletion, PendingRequestDeletion } from '../types'
+import type { PendingCollectionDeletion, PendingEnvironmentDeletion, PendingRecentProjectRemoval, PendingRequestDeletion } from '../types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,6 +10,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -36,7 +37,7 @@ export function CreateProjectDialog(props: {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>新建项目</DialogTitle>
-          <DialogDescription>项目会显示在左侧选择器中，并拥有独立的请求树。</DialogDescription>
+          <DialogDescription>选择一个本地目录并在其中初始化项目，请求树和环境会直接保存在该目录下。</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <LabelBlock label="项目名称">
@@ -268,6 +269,78 @@ export function ConfirmDeleteRequestDialog(props: {
   )
 }
 
+export function ConfirmDeleteEnvironmentDialog(props: {
+  deletion: PendingEnvironmentDeletion | null
+  onConfirm: () => void
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <AlertDialog
+      open={Boolean(props.deletion)}
+      onOpenChange={open => props.onOpenChange(open)}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>删除环境？</AlertDialogTitle>
+          <AlertDialogDescription>
+            {props.deletion
+              ? `确认删除环境 ${props.deletion.name} 吗？`
+              : '确认删除这个环境吗？'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => props.onOpenChange(false)}>
+            取消
+          </AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={props.onConfirm}>
+            删除
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+export function ConfirmRemoveRecentProjectDialog(props: {
+  removal: PendingRecentProjectRemoval | null
+  onDeleteLocalFilesChange: (checked: boolean) => void
+  onConfirm: () => void
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <AlertDialog
+      open={Boolean(props.removal)}
+      onOpenChange={open => props.onOpenChange(open)}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认删除</AlertDialogTitle>
+          <AlertDialogDescription>
+            {props.removal
+              ? `删除后不可恢复，确认删除项目 ${props.removal.name} 吗？`
+              : '删除后不可恢复，确认删除这个项目吗？'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <label className="flex items-center gap-3 px-1">
+          <Checkbox
+            checked={props.removal?.deleteLocalFiles ?? false}
+            onCheckedChange={checked => props.onDeleteLocalFilesChange(Boolean(checked))}
+          />
+          <span className="block text-sm font-medium text-foreground">同时删除本地文件</span>
+        </label>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => props.onOpenChange(false)}>
+            取消
+          </AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={props.onConfirm}>
+            确定
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 export function EnvironmentDialog(props: {
   name: string
   baseUrl: string
@@ -283,7 +356,7 @@ export function EnvironmentDialog(props: {
 }) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{props.isEditing ? '编辑环境' : '新建环境'}</DialogTitle>
           <DialogDescription>
@@ -330,7 +403,7 @@ export function EnvironmentDialog(props: {
                       newVars[index] = { ...variable, key: e.target.value }
                       props.onVariablesChange(newVars)
                     }}
-                    placeholder="VARIABLE_NAME"
+                    placeholder="变量名"
                     className="w-32"
                   />
                   <Input
@@ -340,7 +413,7 @@ export function EnvironmentDialog(props: {
                       newVars[index] = { ...variable, value: e.target.value }
                       props.onVariablesChange(newVars)
                     }}
-                    placeholder="值"
+                    placeholder="变量值"
                     className="flex-1"
                   />
                   <Button

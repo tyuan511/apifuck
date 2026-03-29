@@ -11,7 +11,6 @@ use ulid::Ulid;
 
 use crate::error::{AppError, AppResult};
 
-const WORKSPACE_FILE: &str = "workspace.json";
 const METADATA_FILE: &str = "metadata.json";
 const ITEMS_DIR: &str = "items";
 pub const SCHEMA_VERSION: u32 = 1;
@@ -22,21 +21,6 @@ pub enum EntityType {
     Project,
     Collection,
     Api,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceManifest {
-    pub schema_version: u32,
-    pub workspace_id: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub name: String,
-    pub default_project_id: String,
-    pub last_opened_project_id: String,
-    pub project_order: Vec<String>,
-    #[serde(default)]
-    pub settings: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -320,24 +304,6 @@ pub struct ProjectSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceSnapshot {
-    pub schema_version: u32,
-    pub workspace_id: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub name: String,
-    pub default_project_id: String,
-    pub last_opened_project_id: String,
-    #[serde(default)]
-    pub project_order: Vec<String>,
-    #[serde(default)]
-    pub settings: BTreeMap<String, Value>,
-    #[serde(default)]
-    pub projects: Vec<ProjectSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CreateProjectInput {
     pub name: String,
     #[serde(default)]
@@ -520,232 +486,156 @@ struct ApiEntry {
 }
 
 #[derive(Debug, Clone)]
-struct WorkspaceIndex {
+struct ProjectIndex {
     root: PathBuf,
-    manifest: WorkspaceManifest,
     projects: HashMap<String, ProjectEntry>,
     collections: HashMap<String, CollectionEntry>,
     apis: HashMap<String, ApiEntry>,
 }
 
-impl WorkspaceIndex {
+impl ProjectIndex {
     fn load(root: impl AsRef<Path>) -> AppResult<Self> {
         let root = root.as_ref().to_path_buf();
-        let manifest_path = root.join(WORKSPACE_FILE);
-        if !manifest_path.exists() {
-            return Err(AppError::WorkspaceNotFound(root.display().to_string()));
-        }
-
-        let manifest: WorkspaceManifest = read_json_file(&manifest_path)?;
-        if manifest.schema_version != SCHEMA_VERSION {
-            return Err(AppError::InvalidWorkspace(format!(
-                "unsupported workspace schema version {}",
-                manifest.schema_version
+        let metadata_path = root.join(METADATA_FILE);
+        if !metadata_path.exists() {
+            return Err(AppError::InvalidInput(format!(
+                "项目目录缺少 metadata.json：{}",
+                metadata_path.display()
             )));
         }
 
+        let metadata: ProjectMetadata = read_json_file(&metadata_path)?;
+        validate_project_metadata(&metadata)?;
+
         let mut index = Self {
             root,
-            manifest,
             projects: HashMap::new(),
             collections: HashMap::new(),
             apis: HashMap::new(),
         };
 
         let mut seen_ids = HashMap::new();
+        register_id(&mut seen_ids, &metadata.id, "project")?;
 
-        let entries = fs::read_dir(&index.root)?;
-        for entry in entries {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
-            }
-            if is_hidden(entry.file_name().to_string_lossy().as_ref()) {
-                continue;
-            }
+        let project_id = metadata.id.clone();
+        let items_dir = index.root.join(ITEMS_DIR);
+        let children = if items_dir.exists() {
+            scan_children(
+                &project_id,
+                &items_dir,
+                &metadata.root_order,
+                &ParentRef::ProjectRoot(project_id.clone()),
+                &mut seen_ids,
+                &mut index.collections,
+                &mut index.apis,
+            )?
+        } else {
+            vec![]
+        };
 
-            let project_dir = entry.path();
-            let metadata_path = project_dir.join(METADATA_FILE);
-            if !metadata_path.exists() {
-                continue;
-            }
+        index.projects.insert(
+            metadata.id.clone(),
+            ProjectEntry {
+                dir: index.root.clone(),
+                items_dir,
+                metadata,
+            },
+        );
 
-            let metadata: ProjectMetadata = read_json_file(&metadata_path)?;
-            validate_project_metadata(&metadata)?;
-            register_id(&mut seen_ids, &metadata.id, "project")?;
-
-            let project_id = metadata.id.clone();
-            let items_dir = project_dir.join(ITEMS_DIR);
-            let children = if items_dir.exists() {
-                scan_children(
-                    &project_id,
-                    &items_dir,
-                    &metadata.root_order,
-                    &ParentRef::ProjectRoot(project_id.clone()),
-                    &mut seen_ids,
-                    &mut index.collections,
-                    &mut index.apis,
-                )?
-            } else {
-                vec![]
-            };
-
-            index.projects.insert(
-                metadata.id.clone(),
-                ProjectEntry {
-                    dir: project_dir,
-                    items_dir,
-                    metadata,
-                },
-            );
-
-            let project = index
-                .projects
-                .get_mut(&project_id)
-                .expect("project inserted");
-            project.metadata.root_order =
-                ordered_child_ids(project.metadata.root_order.clone(), &children);
-        }
-
-        if !index
+        let project = index
             .projects
-            .contains_key(&index.manifest.default_project_id)
-        {
-            return Err(AppError::InvalidWorkspace(format!(
-                "default project {} is missing",
-                index.manifest.default_project_id
-            )));
-        }
-
-        if !index
-            .projects
-            .contains_key(&index.manifest.last_opened_project_id)
-        {
-            return Err(AppError::InvalidWorkspace(format!(
-                "last opened project {} is missing",
-                index.manifest.last_opened_project_id
-            )));
-        }
-
-        for project_id in &index.manifest.project_order {
-            if !index.projects.contains_key(project_id) {
-                return Err(AppError::InvalidWorkspace(format!(
-                    "project order references missing project {}",
-                    project_id
-                )));
-            }
-        }
+            .get_mut(&project_id)
+            .expect("project inserted");
+        project.metadata.root_order = ordered_child_ids(project.metadata.root_order.clone(), &children);
 
         Ok(index)
     }
 
-    fn snapshot(&self) -> AppResult<WorkspaceSnapshot> {
-        let mut projects = Vec::with_capacity(self.projects.len());
-        for project_entry in sorted_projects(self) {
-            let children = if project_entry.items_dir.exists() {
-                scan_children(
-                    &project_entry.metadata.id,
-                    &project_entry.items_dir,
-                    &project_entry.metadata.root_order,
-                    &ParentRef::ProjectRoot(project_entry.metadata.id.clone()),
-                    &mut HashMap::new(),
-                    &mut HashMap::new(),
-                    &mut HashMap::new(),
-                )?
-            } else {
-                vec![]
-            };
-            let environments = read_environments(&self.root, &project_entry.metadata.id)?;
-            projects.push(ProjectSnapshot {
-                metadata: project_entry.metadata.clone(),
-                children,
-                environments,
-            });
-        }
+    fn snapshot(&self) -> AppResult<ProjectSnapshot> {
+        let project_entry = self
+            .projects
+            .values()
+            .next()
+            .ok_or_else(|| AppError::InvalidInput("current project is unavailable".to_string()))?;
 
-        Ok(WorkspaceSnapshot {
-            schema_version: self.manifest.schema_version,
-            workspace_id: self.manifest.workspace_id.clone(),
-            created_at: self.manifest.created_at.clone(),
-            updated_at: self.manifest.updated_at.clone(),
-            name: self.manifest.name.clone(),
-            default_project_id: self.manifest.default_project_id.clone(),
-            last_opened_project_id: self.manifest.last_opened_project_id.clone(),
-            project_order: self.manifest.project_order.clone(),
-            settings: self.manifest.settings.clone(),
-            projects,
+        let children = if project_entry.items_dir.exists() {
+            scan_children(
+                &project_entry.metadata.id,
+                &project_entry.items_dir,
+                &project_entry.metadata.root_order,
+                &ParentRef::ProjectRoot(project_entry.metadata.id.clone()),
+                &mut HashMap::new(),
+                &mut HashMap::new(),
+                &mut HashMap::new(),
+            )?
+        } else {
+            vec![]
+        };
+        let environments = read_environments(&self.root, &project_entry.metadata.id)?;
+
+        Ok(ProjectSnapshot {
+            metadata: project_entry.metadata.clone(),
+            children,
+            environments,
         })
     }
 }
 
-pub fn open_workspace(root: impl AsRef<Path>) -> AppResult<WorkspaceSnapshot> {
-    WorkspaceIndex::load(root)?.snapshot()
+pub fn open_project(root: impl AsRef<Path>) -> AppResult<ProjectSnapshot> {
+    ProjectIndex::load(root)?.snapshot()
 }
 
-pub fn bootstrap_workspace(root: impl AsRef<Path>) -> AppResult<WorkspaceSnapshot> {
+pub fn read_project_summary(root: impl AsRef<Path>) -> AppResult<ProjectSummary> {
+    let metadata_path = root.as_ref().join(METADATA_FILE);
+    if !metadata_path.is_file() {
+        return Err(AppError::InvalidProject(format!(
+            "项目目录缺少 metadata.json：{}",
+            root.as_ref().display()
+        )));
+    }
+    read_json_file(&metadata_path)
+}
+
+pub fn delete_project_files(root: impl AsRef<Path>) -> AppResult<()> {
+    let root = root.as_ref();
+    read_project_summary(root)?;
+    if !root.is_dir() {
+        return Err(AppError::InvalidProject(format!(
+            "project path is not a directory: {}",
+            root.display()
+        )));
+    }
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+pub fn bootstrap_project(
+    root: impl AsRef<Path>,
+    input: Option<CreateProjectInput>,
+) -> AppResult<ProjectSnapshot> {
     let root = root.as_ref();
     if !root.exists() {
         fs::create_dir_all(root)?;
     }
 
-    let manifest_path = root.join(WORKSPACE_FILE);
-    if !manifest_path.exists() {
-        initialize_workspace(root)?;
-    }
-
-    open_workspace(root)
-}
-
-pub fn create_project(
-    root: impl AsRef<Path>,
-    input: CreateProjectInput,
-) -> AppResult<ProjectSummary> {
-    let root = root.as_ref();
-    let mut index = WorkspaceIndex::load(root)?;
-    let name = required_name(&input.name, "project")?;
-    let slug = unique_project_slug(root, input.slug.as_deref().unwrap_or(&name))?;
-    let id = new_id();
-    let now = now_iso_string();
-    let project_dir = root.join(&slug);
-    if project_dir.exists() {
+    let metadata_path = root.join(METADATA_FILE);
+    if !metadata_path.exists() {
+        initialize_project(root, input)?;
+    } else if input.is_some() {
         return Err(AppError::Conflict(format!(
-            "project directory already exists: {}",
-            project_dir.display()
+            "项目目录已存在：{}",
+            root.display()
         )));
     }
 
-    fs::create_dir_all(project_dir.join(ITEMS_DIR))?;
-
-    let metadata = ProjectMetadata {
-        schema_version: SCHEMA_VERSION,
-        entity_type: EntityType::Project,
-        id: id.clone(),
-        created_at: now.clone(),
-        updated_at: now,
-        slug: slug.clone(),
-        name,
-        description: input.description,
-        root_order: vec![],
-        docs: ProjectDocsConfig::default(),
-        mock: ProjectMockConfig::default(),
-        active_environment_id: None,
-    };
-
-    write_json_file(&project_dir.join(METADATA_FILE), &metadata)?;
-
-    index.manifest.project_order.push(id.clone());
-    index.manifest.last_opened_project_id = id.clone();
-    index.manifest.updated_at = now_iso_string();
-    write_json_file(&root.join(WORKSPACE_FILE), &index.manifest)?;
-
-    Ok(metadata)
+    open_project(root)
 }
 
 pub fn update_project(
     root: impl AsRef<Path>,
     input: UpdateProjectInput,
 ) -> AppResult<ProjectSummary> {
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let project = index
         .projects
         .get(&input.id)
@@ -767,7 +657,7 @@ pub fn create_collection(
     input: CreateCollectionInput,
 ) -> AppResult<CollectionSummary> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     ensure_project_parent_matches(
         &index,
         &input.project_id,
@@ -808,7 +698,7 @@ pub fn update_collection(
     root: impl AsRef<Path>,
     input: UpdateCollectionInput,
 ) -> AppResult<CollectionSummary> {
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let entry = index
         .collections
         .get(&input.id)
@@ -825,7 +715,7 @@ pub fn update_collection(
 
 pub fn create_api(root: impl AsRef<Path>, input: CreateApiInput) -> AppResult<ApiDefinition> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     ensure_project_parent_matches(
         &index,
         &input.project_id,
@@ -870,7 +760,7 @@ pub fn create_api(root: impl AsRef<Path>, input: CreateApiInput) -> AppResult<Ap
 }
 
 pub fn update_api(root: impl AsRef<Path>, input: UpdateApiInput) -> AppResult<ApiDefinition> {
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let entry = index
         .apis
         .get(&input.id)
@@ -895,7 +785,7 @@ pub fn update_api(root: impl AsRef<Path>, input: UpdateApiInput) -> AppResult<Ap
 
 pub fn delete_node(root: impl AsRef<Path>, input: DeleteNodeInput) -> AppResult<()> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
 
     if let Some(entry) = index.apis.get(&input.id) {
         fs::remove_file(&entry.path)?;
@@ -909,30 +799,12 @@ pub fn delete_node(root: impl AsRef<Path>, input: DeleteNodeInput) -> AppResult<
         return Ok(());
     }
 
-    if let Some(entry) = index.projects.get(&input.id) {
-        if input.id == index.manifest.default_project_id {
-            return Err(AppError::Conflict(
-                "default project cannot be deleted".to_string(),
-            ));
-        }
-
-        fs::remove_dir_all(&entry.dir)?;
-        let mut manifest = index.manifest.clone();
-        manifest.project_order.retain(|id| id != &input.id);
-        if manifest.last_opened_project_id == input.id {
-            manifest.last_opened_project_id = manifest.default_project_id.clone();
-        }
-        manifest.updated_at = now_iso_string();
-        write_json_file(&root.join(WORKSPACE_FILE), &manifest)?;
-        return Ok(());
-    }
-
     Err(AppError::NotFound(format!("node {}", input.id)))
 }
 
 pub fn move_node(root: impl AsRef<Path>, input: MoveNodeInput) -> AppResult<()> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let target_parent = resolve_parent(
         &index,
         &input.target_project_id,
@@ -944,7 +816,7 @@ pub fn move_node(root: impl AsRef<Path>, input: MoveNodeInput) -> AppResult<()> 
         let file_name = api
             .path
             .file_name()
-            .ok_or_else(|| AppError::InvalidWorkspace("api file name is missing".to_string()))?;
+            .ok_or_else(|| AppError::InvalidProject("api file name is missing".to_string()))?;
         let destination = target_dir.join(file_name);
         if api.path != destination {
             fs::rename(&api.path, &destination)?;
@@ -973,7 +845,7 @@ pub fn move_node(root: impl AsRef<Path>, input: MoveNodeInput) -> AppResult<()> 
         }
 
         let destination = target_dir.join(collection.dir.file_name().ok_or_else(|| {
-            AppError::InvalidWorkspace("collection directory name is missing".to_string())
+            AppError::InvalidProject("collection directory name is missing".to_string())
         })?);
         if collection.dir != destination {
             if destination.exists() {
@@ -1001,7 +873,7 @@ pub fn move_node(root: impl AsRef<Path>, input: MoveNodeInput) -> AppResult<()> 
 
 pub fn reorder_children(root: impl AsRef<Path>, input: ReorderChildrenInput) -> AppResult<()> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
 
     let parent = match (&input.project_id, &input.parent_collection_id) {
         (Some(project_id), None) => ParentRef::ProjectRoot(project_id.clone()),
@@ -1027,7 +899,7 @@ pub fn reorder_children(root: impl AsRef<Path>, input: ReorderChildrenInput) -> 
 }
 
 pub fn read_api(root: impl AsRef<Path>, id: &str) -> AppResult<ApiDefinition> {
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let entry = index
         .apis
         .get(id)
@@ -1038,7 +910,7 @@ pub fn read_api(root: impl AsRef<Path>, id: &str) -> AppResult<ApiDefinition> {
 const ENVIRONMENTS_FILE: &str = "environments.json";
 
 fn read_environments(root: &Path, project_id: &str) -> AppResult<Vec<Environment>> {
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let project = index
         .projects
         .get(project_id)
@@ -1055,7 +927,7 @@ fn write_environments(
     project_id: &str,
     environments: &[Environment],
 ) -> AppResult<()> {
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let project = index
         .projects
         .get(project_id)
@@ -1069,7 +941,7 @@ pub fn create_environment(
     input: CreateEnvironmentInput,
 ) -> AppResult<Environment> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     if !index.projects.contains_key(&input.project_id) {
         return Err(AppError::NotFound(format!("project {}", input.project_id)));
     }
@@ -1104,10 +976,7 @@ pub fn update_environment(
     Ok(updated)
 }
 
-pub fn delete_environment(
-    root: impl AsRef<Path>,
-    input: DeleteEnvironmentInput,
-) -> AppResult<()> {
+pub fn delete_environment(root: impl AsRef<Path>, input: DeleteEnvironmentInput) -> AppResult<()> {
     let root = root.as_ref();
     let mut environments = read_environments(root, &input.project_id)?;
     let original_len = environments.len();
@@ -1118,7 +987,7 @@ pub fn delete_environment(
     write_environments(root, &input.project_id, &environments)?;
 
     // Clear active_environment_id if it was deleted
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let project = index
         .projects
         .get(&input.project_id)
@@ -1133,12 +1002,9 @@ pub fn delete_environment(
     Ok(())
 }
 
-pub fn list_environments(
-    root: impl AsRef<Path>,
-    project_id: &str,
-) -> AppResult<Vec<Environment>> {
+pub fn list_environments(root: impl AsRef<Path>, project_id: &str) -> AppResult<Vec<Environment>> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     if !index.projects.contains_key(project_id) {
         return Err(AppError::NotFound(format!("project {}", project_id)));
     }
@@ -1150,7 +1016,7 @@ pub fn set_active_environment(
     input: SetActiveEnvironmentInput,
 ) -> AppResult<ProjectMetadata> {
     let root = root.as_ref();
-    let index = WorkspaceIndex::load(root)?;
+    let index = ProjectIndex::load(root)?;
     let project = index
         .projects
         .get(&input.project_id)
@@ -1171,50 +1037,38 @@ pub fn set_active_environment(
     Ok(metadata)
 }
 
-fn initialize_workspace(root: &Path) -> AppResult<()> {
-    let workspace_id = new_id();
-    let project_id = new_id();
+fn initialize_project(root: &Path, input: Option<CreateProjectInput>) -> AppResult<()> {
     let created_at = now_iso_string();
-    let workspace_name = workspace_name_from_path(root);
-    let project_dir = root.join("default");
+    let (name, description, slug) = match input {
+        Some(input) => {
+            let name = required_name(&input.name, "project")?;
+            let slug = slugify(input.slug.as_deref().unwrap_or(&name), "project");
+            (name, input.description, slug)
+        }
+        None => {
+            let name = project_name_from_path(root);
+            let slug = slugify(&name, "project");
+            (name, String::new(), slug)
+        }
+    };
 
-    if project_dir.exists() && !project_dir.join(METADATA_FILE).exists() {
-        return Err(AppError::Conflict(format!(
-            "default project directory already exists without metadata: {}",
-            project_dir.display()
-        )));
-    }
+    fs::create_dir_all(root.join(ITEMS_DIR))?;
 
-    fs::create_dir_all(project_dir.join(ITEMS_DIR))?;
-
-    let project_metadata = ProjectMetadata {
+    let metadata = ProjectMetadata {
         schema_version: SCHEMA_VERSION,
         entity_type: EntityType::Project,
-        id: project_id.clone(),
+        id: new_id(),
         created_at: created_at.clone(),
-        updated_at: created_at.clone(),
-        slug: "default".to_string(),
-        name: "默认项目".to_string(),
-        description: "默认项目".to_string(),
+        updated_at: created_at,
+        slug,
+        name,
+        description,
         root_order: vec![],
         docs: ProjectDocsConfig::default(),
         mock: ProjectMockConfig::default(),
         active_environment_id: None,
     };
-    write_json_file(&project_dir.join(METADATA_FILE), &project_metadata)?;
-
-    let manifest = WorkspaceManifest {
-        schema_version: SCHEMA_VERSION,
-        workspace_id,
-        created_at: created_at.clone(),
-        updated_at: created_at,
-        name: workspace_name,
-        default_project_id: project_id.clone(),
-        last_opened_project_id: project_id,
-        project_order: vec![project_metadata.id.clone()],
-        settings: BTreeMap::new(),
-    };
-    write_json_file(&root.join(WORKSPACE_FILE), &manifest)?;
+    write_json_file(&root.join(METADATA_FILE), &metadata)?;
 
     Ok(())
 }
@@ -1242,7 +1096,7 @@ fn scan_children(
         if entry.file_type()?.is_dir() {
             let metadata_path = path.join(METADATA_FILE);
             if !metadata_path.exists() {
-                return Err(AppError::InvalidWorkspace(format!(
+                return Err(AppError::InvalidProject(format!(
                     "collection directory {} is missing metadata.json",
                     path.display()
                 )));
@@ -1319,19 +1173,19 @@ fn scan_children(
 
 fn validate_project_metadata(metadata: &ProjectMetadata) -> AppResult<()> {
     if metadata.schema_version != SCHEMA_VERSION {
-        return Err(AppError::InvalidWorkspace(format!(
+        return Err(AppError::InvalidProject(format!(
             "project {} has unsupported schema version {}",
             metadata.id, metadata.schema_version
         )));
     }
     if metadata.entity_type != EntityType::Project {
-        return Err(AppError::InvalidWorkspace(format!(
+        return Err(AppError::InvalidProject(format!(
             "project {} has invalid entityType",
             metadata.id
         )));
     }
     if metadata.id.is_empty() {
-        return Err(AppError::InvalidWorkspace(
+        return Err(AppError::InvalidProject(
             "project id is empty".to_string(),
         ));
     }
@@ -1340,19 +1194,19 @@ fn validate_project_metadata(metadata: &ProjectMetadata) -> AppResult<()> {
 
 fn validate_collection_metadata(metadata: &CollectionMetadata) -> AppResult<()> {
     if metadata.schema_version != SCHEMA_VERSION {
-        return Err(AppError::InvalidWorkspace(format!(
+        return Err(AppError::InvalidProject(format!(
             "collection {} has unsupported schema version {}",
             metadata.id, metadata.schema_version
         )));
     }
     if metadata.entity_type != EntityType::Collection {
-        return Err(AppError::InvalidWorkspace(format!(
+        return Err(AppError::InvalidProject(format!(
             "collection {} has invalid entityType",
             metadata.id
         )));
     }
     if metadata.id.is_empty() {
-        return Err(AppError::InvalidWorkspace(
+        return Err(AppError::InvalidProject(
             "collection id is empty".to_string(),
         ));
     }
@@ -1361,44 +1215,21 @@ fn validate_collection_metadata(metadata: &CollectionMetadata) -> AppResult<()> 
 
 fn validate_api_definition(definition: &ApiDefinition) -> AppResult<()> {
     if definition.schema_version != SCHEMA_VERSION {
-        return Err(AppError::InvalidWorkspace(format!(
+        return Err(AppError::InvalidProject(format!(
             "api {} has unsupported schema version {}",
             definition.id, definition.schema_version
         )));
     }
     if definition.entity_type != EntityType::Api {
-        return Err(AppError::InvalidWorkspace(format!(
+        return Err(AppError::InvalidProject(format!(
             "api {} has invalid entityType",
             definition.id
         )));
     }
     if definition.id.is_empty() {
-        return Err(AppError::InvalidWorkspace("api id is empty".to_string()));
+        return Err(AppError::InvalidProject("api id is empty".to_string()));
     }
     Ok(())
-}
-
-fn sorted_projects(index: &WorkspaceIndex) -> Vec<&ProjectEntry> {
-    let mut ordered = vec![];
-    let mut remaining = index.projects.values().collect::<Vec<_>>();
-    remaining.sort_by(|left, right| left.metadata.name.cmp(&right.metadata.name));
-
-    for project_id in &index.manifest.project_order {
-        if let Some(project) = index.projects.get(project_id) {
-            ordered.push(project);
-        }
-    }
-
-    for project in remaining {
-        if !ordered
-            .iter()
-            .any(|existing| existing.metadata.id == project.metadata.id)
-        {
-            ordered.push(project);
-        }
-    }
-
-    ordered
 }
 
 fn ordered_child_ids(mut stored_order: Vec<String>, children: &[TreeNode]) -> Vec<String> {
@@ -1440,7 +1271,7 @@ fn register_id(seen_ids: &mut HashMap<String, String>, id: &str, kind: &str) -> 
 }
 
 fn ensure_project_parent_matches(
-    index: &WorkspaceIndex,
+    index: &ProjectIndex,
     project_id: &str,
     parent_collection_id: Option<&str>,
 ) -> AppResult<()> {
@@ -1465,7 +1296,7 @@ fn ensure_project_parent_matches(
 }
 
 fn resolve_parent(
-    index: &WorkspaceIndex,
+    index: &ProjectIndex,
     project_id: &str,
     parent_collection_id: Option<&str>,
 ) -> AppResult<ParentRef> {
@@ -1476,7 +1307,7 @@ fn resolve_parent(
     })
 }
 
-fn parent_directory(index: &WorkspaceIndex, parent: &ParentRef) -> AppResult<PathBuf> {
+fn parent_directory(index: &ProjectIndex, parent: &ParentRef) -> AppResult<PathBuf> {
     match parent {
         ParentRef::ProjectRoot(project_id) => {
             let project = index
@@ -1495,7 +1326,7 @@ fn parent_directory(index: &WorkspaceIndex, parent: &ParentRef) -> AppResult<Pat
     }
 }
 
-fn child_ids_for_parent(index: &WorkspaceIndex, parent: &ParentRef) -> AppResult<Vec<String>> {
+fn child_ids_for_parent(index: &ProjectIndex, parent: &ParentRef) -> AppResult<Vec<String>> {
     match parent {
         ParentRef::ProjectRoot(project_id) => {
             let project = index
@@ -1569,14 +1400,14 @@ fn merge_order(existing_ids: &[String], ordered_ids: &[String]) -> Vec<String> {
     next_order
 }
 
-fn append_child_order(index: &WorkspaceIndex, parent: &ParentRef, child_id: &str) -> AppResult<()> {
+fn append_child_order(index: &ProjectIndex, parent: &ParentRef, child_id: &str) -> AppResult<()> {
     let mut order = child_ids_for_parent(index, parent)?;
     order.retain(|id| id != child_id);
     order.push(child_id.to_string());
     set_parent_order(index, parent, order)
 }
 
-fn remove_child_order(index: &WorkspaceIndex, parent: &ParentRef, child_id: &str) -> AppResult<()> {
+fn remove_child_order(index: &ProjectIndex, parent: &ParentRef, child_id: &str) -> AppResult<()> {
     let mut order = child_ids_for_parent(index, parent)?;
     order.retain(|id| id != child_id);
     set_parent_order(index, parent, order)
@@ -1584,7 +1415,7 @@ fn remove_child_order(index: &WorkspaceIndex, parent: &ParentRef, child_id: &str
 
 fn update_move_order(
     root: &Path,
-    index: &WorkspaceIndex,
+    index: &ProjectIndex,
     source_parent: &ParentRef,
     target_parent: &ParentRef,
     node_id: &str,
@@ -1601,7 +1432,7 @@ fn update_move_order(
     source_order.retain(|id| id != node_id);
     set_parent_order(index, source_parent, source_order)?;
 
-    let refreshed_index = WorkspaceIndex::load(root)?;
+    let refreshed_index = ProjectIndex::load(root)?;
     let mut target_order = child_ids_for_parent(&refreshed_index, target_parent)?;
     target_order.retain(|id| id != node_id);
     insert_id(&mut target_order, node_id, position);
@@ -1609,7 +1440,7 @@ fn update_move_order(
 }
 
 fn set_parent_order(
-    index: &WorkspaceIndex,
+    index: &ProjectIndex,
     parent: &ParentRef,
     order: Vec<String>,
 ) -> AppResult<()> {
@@ -1650,7 +1481,7 @@ fn insert_id(order: &mut Vec<String>, node_id: &str, position: Option<usize>) {
     order.insert(position, node_id.to_string());
 }
 
-fn is_descendant_collection(index: &WorkspaceIndex, candidate_id: &str, ancestor_id: &str) -> bool {
+fn is_descendant_collection(index: &ProjectIndex, candidate_id: &str, ancestor_id: &str) -> bool {
     let mut current = Some(candidate_id.to_string());
     while let Some(collection_id) = current {
         if collection_id == ancestor_id {
@@ -1669,10 +1500,6 @@ fn is_descendant_collection(index: &WorkspaceIndex, candidate_id: &str, ancestor
 
 fn api_file_name(id: &str, slug: &str) -> String {
     format!("api_{}__{}.json", id, slug)
-}
-
-fn unique_project_slug(root: &Path, input: &str) -> AppResult<String> {
-    unique_slug(root, input, "project", true)
 }
 
 fn unique_collection_slug(root: &Path, input: &str) -> AppResult<String> {
@@ -1776,11 +1603,11 @@ fn write_json_file<T: Serialize>(path: &Path, value: &T) -> AppResult<()> {
     Ok(())
 }
 
-fn workspace_name_from_path(path: &Path) -> String {
+fn project_name_from_path(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
-        .unwrap_or("Workspace")
+        .unwrap_or("Project")
         .to_string()
 }
 
@@ -1841,14 +1668,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bootstrap_workspace_creates_manifest_and_default_project() {
+    fn bootstrap_project_creates_metadata_and_items() {
         let temp_dir = tempdir().expect("create temp dir");
-        let snapshot = bootstrap_workspace(temp_dir.path()).expect("bootstrap workspace");
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
 
-        assert_eq!(snapshot.project_order.len(), 1);
-        assert!(temp_dir.path().join(WORKSPACE_FILE).exists());
-        assert!(temp_dir.path().join("default").join(METADATA_FILE).exists());
-        assert!(temp_dir.path().join("default").join(ITEMS_DIR).exists());
+        assert!(temp_dir.path().join(METADATA_FILE).exists());
+        assert!(temp_dir.path().join(ITEMS_DIR).exists());
+        assert_eq!(snapshot.children.len(), 0);
+        assert_eq!(snapshot.metadata.entity_type, EntityType::Project);
     }
 
     #[test]
@@ -1860,8 +1687,8 @@ mod tests {
     #[test]
     fn create_and_scan_collection_tree_respects_order() {
         let temp_dir = tempdir().expect("create temp dir");
-        let snapshot = bootstrap_workspace(temp_dir.path()).expect("bootstrap workspace");
-        let project_id = snapshot.default_project_id;
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+        let project_id = snapshot.metadata.id.clone();
 
         let auth = create_collection(
             temp_dir.path(),
@@ -1917,13 +1744,12 @@ mod tests {
         )
         .expect("reorder root");
 
-        let refreshed = open_workspace(temp_dir.path()).expect("open workspace");
-        let project = refreshed.projects.first().expect("project snapshot");
-        assert_eq!(project.children.len(), 2);
-        assert_eq!(project.children[0].id(), root_api.id);
-        assert_eq!(project.children[1].id(), auth.id);
+        let refreshed = open_project(temp_dir.path()).expect("open project");
+        assert_eq!(refreshed.children.len(), 2);
+        assert_eq!(refreshed.children[0].id(), root_api.id);
+        assert_eq!(refreshed.children[1].id(), auth.id);
 
-        match &project.children[1] {
+        match &refreshed.children[1] {
             TreeNode::Collection(node) => {
                 assert_eq!(node.children.len(), 1);
                 assert_eq!(node.children[0].id(), user.id);
@@ -1935,12 +1761,12 @@ mod tests {
     #[test]
     fn api_update_keeps_file_name_stable() {
         let temp_dir = tempdir().expect("create temp dir");
-        let snapshot = bootstrap_workspace(temp_dir.path()).expect("bootstrap workspace");
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
 
         let api = create_api(
             temp_dir.path(),
             CreateApiInput {
-                project_id: snapshot.default_project_id.clone(),
+                project_id: snapshot.metadata.id.clone(),
                 parent_collection_id: None,
                 name: "Login".to_string(),
                 method: "post".to_string(),
@@ -1957,7 +1783,7 @@ mod tests {
         )
         .expect("create api");
 
-        let project_dir = temp_dir.path().join("default").join(ITEMS_DIR);
+        let project_dir = temp_dir.path().join(ITEMS_DIR);
         let original_path = find_api_path(&project_dir, &api.id);
 
         let updated = update_api(
@@ -1986,8 +1812,8 @@ mod tests {
     #[test]
     fn move_node_updates_directory_and_order() {
         let temp_dir = tempdir().expect("create temp dir");
-        let snapshot = bootstrap_workspace(temp_dir.path()).expect("bootstrap workspace");
-        let project_id = snapshot.default_project_id.clone();
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+        let project_id = snapshot.metadata.id.clone();
 
         let source = create_collection(
             temp_dir.path(),
@@ -2044,9 +1870,8 @@ mod tests {
         )
         .expect("move api");
 
-        let refreshed = open_workspace(temp_dir.path()).expect("open workspace");
-        let project = refreshed.projects.first().expect("project snapshot");
-        let target_node = project
+        let refreshed = open_project(temp_dir.path()).expect("open project");
+        let target_node = refreshed
             .children
             .iter()
             .find_map(|node| match node {
@@ -2062,23 +1887,19 @@ mod tests {
     #[test]
     fn invalid_json_is_reported() {
         let temp_dir = tempdir().expect("create temp dir");
-        bootstrap_workspace(temp_dir.path()).expect("bootstrap workspace");
-        fs::write(temp_dir.path().join(WORKSPACE_FILE), "{invalid").expect("write invalid file");
+        bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+        fs::write(temp_dir.path().join(METADATA_FILE), "{invalid").expect("write invalid file");
 
-        let error = open_workspace(temp_dir.path()).expect_err("workspace should fail");
+        let error = open_project(temp_dir.path()).expect_err("project should fail");
         assert!(matches!(error, AppError::Json(_)));
     }
 
     #[test]
     fn duplicate_ids_are_reported() {
         let temp_dir = tempdir().expect("create temp dir");
-        let snapshot = bootstrap_workspace(temp_dir.path()).expect("bootstrap workspace");
-        let duplicate_id = snapshot.default_project_id.clone();
-        let api_path = temp_dir
-            .path()
-            .join("default")
-            .join(ITEMS_DIR)
-            .join(api_file_name(&duplicate_id, "duplicate"));
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+        let duplicate_id = snapshot.metadata.id.clone();
+        let api_path = temp_dir.path().join(ITEMS_DIR).join(api_file_name(&duplicate_id, "duplicate"));
 
         let definition = ApiDefinition {
             schema_version: SCHEMA_VERSION,
@@ -2100,8 +1921,54 @@ mod tests {
         };
         write_json_file(&api_path, &definition).expect("write duplicate api");
 
-        let error = open_workspace(temp_dir.path()).expect_err("workspace should fail");
+        let error = open_project(temp_dir.path()).expect_err("project should fail");
         assert!(matches!(error, AppError::DuplicateId(_)));
+    }
+
+    #[test]
+    fn bootstrap_existing_project_with_input_errors() {
+        let temp_dir = tempdir().expect("create temp dir");
+        bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+        let error = bootstrap_project(
+            temp_dir.path(),
+            Some(CreateProjectInput {
+                name: "Imported".to_string(),
+                description: String::new(),
+                slug: None,
+            }),
+        )
+        .expect_err("bootstrap should fail");
+        assert!(matches!(error, AppError::Conflict(_)));
+    }
+
+    #[test]
+    fn set_active_environment_persists_metadata() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+        let project_id = snapshot.metadata.id.clone();
+
+        let environment = create_environment(
+            temp_dir.path(),
+            CreateEnvironmentInput {
+                project_id: project_id.clone(),
+                name: "dev".to_string(),
+                base_url: "https://example.com".to_string(),
+                variables: vec![],
+            },
+        )
+        .expect("create environment");
+
+        set_active_environment(
+            temp_dir.path(),
+            SetActiveEnvironmentInput {
+                project_id,
+                environment_id: Some(environment.id.clone()),
+            },
+        )
+        .expect("set active environment");
+
+        let refreshed = open_project(temp_dir.path()).expect("open project");
+        assert_eq!(refreshed.metadata.active_environment_id, Some(environment.id));
     }
 
     #[cfg(unix)]

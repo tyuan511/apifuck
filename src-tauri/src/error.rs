@@ -7,12 +7,10 @@ pub type AppResult<T> = Result<T, AppError>;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("workspace is not open")]
-    WorkspaceNotOpen,
-    #[error("workspace not found at {0}")]
-    WorkspaceNotFound(String),
-    #[error("invalid workspace: {0}")]
-    InvalidWorkspace(String),
+    #[error("project is not open")]
+    ProjectNotOpen,
+    #[error("invalid project: {0}")]
+    InvalidProject(String),
     #[error("entity not found: {0}")]
     NotFound(String),
     #[error("duplicate id detected: {0}")]

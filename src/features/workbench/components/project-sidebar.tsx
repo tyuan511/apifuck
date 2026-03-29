@@ -1,5 +1,5 @@
 import type { OpenRequestTab, TreeSelection } from '../types'
-import type { ApiSummary, CollectionTreeNode, Environment, TreeNode, WorkspaceSnapshot } from '@/lib/workspace'
+import type { ApiSummary, CollectionTreeNode, Environment, ProjectSnapshot, TreeNode } from '@/lib/project'
 import { PointerActivationConstraints } from '@dnd-kit/dom'
 import {
   DragDropProvider,
@@ -34,19 +34,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { readProjectSummary } from '@/lib/project'
 import { cn } from '@/lib/utils'
 import { macOSWindowChromeHeightClassName } from '../types'
-import { countApis, getProjectDisplayName, getProjectMonogram, startWindowDragging } from '../utils'
+import { countApis, getProjectDisplayName, getProjectDisplayNameFromPath, getProjectMonogram, isDefaultProjectPath, startWindowDragging } from '../utils'
 import { MethodBadge, SidebarEmptyState } from './shared'
 
 interface ProjectSidebarProps {
-  activeProjectId: string | null
   collapsedCollectionIds: string[]
   environments: Environment[]
   activeEnvironmentId: string | null
   isMacOSDesktop: boolean
   openRequestTabs: OpenRequestTab[]
-  projects: WorkspaceSnapshot['projects']
+  project: ProjectSnapshot | null
+  projectPath: string
+  recentProjectPaths: string[]
   selectedTreeNode: TreeSelection | null
   onCreateCollection: (parentCollectionId: string | null) => void
   onCreateEnvironment: () => void
@@ -59,8 +61,10 @@ interface ProjectSidebarProps {
   onEditEnvironment: (environment: Environment) => void
   onEditRequest: (summary: ApiSummary) => void
   onMoveTreeNode: (nodeId: string, targetParentCollectionId: string | null, position: number) => void | Promise<void>
+  onOpenExistingProject: () => void | Promise<void>
+  onRemoveRecentProject: (path: string, name: string) => void | Promise<void>
+  onSelectProject: (path: string) => void | Promise<void>
   onOpenRequest: (summary: ApiSummary, parentCollectionId: string | null) => void
-  onProjectChange: (projectId: string) => void
   onSetActiveEnvironment: (environmentId: string | null) => void
   onToggleCollection: (collectionId: string) => void
   onTreeSelectionChange: (selection: TreeSelection | null) => void
@@ -705,9 +709,55 @@ function resolvePreviewFromPointer(args: {
 }
 
 export function ProjectSidebar(props: ProjectSidebarProps) {
-  const activeProject = props.projects.find(project => project.metadata.id === props.activeProjectId) ?? props.projects[0] ?? null
+  const activeProject = props.project
   const activeProjectApiCount = activeProject ? countApis(activeProject.children) : 0
   const activeProjectName = getProjectDisplayName(activeProject)
+  const projectPaths = React.useMemo(() => {
+    const deduped = new Set<string>()
+    const paths = [props.projectPath, ...props.recentProjectPaths]
+      .map(path => path.trim())
+      .filter(Boolean)
+      .filter((path) => {
+        if (deduped.has(path)) {
+          return false
+        }
+        deduped.add(path)
+        return true
+      })
+
+    return paths
+  }, [props.projectPath, props.recentProjectPaths])
+  const [projectNamesByPath, setProjectNamesByPath] = React.useState<Record<string, string>>({})
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    async function loadProjectNames() {
+      const entries = await Promise.all(projectPaths.map(async (path) => {
+        if (path === props.projectPath && activeProject) {
+          return [path, getProjectDisplayName(activeProject)] as const
+        }
+
+        try {
+          const metadata = await readProjectSummary(path)
+          return [path, getProjectDisplayName({ metadata, children: [], environments: [] })] as const
+        }
+        catch {
+          return [path, getProjectDisplayNameFromPath(path, activeProject, props.projectPath)] as const
+        }
+      }))
+
+      if (!cancelled) {
+        setProjectNamesByPath(Object.fromEntries(entries))
+      }
+    }
+
+    void loadProjectNames()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeProject, projectPaths, props.projectPath])
   const collapsedCollectionIdSet = React.useMemo(
     () => new Set(props.collapsedCollectionIds),
     [props.collapsedCollectionIds],
@@ -1000,46 +1050,87 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
                   {activeProjectName}
                 </span>
                 <span className="block truncate text-[11px] text-muted-foreground">
-                  {activeProject ? `${activeProjectApiCount} 个接口` : '点击选择项目'}
+                  {activeProject ? `${activeProjectApiCount} 个接口` : '未选择项目'}
                 </span>
               </span>
               <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
             </span>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={6} className="w-60 rounded-xl">
-            <div className="flex items-center justify-between px-1">
+          <DropdownMenuContent align="start" sideOffset={6} className="w-76 rounded-xl">
+            <div className="flex items-center justify-between px-2 py-1">
               <div className="text-[11px] font-medium text-muted-foreground">
-                切换项目
+                项目列表
               </div>
-              <button
-                type="button"
-                onClick={props.onCreateProject}
-                className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-                aria-label="新建项目"
-              >
-                <PlusIcon className="size-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={props.onOpenExistingProject}
+                  className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                  aria-label="打开已有项目"
+                  title="打开已有项目"
+                >
+                  <FolderOpenIcon className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={props.onCreateProject}
+                  className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                  aria-label="新建项目"
+                  title="新建项目"
+                >
+                  <PlusIcon className="size-4" />
+                </button>
+              </div>
             </div>
             <DropdownMenuSeparator className="my-1" />
-            {props.projects.map(project => (
-              <DropdownMenuItem
-                key={project.metadata.id}
-                onClick={() => props.onProjectChange(project.metadata.id)}
-                className="rounded-lg p-1"
-              >
-                <span className="flex min-w-0 flex-1 items-center gap-2.5">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-[12px] font-semibold text-foreground/80">
-                    {getProjectMonogram(getProjectDisplayName(project) || project.metadata.slug)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                    <span className="block truncate text-[13px] font-medium">{getProjectDisplayName(project)}</span>
-                  </span>
-                </span>
-                {project.metadata.id === activeProject?.metadata.id && (
-                  <CheckIcon className="size-4 text-emerald-500" />
+            {projectPaths.length > 0
+              ? projectPaths.map((path) => {
+                  const canRemove = path !== props.projectPath && !isDefaultProjectPath(path)
+                  const projectName = projectNamesByPath[path] ?? getProjectDisplayNameFromPath(path, activeProject, props.projectPath)
+                  return (
+                    <DropdownMenuItem key={path} onClick={() => props.onSelectProject(path)} className="group rounded-lg p-1.5">
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/4 text-xs font-semibold text-foreground/80">
+                          {getProjectMonogram(projectName)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">
+                            {projectName}
+                          </span>
+                          <span className="block truncate text-[11px] text-muted-foreground">
+                            {path}
+                          </span>
+                        </span>
+                        {path === props.projectPath
+                          ? (
+                              <CheckIcon className="size-4 shrink-0 text-primary" />
+                            )
+                          : canRemove
+                            ? (
+                                <button
+                                  type="button"
+                                  className="invisible flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition group-hover:visible group-hover:opacity-100 hover:bg-accent hover:text-destructive"
+                                  aria-label="删除项目"
+                                  title="删除项目"
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    void props.onRemoveRecentProject(path, projectName)
+                                  }}
+                                >
+                                  <Trash2Icon className="size-3.5" />
+                                </button>
+                              )
+                            : <span className="size-6 shrink-0" />}
+                      </span>
+                    </DropdownMenuItem>
+                  )
+                })
+              : (
+                  <div className="px-2 py-3 text-sm text-muted-foreground">
+                    暂无项目
+                  </div>
                 )}
-              </DropdownMenuItem>
-            ))}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -1121,12 +1212,12 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
                             onTreeSelectionChange={props.onTreeSelectionChange}
                           />
                         )
-                      : <SidebarEmptyState title="还没有请求" body="新建集合或请求，开始搭建当前项目。" />}
+                      : <SidebarEmptyState title="还没有请求" body="新建集合或请求" />}
                   </div>
                 )
               : (
                   <div className="px-2.5">
-                    <SidebarEmptyState title="还没有项目" body="先创建一个项目，再开始使用工作台。" />
+                    <SidebarEmptyState title="还没有项目" body="先创建一个项目，再开始使用" />
                   </div>
                 )}
           </div>
@@ -1649,12 +1740,30 @@ function EnvironmentSection(props: {
 
       {isExpanded && (
         <div className="space-y-0.5">
+          <div
+            className={cn(
+              'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition',
+              props.activeEnvironmentId === null
+                ? 'bg-accent text-foreground'
+                : 'text-foreground hover:bg-accent',
+            )}
+            onClick={() => {
+              props.onSetActiveEnvironment(null)
+            }}
+          >
+            <span className="flex size-4 items-center justify-center">
+              {props.activeEnvironmentId === null
+                ? (
+                    <CheckIcon className="size-4 text-primary" />
+                  )
+                : (
+                    <CircleIcon className="size-3 opacity-0 group-hover:opacity-50" />
+                  )}
+            </span>
+            <span className="min-w-0 flex-1 truncate">无环境</span>
+          </div>
           {props.environments.length === 0
-            ? (
-                <div className="py-2 text-center text-[11px] text-muted-foreground">
-                  暂无环境
-                </div>
-              )
+            ? null
             : (
                 props.environments.map(env => (
                   <div
@@ -1699,13 +1808,21 @@ function EnvironmentSection(props: {
                         )}
                       />
                       <DropdownMenuContent align="end" className="w-28">
-                        <DropdownMenuItem onClick={() => props.onEditEnvironment(env)}>
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            props.onEditEnvironment(env)
+                          }}
+                        >
                           <PencilLineIcon />
                           编辑
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           variant="destructive"
-                          onClick={() => props.onDeleteEnvironment(env.id)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            props.onDeleteEnvironment(env.id)
+                          }}
                         >
                           <Trash2Icon />
                           删除

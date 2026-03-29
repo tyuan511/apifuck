@@ -3,13 +3,14 @@ import type {
   EditorPanelTab,
   OpenRequestTab,
   PendingCollectionDeletion,
+  PendingEnvironmentDeletion,
+  PendingRecentProjectRemoval,
   PendingRequestDeletion,
   RequestEditorDraft,
   ResponseState,
   TreeSelection,
   WorkbenchBootPayload,
 } from '../types'
-import type { RequestConfig, ResponseData } from '@/lib/script-runner'
 import type {
   ApiDefinition,
   ApiSummary,
@@ -17,36 +18,39 @@ import type {
   CreateApiInput,
   Environment,
   KeyValue,
-  WorkspaceSnapshot,
-} from '@/lib/workspace'
+  ProjectSnapshot,
+} from '@/lib/project'
+import type { RequestConfig, ResponseData } from '@/lib/script-runner'
+import { open } from '@tauri-apps/plugin-dialog'
 import { startTransition } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
-import { updateTabState } from '@/lib/app-config'
+import { readAppConfig, updateAppConfig, updateTabState } from '@/lib/app-config'
 import {
-  createPostRequestContext,
-  createPreRequestContext,
-  runScript,
-} from '@/lib/script-runner'
-import {
+  bootstrapProject,
   createApi,
   createCollection,
   createDefaultDocumentation,
   createDefaultMock,
   createDefaultRequest,
   createEnvironment,
-  createProject,
   deleteEnvironment,
   deleteNode,
+  deleteProjectFiles,
   moveNode,
-  openWorkspace,
+  openProject,
   readApi,
   sendRequest,
   setActiveEnvironment,
   updateApi,
   updateCollection,
   updateEnvironment,
-} from '@/lib/workspace'
+} from '@/lib/project'
+import {
+  createPostRequestContext,
+  createPreRequestContext,
+  runScript,
+} from '@/lib/script-runner'
 import {
   areApiDefinitionsEqual,
   cloneApiDefinition,
@@ -56,7 +60,6 @@ import {
   findApiLocation,
   findApiLocationInProject,
   findCollectionName,
-  getActiveProject,
 } from '../utils'
 
 function generateId(): string {
@@ -64,11 +67,11 @@ function generateId(): string {
 }
 
 interface WorkbenchState {
-  workspacePath: string
-  workspace: WorkspaceSnapshot | null
+  projectPath: string
+  project: ProjectSnapshot | null
+  recentProjectPaths: string[]
   isBooting: boolean
   isBusy: boolean
-  activeProjectId: string | null
   selectedTreeNode: TreeSelection | null
   collapsedCollectionIds: string[]
   openRequestTabs: OpenRequestTab[]
@@ -101,8 +104,10 @@ interface WorkbenchState {
   pendingCloseRequestId: string | null
   pendingRequestDeletion: PendingRequestDeletion | null
   pendingCollectionDeletion: PendingCollectionDeletion | null
-  environments: Record<string, Environment[]>
-  activeEnvironmentId: Record<string, string | null>
+  pendingEnvironmentDeletion: PendingEnvironmentDeletion | null
+  pendingRecentProjectRemoval: PendingRecentProjectRemoval | null
+  environments: Environment[]
+  activeEnvironmentId: string | null
   environmentDialogOpen: boolean
   editingEnvironmentId: string | null
   environmentNameDraft: string
@@ -111,23 +116,28 @@ interface WorkbenchState {
 }
 
 interface WorkbenchActions {
-  hydrateWorkspace: (payload: WorkbenchBootPayload) => void
+  hydrateProject: (payload: WorkbenchBootPayload) => void
   hydrateTabState: (tabs: OpenRequestTab[], activeRequestId: string | null) => void
   setIsBooting: (value: boolean) => void
   setSplitRatio: (value: number) => void
   setActiveEditorTab: (value: EditorPanelTab) => void
-  ensureActiveProject: () => void
   ensureTreeSelection: () => void
   toggleCollection: (collectionId: string) => void
   setNodeSelection: (selection: TreeSelection | null) => void
-  setActiveProject: (projectId: string | null) => void
   focusRequestTab: (requestId: string) => void
   reorderRequestTabs: (tabs: OpenRequestTab[]) => void
   openCreateProjectDialog: () => void
   closeCreateProjectDialog: () => void
   setProjectNameDraft: (value: string) => void
   setProjectDescriptionDraft: (value: string) => void
+  setRecentProjectPaths: (paths: string[]) => void
   handleCreateProject: () => Promise<void>
+  handleOpenExistingProject: () => Promise<void>
+  requestRemoveRecentProject: (path: string, name: string) => void
+  clearPendingRecentProjectRemoval: () => void
+  setDeleteLocalFilesForPendingRecentProjectRemoval: (value: boolean) => void
+  handleRemoveRecentProject: () => Promise<void>
+  handleSelectProject: (path: string) => Promise<void>
   openCreateCollectionDialog: (parentCollectionId: string | null) => void
   closeCreateCollectionDialog: () => void
   setCollectionNameDraft: (value: string) => void
@@ -162,14 +172,14 @@ interface WorkbenchActions {
   clearPendingCollectionDeletion: () => void
   handleDeleteCollection: () => Promise<void>
   moveTreeNode: (nodeId: string, targetParentCollectionId: string | null, position: number) => Promise<void>
-  refreshWorkspaceInternal: () => Promise<WorkspaceSnapshot | null>
+  refreshProjectInternal: () => Promise<ProjectSnapshot | null>
   setRequestLoaded: (definition: ApiDefinition, setActiveTab?: boolean) => void
   syncRequestState: (definition: ApiDefinition) => void
   syncTabState: () => void
   removeDeletedRequestStateInternal: (
     requestIds: string[],
     collectionIds: string[],
-    nextWorkspace: WorkspaceSnapshot | null,
+    nextProject: ProjectSnapshot | null,
   ) => void
   openCreateEnvironmentDialog: () => void
   openEditEnvironmentDialog: (environment: Environment) => void
@@ -180,7 +190,9 @@ interface WorkbenchActions {
   addEnvironmentVariable: () => void
   handleCreateEnvironment: () => Promise<void>
   handleEditEnvironment: () => Promise<void>
-  handleDeleteEnvironment: (environmentId: string) => Promise<void>
+  requestDeleteEnvironment: (environmentId: string) => void
+  clearPendingEnvironmentDeletion: () => void
+  handleDeleteEnvironment: () => Promise<void>
   handleSetActiveEnvironment: (environmentId: string | null) => Promise<void>
   resolveEnvironmentVariables: (text: string, variables: KeyValue[]) => string
   resolveUrl: (url: string, baseUrl: string | undefined) => string
@@ -189,11 +201,11 @@ interface WorkbenchActions {
 export type WorkbenchStore = WorkbenchState & WorkbenchActions
 
 const initialState: WorkbenchState = {
-  workspacePath: '',
-  workspace: null,
+  projectPath: '',
+  project: null,
+  recentProjectPaths: [],
   isBooting: true,
   isBusy: false,
-  activeProjectId: null,
   selectedTreeNode: null,
   collapsedCollectionIds: [],
   openRequestTabs: [],
@@ -226,8 +238,10 @@ const initialState: WorkbenchState = {
   pendingCloseRequestId: null,
   pendingRequestDeletion: null,
   pendingCollectionDeletion: null,
-  environments: {},
-  activeEnvironmentId: {},
+  pendingEnvironmentDeletion: null,
+  pendingRecentProjectRemoval: null,
+  environments: [],
+  activeEnvironmentId: null,
   environmentDialogOpen: false,
   editingEnvironmentId: null,
   environmentNameDraft: '',
@@ -262,24 +276,37 @@ async function runTask<T>(
   }
 }
 
+async function openProjectInStore(
+  set: WorkbenchSetState,
+  get: () => WorkbenchStore,
+  path: string,
+  successMessage: string,
+) {
+  await runTask(set, async () => {
+    const snapshot = await openProject(path)
+    const appConfig = await readAppConfig()
+    get().hydrateProject({
+      projectPath: path,
+      projectSnapshot: snapshot,
+      recentProjectPaths: appConfig.recentProjectPaths,
+    })
+    get().syncTabState()
+  }, successMessage)
+}
+
 const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   ...initialState,
 
-  hydrateWorkspace(payload) {
+  hydrateProject(payload) {
     startTransition(() => {
-      const environments: Record<string, Environment[]> = {}
-      const activeEnvironmentId: Record<string, string | null> = {}
-      for (const project of payload.workspaceSnapshot.projects) {
-        environments[project.metadata.id] = project.environments
-        activeEnvironmentId[project.metadata.id] = project.metadata.activeEnvironmentId ?? null
-      }
       set({
-        workspacePath: payload.workspacePath,
-        workspace: payload.workspaceSnapshot,
-        activeProjectId: payload.workspaceSnapshot.lastOpenedProjectId,
+        projectPath: payload.projectPath,
+        project: payload.projectSnapshot,
+        recentProjectPaths: payload.recentProjectPaths,
         selectedTreeNode: null,
         openRequestTabs: [],
         activeRequestId: null,
+        activeEditorTab: 'query',
         requestDrafts: {},
         savedRequests: {},
         dirtyRequestIds: new Set(),
@@ -306,16 +333,20 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         pendingCloseRequestId: null,
         pendingRequestDeletion: null,
         pendingCollectionDeletion: null,
-        environments,
-        activeEnvironmentId,
+        pendingEnvironmentDeletion: null,
+        pendingRecentProjectRemoval: null,
+        environments: payload.projectSnapshot.environments,
+        activeEnvironmentId: payload.projectSnapshot.metadata.activeEnvironmentId ?? null,
       })
     })
   },
 
   hydrateTabState(tabs, activeRequestId) {
+    const activeTab = tabs.find(tab => tab.requestId === activeRequestId)?.editorTab ?? 'query'
     set({
       openRequestTabs: tabs,
       activeRequestId,
+      activeEditorTab: activeTab,
     })
   },
 
@@ -328,37 +359,35 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   setActiveEditorTab(value) {
-    set({ activeEditorTab: value })
-  },
+    set((state) => {
+      if (!state.activeRequestId) {
+        return { activeEditorTab: value }
+      }
 
-  ensureActiveProject() {
-    const { workspace, activeProjectId } = get()
-    if (!workspace) {
-      return
-    }
-
-    const activeExists = activeProjectId && workspace.projects.some(project => project.metadata.id === activeProjectId)
-    if (!activeExists) {
-      set({ activeProjectId: workspace.lastOpenedProjectId || workspace.defaultProjectId })
-    }
+      return {
+        activeEditorTab: value,
+        openRequestTabs: state.openRequestTabs.map(tab =>
+          tab.requestId === state.activeRequestId ? { ...tab, editorTab: value } : tab,
+        ),
+      }
+    })
   },
 
   ensureTreeSelection() {
-    const { workspace, activeProjectId, selectedTreeNode } = get()
-    const activeProject = getActiveProject(workspace, activeProjectId)
-    if (!activeProject || !selectedTreeNode) {
+    const { project, selectedTreeNode } = get()
+    if (!project || !selectedTreeNode) {
       return
     }
 
     if (selectedTreeNode.type === 'collection') {
-      const collectionIds = collectCollectionIds(activeProject.children)
+      const collectionIds = collectCollectionIds(project.children)
       if (!collectionIds.includes(selectedTreeNode.id)) {
         set({ selectedTreeNode: null })
       }
       return
     }
 
-    const location = findApiLocationInProject(activeProject.children, selectedTreeNode.id)
+    const location = findApiLocationInProject(project.children, selectedTreeNode.id)
     if (!location) {
       set({ selectedTreeNode: null })
     }
@@ -382,27 +411,21 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     set({ selectedTreeNode: selection })
   },
 
-  setActiveProject(projectId) {
-    set({
-      activeProjectId: projectId,
-      selectedTreeNode: null,
-    })
-  },
-
   focusRequestTab(requestId) {
-    const { workspace } = get()
+    set((state) => {
+      const nextActiveTab = state.openRequestTabs.find(tab => tab.requestId === requestId)?.editorTab ?? 'query'
+      return {
+        openRequestTabs: state.openRequestTabs.map(tab =>
+          tab.requestId === requestId ? { ...tab, lastFocusedAt: Date.now() } : tab,
+        ),
+        activeRequestId: requestId,
+        activeEditorTab: nextActiveTab,
+      }
+    })
 
-    set(state => ({
-      openRequestTabs: state.openRequestTabs.map(tab =>
-        tab.requestId === requestId ? { ...tab, lastFocusedAt: Date.now() } : tab,
-      ),
-      activeRequestId: requestId,
-    }))
-
-    const location = workspace ? findApiLocation(workspace, requestId) : null
+    const location = get().project ? findApiLocation(get().project!, requestId) : null
     if (location) {
       set({
-        activeProjectId: location.projectId,
         selectedTreeNode: {
           type: 'api',
           id: requestId,
@@ -415,12 +438,18 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   reorderRequestTabs(tabs) {
-    set(state => ({
-      activeRequestId: tabs.some(tab => tab.requestId === state.activeRequestId)
+    set((state) => {
+      const nextActiveRequestId = tabs.some(tab => tab.requestId === state.activeRequestId)
         ? state.activeRequestId
-        : tabs.at(0)?.requestId ?? null,
-      openRequestTabs: tabs,
-    }))
+        : tabs.at(0)?.requestId ?? null
+      const nextActiveTab = tabs.find(tab => tab.requestId === nextActiveRequestId)?.editorTab ?? 'query'
+
+      return {
+        activeRequestId: nextActiveRequestId,
+        activeEditorTab: nextActiveTab,
+        openRequestTabs: tabs,
+      }
+    })
 
     get().syncTabState()
   },
@@ -449,6 +478,10 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     set({ projectDescriptionDraft: value })
   },
 
+  setRecentProjectPaths(paths) {
+    set({ recentProjectPaths: paths })
+  },
+
   async handleCreateProject() {
     const { projectNameDraft, projectDescriptionDraft } = get()
     const name = projectNameDraft.trim()
@@ -457,17 +490,111 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       return
     }
 
-    await runTask(set, async () => {
-      const project = await createProject({
-        name,
-        description: projectDescriptionDraft.trim(),
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+        title: '选择新项目目录',
       })
-      const snapshot = await get().refreshWorkspaceInternal()
-      if (snapshot) {
-        set({ activeProjectId: project.id })
+
+      if (typeof selectedPath !== 'string') {
+        return
       }
-      get().closeCreateProjectDialog()
-    }, '项目已创建')
+
+      await runTask(set, async () => {
+        const snapshot = await bootstrapProject(selectedPath, {
+          name,
+          description: projectDescriptionDraft.trim(),
+        })
+        const appConfig = await readAppConfig()
+        get().hydrateProject({
+          projectPath: selectedPath,
+          projectSnapshot: snapshot,
+          recentProjectPaths: appConfig.recentProjectPaths,
+        })
+        get().closeCreateProjectDialog()
+        get().syncTabState()
+      }, '项目已创建')
+    }
+    catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  },
+
+  async handleOpenExistingProject() {
+    try {
+      const selectedPath = await open({
+        directory: true,
+        multiple: false,
+        title: '选择已有项目目录',
+      })
+
+      if (typeof selectedPath !== 'string') {
+        return
+      }
+
+      await openProjectInStore(set, get, selectedPath, '项目已打开')
+    }
+    catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  },
+
+  async handleSelectProject(path) {
+    const nextPath = path.trim()
+    if (!nextPath || nextPath === get().projectPath) {
+      return
+    }
+
+    await openProjectInStore(set, get, nextPath, '项目已切换')
+  },
+
+  requestRemoveRecentProject(path, name) {
+    set({
+      pendingRecentProjectRemoval: {
+        path,
+        name,
+        deleteLocalFiles: false,
+      },
+    })
+  },
+
+  clearPendingRecentProjectRemoval() {
+    set({ pendingRecentProjectRemoval: null })
+  },
+
+  setDeleteLocalFilesForPendingRecentProjectRemoval(value) {
+    set(state => ({
+      pendingRecentProjectRemoval: state.pendingRecentProjectRemoval
+        ? { ...state.pendingRecentProjectRemoval, deleteLocalFiles: value }
+        : null,
+    }))
+  },
+
+  async handleRemoveRecentProject() {
+    const { pendingRecentProjectRemoval, projectPath, recentProjectPaths } = get()
+    const targetPath = pendingRecentProjectRemoval?.path.trim() ?? ''
+
+    if (!targetPath || targetPath === projectPath) {
+      return
+    }
+
+    await runTask(set, async () => {
+      if (pendingRecentProjectRemoval?.deleteLocalFiles) {
+        await deleteProjectFiles(targetPath)
+      }
+
+      const appConfig = await readAppConfig()
+      const updated = await updateAppConfig({
+        lastOpenedProjectPath: appConfig.lastOpenedProjectPath,
+        recentProjectPaths: recentProjectPaths.filter(item => item !== targetPath),
+        theme: appConfig.theme,
+      })
+      set({
+        pendingRecentProjectRemoval: null,
+        recentProjectPaths: updated.recentProjectPaths,
+      })
+    }, '删除项目')
   },
 
   openCreateCollectionDialog(parentCollectionId) {
@@ -492,15 +619,13 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   async handleCreateCollection() {
     const {
-      activeProjectId,
       collectionDialogParentCollectionId,
       collectionNameDraft,
-      workspace,
+      project,
     } = get()
-    const activeProject = getActiveProject(workspace, activeProjectId)
     const name = collectionNameDraft.trim()
 
-    if (!name || !activeProject) {
+    if (!name || !project) {
       toast.error('请先选择项目并填写集合名称')
       return
     }
@@ -508,12 +633,12 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     const parentCollectionId = collectionDialogParentCollectionId
     await runTask(set, async () => {
       const collection = await createCollection({
-        projectId: activeProject.metadata.id,
+        projectId: project.metadata.id,
         parentCollectionId: parentCollectionId ?? undefined,
         name,
         description: '',
       })
-      await get().refreshWorkspaceInternal()
+      await get().refreshProjectInternal()
       set(state => ({
         selectedTreeNode: {
           type: 'collection',
@@ -572,7 +697,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         name,
         description: editCollectionDescriptionDraft.trim(),
       })
-      await get().refreshWorkspaceInternal()
+      await get().refreshProjectInternal()
       get().closeEditCollectionDialog()
     }, '目录已更新')
   },
@@ -605,22 +730,20 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   async handleCreateRequest() {
     const {
-      activeProjectId,
       requestDialogParentCollectionId,
       requestNameDraft,
       requestDescriptionDraft,
-      workspace,
+      project,
     } = get()
-    const activeProject = getActiveProject(workspace, activeProjectId)
     const name = requestNameDraft.trim()
-    if (!name || !activeProject) {
+    if (!name || !project) {
       toast.error('请填写请求名称')
       return
     }
 
     const parentCollectionId = requestDialogParentCollectionId
     const input: CreateApiInput = {
-      projectId: activeProject.metadata.id,
+      projectId: project.metadata.id,
       parentCollectionId: parentCollectionId ?? undefined,
       name,
       method: 'GET',
@@ -629,7 +752,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       tags: [],
       request: createDefaultRequest(),
       documentation: createDefaultDocumentation(
-        parentCollectionId ? findCollectionName(activeProject.children, parentCollectionId) : '',
+        parentCollectionId ? findCollectionName(project.children, parentCollectionId) : '',
       ),
       mock: createDefaultMock(),
       preRequestScript: '',
@@ -638,7 +761,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
     await runTask(set, async () => {
       const definition = await createApi(input)
-      await get().refreshWorkspaceInternal()
+      await get().refreshProjectInternal()
       get().setRequestLoaded(definition)
       set({
         selectedTreeNode: {
@@ -714,17 +837,13 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         postRequestScript: requestSource.postRequestScript,
       })
       get().syncRequestState(saved)
-      await get().refreshWorkspaceInternal()
+      await get().refreshProjectInternal()
       get().closeEditRequestDialog()
     }, '请求已更新')
   },
 
   async openRequestFromSummary(summary, parentCollectionId) {
-    const { workspace, requestDrafts } = get()
-    const projectLocation = workspace ? findApiLocation(workspace, summary.id) : null
-    if (projectLocation) {
-      set({ activeProjectId: projectLocation.projectId })
-    }
+    const { requestDrafts } = get()
 
     set({
       selectedTreeNode: { type: 'api', id: summary.id, parentCollectionId },
@@ -818,20 +937,19 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         postRequestScript: draft.postRequestScript,
       })
       get().setRequestLoaded(saved)
-      await get().refreshWorkspaceInternal()
+      await get().refreshProjectInternal()
     }, '请求已保存')
   },
 
   async handleSendRequest() {
-    const { activeRequestId, requestDrafts, activeProjectId, environments, activeEnvironmentId, resolveUrl, resolveEnvironmentVariables } = get()
+    const { activeRequestId, requestDrafts, project, environments, activeEnvironmentId, resolveUrl, resolveEnvironmentVariables } = get()
     if (!activeRequestId || !requestDrafts[activeRequestId]) {
       return
     }
 
     const draft = cloneApiDefinition(requestDrafts[activeRequestId])
-    const projectEnvironments = activeProjectId ? environments[activeProjectId] ?? [] : []
-    const currentEnvId = activeProjectId ? activeEnvironmentId[activeProjectId] : null
-    const activeEnv = currentEnvId ? projectEnvironments.find(e => e.id === currentEnvId) : null
+    const activeProjectId = project?.metadata.id ?? null
+    const activeEnv = activeEnvironmentId ? environments.find(e => e.id === activeEnvironmentId) ?? null : null
 
     set(state => ({
       requestResponses: {
@@ -919,6 +1037,20 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         })),
       }
 
+      const resolvedAuth = {
+        ...draft.request.auth,
+        basic: {
+          username: resolveEnvironmentVariables(draft.request.auth.basic.username, variables),
+          password: resolveEnvironmentVariables(draft.request.auth.basic.password, variables),
+        },
+        bearerToken: resolveEnvironmentVariables(draft.request.auth.bearerToken, variables),
+        apiKey: {
+          ...draft.request.auth.apiKey,
+          key: resolveEnvironmentVariables(draft.request.auth.apiKey.key, variables),
+          value: resolveEnvironmentVariables(draft.request.auth.apiKey.value, variables),
+        },
+      }
+
       const response = await sendRequest({
         method: mutableConfig.method,
         url: finalUrl,
@@ -927,7 +1059,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           query: resolvedQuery,
           pathParams: draft.request.pathParams,
           cookies: draft.request.cookies,
-          auth: draft.request.auth,
+          auth: resolvedAuth,
           body: {
             ...resolvedBody,
             binary: draft.request.body.binary,
@@ -982,12 +1114,9 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           variables: updatedVariables,
         })
         set(state => ({
-          environments: {
-            ...state.environments,
-            [activeProjectId]: state.environments[activeProjectId]?.map(e =>
-              e.id === activeEnv.id ? { ...e, variables: updatedVariables } : e,
-            ) ?? [],
-          },
+          environments: state.environments.map(e =>
+            e.id === activeEnv.id ? { ...e, variables: updatedVariables } : e,
+          ),
         }))
       }
 
@@ -1033,7 +1162,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   closeRequestTab(requestId) {
-    const { workspace, selectedTreeNode } = get()
+    const { project, selectedTreeNode } = get()
 
     set((state) => {
       const remaining = state.openRequestTabs.filter(tab => tab.requestId !== requestId)
@@ -1042,6 +1171,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const nextState: Partial<WorkbenchStore> = {
         openRequestTabs: remaining,
         activeRequestId: nextActive?.requestId ?? null,
+        activeEditorTab: nextActive?.editorTab ?? 'query',
         requestDrafts: Object.fromEntries(
           Object.entries(state.requestDrafts).filter(([id]) => id !== requestId),
         ),
@@ -1054,10 +1184,9 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         dirtyRequestIds: new Set([...state.dirtyRequestIds].filter(id => id !== requestId)),
       }
 
-      if (nextActive && workspace) {
-        const location = findApiLocation(workspace, nextActive.requestId)
+      if (nextActive && project) {
+        const location = findApiLocation(project, nextActive.requestId)
         if (location) {
-          nextState.activeProjectId = location.projectId
           nextState.selectedTreeNode = {
             type: 'api',
             id: nextActive.requestId,
@@ -1110,8 +1239,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
     await runTask(set, async () => {
       await deleteNode(deletion.id)
-      const nextWorkspace = await get().refreshWorkspaceInternal()
-      get().removeDeletedRequestStateInternal([deletion.id], [], nextWorkspace)
+      const nextProject = await get().refreshProjectInternal()
+      get().removeDeletedRequestStateInternal([deletion.id], [], nextProject)
       set({ pendingRequestDeletion: null })
       get().syncTabState()
     }, '请求已删除')
@@ -1141,8 +1270,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
     await runTask(set, async () => {
       await deleteNode(deletion.id)
-      const nextWorkspace = await get().refreshWorkspaceInternal()
-      get().removeDeletedRequestStateInternal(deletion.apiIds, deletion.collectionIds, nextWorkspace)
+      const nextProject = await get().refreshProjectInternal()
+      get().removeDeletedRequestStateInternal(deletion.apiIds, deletion.collectionIds, nextProject)
       set(state => ({
         collapsedCollectionIds: state.collapsedCollectionIds.filter(id => !deletion.collectionIds.includes(id)),
         pendingCollectionDeletion: null,
@@ -1152,10 +1281,9 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   async moveTreeNode(nodeId, targetParentCollectionId, position) {
-    const { activeProjectId, workspace } = get()
-    const activeProject = getActiveProject(workspace, activeProjectId)
+    const { project } = get()
 
-    if (!activeProject) {
+    if (!project) {
       toast.error('请先选择项目')
       return
     }
@@ -1163,12 +1291,12 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     await runTask(set, async () => {
       await moveNode({
         nodeId,
-        targetProjectId: activeProject.metadata.id,
+        targetProjectId: project.metadata.id,
         targetCollectionId: targetParentCollectionId ?? undefined,
         position,
       })
 
-      await get().refreshWorkspaceInternal()
+      await get().refreshProjectInternal()
 
       set(state => ({
         collapsedCollectionIds: targetParentCollectionId
@@ -1181,14 +1309,18 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     })
   },
 
-  async refreshWorkspaceInternal() {
-    const { workspacePath } = get()
-    if (!workspacePath) {
+  async refreshProjectInternal() {
+    const { projectPath } = get()
+    if (!projectPath) {
       return null
     }
 
-    const snapshot = await openWorkspace(workspacePath)
-    set({ workspace: snapshot })
+    const snapshot = await openProject(projectPath)
+    set({
+      project: snapshot,
+      environments: snapshot.environments,
+      activeEnvironmentId: snapshot.metadata.activeEnvironmentId ?? null,
+    })
     return snapshot
   },
 
@@ -1203,6 +1335,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         method: definition.method,
         dirty: false,
         lastFocusedAt: Date.now(),
+        editorTab: state.openRequestTabs.find(tab => tab.requestId === definition.id)?.editorTab ?? 'query',
       }
       const existing = state.openRequestTabs.some(tab => tab.requestId === definition.id)
       const nextDirtyIds = new Set(state.dirtyRequestIds)
@@ -1219,6 +1352,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           ? state.openRequestTabs.map(tab => (tab.requestId === definition.id ? nextTab : tab))
           : [...state.openRequestTabs, nextTab],
         activeRequestId: setActiveTab ? definition.id : state.activeRequestId,
+        activeEditorTab: setActiveTab ? nextTab.editorTab : state.activeEditorTab,
       }
     })
 
@@ -1253,7 +1387,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     })
   },
 
-  removeDeletedRequestStateInternal(requestIds, collectionIds, nextWorkspace) {
+  removeDeletedRequestStateInternal(requestIds, collectionIds, nextProject) {
     const removedRequestIds = new Set(requestIds)
     const removedCollectionIds = new Set(collectionIds)
     const { activeRequestId, editingRequestId, selectedTreeNode } = get()
@@ -1267,6 +1401,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
       const nextState: Partial<WorkbenchStore> = {
         openRequestTabs: remaining,
+        activeEditorTab: nextActive?.editorTab ?? 'query',
         requestDrafts: Object.fromEntries(
           Object.entries(state.requestDrafts).filter(([id]) => !removedRequestIds.has(id)),
         ),
@@ -1304,10 +1439,9 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         nextState.activeRequestId = nextActive?.requestId ?? null
       }
 
-      if (nextActive && activeRemoved && nextWorkspace) {
-        const location = findApiLocation(nextWorkspace, nextActive.requestId)
+      if (nextActive && activeRemoved && nextProject) {
+        const location = findApiLocation(nextProject, nextActive.requestId)
         if (location) {
-          nextState.activeProjectId = location.projectId
           nextState.selectedTreeNode = {
             type: 'api',
             id: nextActive.requestId,
@@ -1391,7 +1525,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   async handleCreateEnvironment() {
-    const { activeProjectId, environmentNameDraft, environmentBaseUrlDraft, environmentVariablesDraft } = get()
+    const { project, environmentNameDraft, environmentBaseUrlDraft, environmentVariablesDraft } = get()
+    const activeProjectId = project?.metadata.id ?? null
     if (!activeProjectId) {
       toast.error('请先选择项目')
       return
@@ -1409,21 +1544,19 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         baseUrl: environmentBaseUrlDraft.trim(),
         variables: environmentVariablesDraft,
       })
-      const snapshot = await get().refreshWorkspaceInternal()
+      const snapshot = await get().refreshProjectInternal()
       if (snapshot) {
-        set(state => ({
-          environments: {
-            ...state.environments,
-            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.environments ?? [],
-          },
-        }))
+        set({
+          environments: snapshot.environments,
+        })
       }
       get().closeEnvironmentDialog()
     }, '环境已创建')
   },
 
   async handleEditEnvironment() {
-    const { activeProjectId, editingEnvironmentId, environmentNameDraft, environmentBaseUrlDraft, environmentVariablesDraft } = get()
+    const { project, editingEnvironmentId, environmentNameDraft, environmentBaseUrlDraft, environmentVariablesDraft } = get()
+    const activeProjectId = project?.metadata.id ?? null
     if (!activeProjectId || !editingEnvironmentId) {
       return
     }
@@ -1441,48 +1574,64 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         baseUrl: environmentBaseUrlDraft.trim(),
         variables: environmentVariablesDraft,
       })
-      const snapshot = await get().refreshWorkspaceInternal()
+      const snapshot = await get().refreshProjectInternal()
       if (snapshot) {
-        set(state => ({
-          environments: {
-            ...state.environments,
-            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.environments ?? [],
-          },
-        }))
+        set({
+          environments: snapshot.environments,
+        })
       }
       get().closeEnvironmentDialog()
     }, '环境已更新')
   },
 
-  async handleDeleteEnvironment(environmentId) {
-    const { activeProjectId } = get()
-    if (!activeProjectId) {
+  requestDeleteEnvironment(environmentId) {
+    const environment = get().environments.find(item => item.id === environmentId)
+    if (!environment) {
+      return
+    }
+
+    set(state => ({
+      pendingEnvironmentDeletion: {
+        id: environment.id,
+        name: environment.name,
+      },
+      environmentDialogOpen: state.editingEnvironmentId === environmentId ? false : state.environmentDialogOpen,
+      editingEnvironmentId: state.editingEnvironmentId === environmentId ? null : state.editingEnvironmentId,
+      environmentNameDraft: state.editingEnvironmentId === environmentId ? '' : state.environmentNameDraft,
+      environmentBaseUrlDraft: state.editingEnvironmentId === environmentId ? '' : state.environmentBaseUrlDraft,
+      environmentVariablesDraft: state.editingEnvironmentId === environmentId ? [] : state.environmentVariablesDraft,
+    }))
+  },
+
+  clearPendingEnvironmentDeletion() {
+    set({ pendingEnvironmentDeletion: null })
+  },
+
+  async handleDeleteEnvironment() {
+    const activeProjectId = get().project?.metadata.id ?? null
+    const pendingEnvironmentDeletion = get().pendingEnvironmentDeletion
+    if (!activeProjectId || !pendingEnvironmentDeletion) {
       return
     }
 
     await runTask(set, async () => {
       await deleteEnvironment({
-        id: environmentId,
+        id: pendingEnvironmentDeletion.id,
         projectId: activeProjectId,
       })
-      const snapshot = await get().refreshWorkspaceInternal()
+      const snapshot = await get().refreshProjectInternal()
       if (snapshot) {
-        set(state => ({
-          environments: {
-            ...state.environments,
-            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.environments ?? [],
-          },
-          activeEnvironmentId: {
-            ...state.activeEnvironmentId,
-            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.metadata.activeEnvironmentId ?? null,
-          },
-        }))
+        set({
+          environments: snapshot.environments,
+          activeEnvironmentId: snapshot.metadata.activeEnvironmentId ?? null,
+          pendingEnvironmentDeletion: null,
+        })
       }
     }, '环境已删除')
   },
 
   async handleSetActiveEnvironment(environmentId) {
-    const { activeProjectId } = get()
+    const activeProjectId = get().project?.metadata.id ?? null
     if (!activeProjectId) {
       return
     }
@@ -1492,12 +1641,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         projectId: activeProjectId,
         environmentId,
       })
-      set(state => ({
-        activeEnvironmentId: {
-          ...state.activeEnvironmentId,
-          [activeProjectId]: metadata.activeEnvironmentId ?? null,
-        },
-      }))
+      set({ activeEnvironmentId: metadata.activeEnvironmentId ?? null })
     })
   },
 
