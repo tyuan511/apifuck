@@ -283,7 +283,7 @@ export function EnvironmentDialog(props: {
 }) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>{props.isEditing ? '编辑环境' : '新建环境'}</DialogTitle>
           <DialogDescription>

@@ -16,6 +16,10 @@ import {
   projectMonogramSeparatorPattern,
 } from './types'
 
+// Static regex patterns for URL parsing (avoid re-compilation on each call)
+const protocolRegex = /^https?:\/\//i
+const hostnameRegex = /^[^/]+\.[^/]/
+
 export function getActiveProject(workspace: WorkspaceSnapshot | null, activeProjectId: string | null) {
   if (!workspace) {
     return null
@@ -100,6 +104,153 @@ export function createKeyValueDraft(): KeyValue {
     value: '',
     enabled: true,
     description: '',
+  }
+}
+
+/**
+ * Parse query parameters from a URL string into KeyValue array.
+ * Handles absolute URLs, relative paths like /users?id=1, and hostnames like api.example.com.
+ * Preserves existing row IDs if the same key exists.
+ */
+export function parseUrlQueryParams(url: string, existingParams: KeyValue[]): KeyValue[] {
+  if (!url) {
+    return []
+  }
+
+  try {
+    // Handle relative paths like /users?id=1 or just ?id=1
+    if (!protocolRegex.test(url) && !hostnameRegex.test(url)) {
+      // This is a relative URL or just a query string
+      const queryStart = url.indexOf('?')
+      if (queryStart === -1) {
+        return []
+      }
+      const queryString = url.slice(queryStart + 1)
+      const searchParams = new URLSearchParams(queryString)
+      return parseSearchParams(searchParams, existingParams)
+    }
+
+    // Handle URLs without protocol by prepending https://
+    let urlToParse = url
+    if (!protocolRegex.test(urlToParse) && hostnameRegex.test(urlToParse)) {
+      urlToParse = `https://${urlToParse}`
+    }
+
+    const urlObj = new URL(urlToParse)
+    return parseSearchParams(urlObj.searchParams, existingParams)
+  }
+  catch {
+    return []
+  }
+}
+
+/**
+ * Parse search params to KeyValue array, preserving existing IDs.
+ */
+function parseSearchParams(searchParams: URLSearchParams, existingParams: KeyValue[]): KeyValue[] {
+  const result: KeyValue[] = []
+
+  // Build a map of existing keys for ID preservation
+  const existingKeyToId = new Map<string, string>()
+  for (const param of existingParams) {
+    if (param.key) {
+      existingKeyToId.set(param.key, param.id)
+    }
+  }
+
+  searchParams.forEach((value, key) => {
+    result.push({
+      id: existingKeyToId.get(key) ?? globalThis.crypto?.randomUUID?.() ?? `kv-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      key,
+      value: decodeURIComponent(value),
+      enabled: true,
+      description: '',
+    })
+  })
+
+  return result
+}
+
+/**
+ * Build a URL string with query parameters appended.
+ * Handles absolute URLs, relative paths like /users?id=1, and hostnames like api.example.com.
+ * Preserves the base URL (path + domain) and replaces existing query params.
+ * Only includes enabled params.
+ */
+export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
+  if (!url) {
+    return url
+  }
+
+  try {
+    // Handle relative paths like /users?id=1
+    if (!protocolRegex.test(url) && !hostnameRegex.test(url)) {
+      const queryStart = url.indexOf('?')
+      const base = queryStart >= 0 ? url.slice(0, queryStart) : url
+      // Preserve hash if present
+      const hashStart = base.indexOf('#')
+      const baseWithoutHash = hashStart >= 0 ? base.slice(0, hashStart) : base
+      const hash = hashStart >= 0 ? base.slice(hashStart) : ''
+
+      const searchParams = new URLSearchParams()
+      for (const param of params) {
+        if (param.enabled && param.key.trim()) {
+          searchParams.append(param.key.trim(), param.value)
+        }
+      }
+
+      const queryString = searchParams.toString()
+      return queryString ? `${baseWithoutHash}?${queryString}${hash}` : `${baseWithoutHash}${hash}`
+    }
+
+    // Handle URLs without protocol
+    let urlToParse = url
+    if (!protocolRegex.test(urlToParse) && hostnameRegex.test(urlToParse)) {
+      urlToParse = `https://${urlToParse}`
+    }
+
+    const urlObj = new URL(urlToParse)
+    const searchParams = urlObj.searchParams
+
+    // Clear existing query params
+    searchParams.delete('dummy') // Workaround to clear all params
+
+    // Append enabled params
+    for (const param of params) {
+      if (param.enabled && param.key.trim()) {
+        searchParams.append(param.key.trim(), param.value)
+      }
+    }
+
+    // Return full URL including hash if present
+    return urlObj.toString()
+  }
+  catch {
+    return url
+  }
+}
+
+/**
+ * Extract the base URL (without query parameters) from a URL string.
+ */
+export function getBaseUrl(url: string): string {
+  try {
+    let urlToParse = url
+    if (urlToParse && !protocolRegex.test(urlToParse)) {
+      if (hostnameRegex.test(urlToParse)) {
+        urlToParse = `https://${urlToParse}`
+      }
+      else {
+        return url
+      }
+    }
+
+    const urlObj = new URL(urlToParse)
+    // Remove query string and hash
+    return `${urlObj.origin}${urlObj.pathname}${urlObj.hash}`
+  }
+  catch {
+    return url
   }
 }
 
