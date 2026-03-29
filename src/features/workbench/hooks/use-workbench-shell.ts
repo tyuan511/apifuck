@@ -1,12 +1,13 @@
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useWorkbenchStore } from '../store/workbench-store'
-import { collectCollectionIds, describeCollectionParent, findCollectionName, getActiveProject } from '../utils'
+import { collectCollectionIds, describeCollectionParent, findCollectionName } from '../utils'
 
 export function useWorkbenchShell() {
   const state = useWorkbenchStore(useShallow(store => ({
-    workspace: store.workspace,
-    activeProjectId: store.activeProjectId,
+    project: store.project,
+    projectPath: store.projectPath,
+    recentProjectPaths: store.recentProjectPaths,
     selectedTreeNode: store.selectedTreeNode,
     collapsedCollectionIds: store.collapsedCollectionIds,
     openRequestTabs: store.openRequestTabs,
@@ -37,6 +38,8 @@ export function useWorkbenchShell() {
     editRequestDescriptionDraft: store.editRequestDescriptionDraft,
     pendingCloseRequestId: store.pendingCloseRequestId,
     pendingCollectionDeletion: store.pendingCollectionDeletion,
+    pendingEnvironmentDeletion: store.pendingEnvironmentDeletion,
+    pendingRecentProjectRemoval: store.pendingRecentProjectRemoval,
     pendingRequestDeletion: store.pendingRequestDeletion,
     environments: store.environments,
     activeEnvironmentId: store.activeEnvironmentId,
@@ -50,9 +53,16 @@ export function useWorkbenchShell() {
   const actions = useWorkbenchStore(useShallow(store => ({
     setProjectNameDraft: store.setProjectNameDraft,
     setProjectDescriptionDraft: store.setProjectDescriptionDraft,
+    setRecentProjectPaths: store.setRecentProjectPaths,
     openCreateProjectDialog: store.openCreateProjectDialog,
     closeCreateProjectDialog: store.closeCreateProjectDialog,
     handleCreateProject: store.handleCreateProject,
+    handleOpenExistingProject: store.handleOpenExistingProject,
+    requestRemoveRecentProject: store.requestRemoveRecentProject,
+    clearPendingRecentProjectRemoval: store.clearPendingRecentProjectRemoval,
+    setDeleteLocalFilesForPendingRecentProjectRemoval: store.setDeleteLocalFilesForPendingRecentProjectRemoval,
+    handleRemoveRecentProject: store.handleRemoveRecentProject,
+    handleSelectProject: store.handleSelectProject,
     openCreateCollectionDialog: store.openCreateCollectionDialog,
     closeCreateCollectionDialog: store.closeCreateCollectionDialog,
     setCollectionNameDraft: store.setCollectionNameDraft,
@@ -81,7 +91,6 @@ export function useWorkbenchShell() {
     moveTreeNode: store.moveTreeNode,
     toggleCollection: store.toggleCollection,
     setNodeSelection: store.setNodeSelection,
-    setActiveProject: store.setActiveProject,
     openRequestFromSummary: store.openRequestFromSummary,
     focusRequestTab: store.focusRequestTab,
     reorderRequestTabs: store.reorderRequestTabs,
@@ -101,11 +110,12 @@ export function useWorkbenchShell() {
     setEnvironmentVariablesDraft: store.setEnvironmentVariablesDraft,
     handleCreateEnvironment: store.handleCreateEnvironment,
     handleEditEnvironment: store.handleEditEnvironment,
+    requestDeleteEnvironment: store.requestDeleteEnvironment,
+    clearPendingEnvironmentDeletion: store.clearPendingEnvironmentDeletion,
     handleDeleteEnvironment: store.handleDeleteEnvironment,
     handleSetActiveEnvironment: store.handleSetActiveEnvironment,
   })))
 
-  const activeProject = getActiveProject(state.workspace, state.activeProjectId)
   const activeDraft = state.activeRequestId ? state.requestDrafts[state.activeRequestId] ?? null : null
   const activeResponse = state.activeRequestId ? state.requestResponses[state.activeRequestId] ?? null : null
   const activeRequestIsLoading = Boolean(
@@ -113,9 +123,9 @@ export function useWorkbenchShell() {
   )
 
   const currentProjectCollectionNames = useMemo(() => new Map(
-    (activeProject ? collectCollectionIds(activeProject.children) : [])
-      .map(id => [id, findCollectionName(activeProject?.children ?? [], id)]),
-  ), [activeProject])
+    (state.project ? collectCollectionIds(state.project.children) : [])
+      .map(id => [id, findCollectionName(state.project?.children ?? [], id)]),
+  ), [state.project])
 
   const collectionDialogParentLabel = describeCollectionParent(
     state.collectionDialogParentCollectionId,
@@ -126,19 +136,13 @@ export function useWorkbenchShell() {
     currentProjectCollectionNames,
   )
 
-  const environments = state.activeProjectId ? state.environments[state.activeProjectId] ?? [] : []
-  const activeEnvironmentId = state.activeProjectId ? state.activeEnvironmentId[state.activeProjectId] ?? null : null
-
   return {
     ...state,
     ...actions,
     activeDraft,
-    activeProject,
     activeRequestIsLoading,
     activeResponse,
     collectionDialogParentLabel,
     requestDialogParentLabel,
-    environments,
-    activeEnvironmentId,
   }
 }

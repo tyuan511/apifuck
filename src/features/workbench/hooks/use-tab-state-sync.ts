@@ -5,13 +5,13 @@ export function useTabStateSync() {
   const openRequestTabs = useWorkbenchStore(state => state.openRequestTabs)
   const activeRequestId = useWorkbenchStore(state => state.activeRequestId)
   const syncTabState = useWorkbenchStore(state => state.syncTabState)
-  const workspace = useWorkbenchStore(state => state.workspace)
+  const project = useWorkbenchStore(state => state.project)
 
   useEffect(() => {
-    if (!workspace) {
+    if (!project) {
       return
     }
 
     syncTabState()
-  }, [openRequestTabs, activeRequestId, syncTabState, workspace])
+  }, [openRequestTabs, activeRequestId, project, syncTabState])
 }

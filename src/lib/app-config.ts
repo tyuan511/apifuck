@@ -1,4 +1,5 @@
-import type { WorkspaceSnapshot } from '@/lib/workspace'
+import type { EditorPanelTab } from '@/features/workbench/types'
+import type { ProjectSnapshot } from '@/lib/project'
 import { invoke } from '@tauri-apps/api/core'
 
 export type AppTheme = 'light' | 'dark' | 'system'
@@ -9,20 +10,23 @@ export interface OpenRequestTab {
   method: string
   dirty: boolean
   lastFocusedAt: number
+  editorTab: EditorPanelTab
 }
 
 export interface AppConfig {
   schemaVersion: number
   createdAt: string
   updatedAt: string
-  lastOpenedWorkspacePath: string | null
+  lastOpenedProjectPath: string | null
+  recentProjectPaths: string[]
   theme: AppTheme
   openRequestTabs: OpenRequestTab[]
   activeRequestId: string | null
 }
 
 export interface UpdateAppConfigInput {
-  lastOpenedWorkspacePath: string | null
+  lastOpenedProjectPath: string | null
+  recentProjectPaths?: string[]
   theme: AppTheme
 }
 
@@ -33,12 +37,12 @@ export interface UpdateTabStateInput {
 
 export interface AppStartupState {
   appConfig: AppConfig
-  workspacePath: string
-  workspaceSnapshot: WorkspaceSnapshot
+  projectPath: string
+  projectSnapshot: ProjectSnapshot
 }
 
-export function openStartupWorkspace() {
-  return invoke<AppStartupState>('open_startup_workspace')
+export function openStartupProject() {
+  return invoke<AppStartupState>('open_startup_project')
 }
 
 export function readAppConfig() {

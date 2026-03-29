@@ -1,12 +1,12 @@
 import type {
   ApiDefinition,
   CollectionTreeNode,
+  ProjectSnapshot,
   ResponseHeader,
   ResponseType,
-  WorkspaceSnapshot,
-} from '@/lib/workspace'
+} from '@/lib/project'
 
-export type EditorPanelTab = 'query' | 'headers' | 'body' | 'preRequestScript' | 'postRequestScript'
+export type EditorPanelTab = 'query' | 'headers' | 'auth' | 'body' | 'preRequestScript' | 'postRequestScript'
 
 export type TreeSelection
   = | { type: 'collection', id: string, parentCollectionId: string | null }
@@ -20,6 +20,7 @@ export interface OpenRequestTab {
   method: string
   dirty: boolean
   lastFocusedAt: number
+  editorTab: EditorPanelTab
 }
 
 export interface PendingCollectionDeletion {
@@ -30,6 +31,17 @@ export interface PendingCollectionDeletion {
 }
 
 export interface PendingRequestDeletion {
+  id: string
+  name: string
+}
+
+export interface PendingRecentProjectRemoval {
+  path: string
+  name: string
+  deleteLocalFiles: boolean
+}
+
+export interface PendingEnvironmentDeletion {
   id: string
   name: string
 }
@@ -47,8 +59,9 @@ export interface ResponseState {
 }
 
 export interface WorkbenchBootPayload {
-  workspacePath: string
-  workspaceSnapshot: WorkspaceSnapshot
+  projectPath: string
+  projectSnapshot: ProjectSnapshot
+  recentProjectPaths: string[]
 }
 
 export const methodOptions = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
@@ -57,6 +70,7 @@ export const editorTabs: Array<{ value: EditorPanelTab, label: string }> = [
   { value: 'query', label: '查询参数' },
   { value: 'headers', label: '请求头' },
   { value: 'body', label: '请求体' },
+  { value: 'auth', label: '认证' },
   { value: 'preRequestScript', label: '请求脚本' },
   { value: 'postRequestScript', label: '响应脚本' },
 ]
@@ -70,6 +84,6 @@ export type CollectionSubtree = Pick<PendingCollectionDeletion, 'apiIds' | 'coll
 
 export type DeleteCollectionRequest = PendingCollectionDeletion | null
 
-export type ActiveProjectLike = WorkspaceSnapshot['projects'][number] | null
+export type ActiveProjectLike = ProjectSnapshot | null
 
 export type CollectionNodeLike = CollectionTreeNode

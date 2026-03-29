@@ -11,7 +11,8 @@ use crate::error::{AppError, AppResult};
 const APP_CONFIG_DIR: &str = ".apifuck";
 const LEGACY_APP_CONFIG_DIR: &str = ".fuckapi";
 const APP_CONFIG_FILE: &str = "config.json";
-const DEFAULT_WORKSPACE_DIR: &str = "workspace";
+const DEFAULT_PROJECT_DIR: &str = "default";
+const MAX_RECENT_PROJECTS: usize = 12;
 const APP_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -23,6 +24,18 @@ pub enum AppTheme {
     System,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum EditorPanelTab {
+    #[default]
+    Query,
+    Headers,
+    Auth,
+    Body,
+    PreRequestScript,
+    PostRequestScript,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenRequestTab {
@@ -31,6 +44,8 @@ pub struct OpenRequestTab {
     pub method: String,
     pub dirty: bool,
     pub last_focused_at: i64,
+    #[serde(default)]
+    pub editor_tab: EditorPanelTab,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -39,7 +54,9 @@ pub struct AppConfig {
     pub schema_version: u32,
     pub created_at: String,
     pub updated_at: String,
-    pub last_opened_workspace_path: Option<String>,
+    pub last_opened_project_path: Option<String>,
+    #[serde(default)]
+    pub recent_project_paths: Vec<String>,
     pub theme: AppTheme,
     #[serde(default)]
     pub open_request_tabs: Vec<OpenRequestTab>,
@@ -49,7 +66,9 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAppConfigInput {
-    pub last_opened_workspace_path: Option<String>,
+    pub last_opened_project_path: Option<String>,
+    #[serde(default)]
+    pub recent_project_paths: Option<Vec<String>>,
     pub theme: AppTheme,
 }
 
@@ -64,8 +83,8 @@ pub fn read_app_config() -> AppResult<AppConfig> {
     read_app_config_at(&app_config_path()?)
 }
 
-pub fn resolve_startup_workspace_path() -> AppResult<PathBuf> {
-    resolve_startup_workspace_path_at(&app_config_path()?)
+pub fn resolve_startup_project_path() -> AppResult<PathBuf> {
+    resolve_startup_project_path_at(&app_config_path()?)
 }
 
 pub fn update_app_config(input: UpdateAppConfigInput) -> AppResult<AppConfig> {
@@ -84,7 +103,8 @@ pub fn update_tab_state(input: UpdateTabStateInput) -> AppResult<AppConfig> {
         schema_version: current.schema_version,
         created_at: current.created_at,
         updated_at: now_iso_string(),
-        last_opened_workspace_path: current.last_opened_workspace_path,
+        last_opened_project_path: current.last_opened_project_path,
+        recent_project_paths: current.recent_project_paths,
         theme: current.theme,
         open_request_tabs: input.open_request_tabs,
         active_request_id: input.active_request_id,
@@ -93,10 +113,11 @@ pub fn update_tab_state(input: UpdateTabStateInput) -> AppResult<AppConfig> {
     Ok(next)
 }
 
-pub fn update_last_opened_workspace_path(path: Option<String>) -> AppResult<AppConfig> {
+pub fn update_last_opened_project_path(path: Option<String>) -> AppResult<AppConfig> {
     let current = read_app_config()?;
     update_app_config(UpdateAppConfigInput {
-        last_opened_workspace_path: path,
+        last_opened_project_path: path,
+        recent_project_paths: None,
         theme: current.theme,
     })
 }
@@ -116,13 +137,18 @@ fn read_app_config_at(path: &Path) -> AppResult<AppConfig> {
 
 fn update_app_config_at(path: &Path, input: UpdateAppConfigInput) -> AppResult<AppConfig> {
     let current = read_app_config_at(path)?;
+    let last_opened_project_path = input
+        .last_opened_project_path
+        .and_then(|value| normalize_optional_string(&value));
     let next = AppConfig {
         schema_version: current.schema_version,
         created_at: current.created_at,
         updated_at: now_iso_string(),
-        last_opened_workspace_path: input
-            .last_opened_workspace_path
-            .and_then(|value| normalize_optional_string(&value)),
+        last_opened_project_path: last_opened_project_path.clone(),
+        recent_project_paths: normalize_recent_project_paths(
+            input.recent_project_paths.unwrap_or(current.recent_project_paths),
+            last_opened_project_path.as_deref(),
+        ),
         theme: input.theme,
         open_request_tabs: current.open_request_tabs,
         active_request_id: current.active_request_id,
@@ -131,10 +157,10 @@ fn update_app_config_at(path: &Path, input: UpdateAppConfigInput) -> AppResult<A
     Ok(next)
 }
 
-fn resolve_startup_workspace_path_at(path: &Path) -> AppResult<PathBuf> {
+fn resolve_startup_project_path_at(path: &Path) -> AppResult<PathBuf> {
     let config = read_app_config_at(path)?;
-    if let Some(last_opened_workspace_path) = config.last_opened_workspace_path {
-        let candidate = PathBuf::from(&last_opened_workspace_path);
+    if let Some(last_opened_project_path) = config.last_opened_project_path {
+        let candidate = PathBuf::from(&last_opened_project_path);
         if candidate.is_dir() {
             return Ok(candidate);
         }
@@ -143,7 +169,7 @@ fn resolve_startup_workspace_path_at(path: &Path) -> AppResult<PathBuf> {
     let root = path.parent().ok_or_else(|| {
         AppError::InvalidInput(format!("config path {} has no parent", path.display()))
     })?;
-    Ok(default_workspace_path_from_root(root))
+    Ok(default_project_path_from_root(root))
 }
 
 fn default_app_config() -> AppConfig {
@@ -152,7 +178,8 @@ fn default_app_config() -> AppConfig {
         schema_version: APP_CONFIG_SCHEMA_VERSION,
         created_at: now.clone(),
         updated_at: now,
-        last_opened_workspace_path: None,
+        last_opened_project_path: None,
+        recent_project_paths: Vec::new(),
         theme: AppTheme::System,
         open_request_tabs: Vec::new(),
         active_request_id: None,
@@ -161,7 +188,7 @@ fn default_app_config() -> AppConfig {
 
 fn validate_config(config: &AppConfig) -> AppResult<()> {
     if config.schema_version != APP_CONFIG_SCHEMA_VERSION {
-        return Err(AppError::InvalidWorkspace(format!(
+        return Err(AppError::InvalidProject(format!(
             "unsupported app config schema version {}",
             config.schema_version
         )));
@@ -177,6 +204,34 @@ fn normalize_optional_string(value: &str) -> Option<String> {
     else {
         Some(trimmed.to_string())
     }
+}
+
+fn normalize_recent_project_paths(
+    paths: Vec<String>,
+    last_opened_project_path: Option<&str>,
+) -> Vec<String> {
+    let mut normalized = Vec::new();
+
+    if let Some(path) = last_opened_project_path.and_then(normalize_optional_string) {
+        normalized.push(path);
+    }
+
+    for path in paths {
+        let Some(path) = normalize_optional_string(&path) else {
+            continue;
+        };
+
+        if normalized.iter().any(|existing| existing == &path) {
+            continue;
+        }
+
+        normalized.push(path);
+        if normalized.len() >= MAX_RECENT_PROJECTS {
+            break;
+        }
+    }
+
+    normalized
 }
 
 fn app_config_path() -> AppResult<PathBuf> {
@@ -204,8 +259,8 @@ fn app_config_root() -> AppResult<PathBuf> {
     Ok(new_root)
 }
 
-fn default_workspace_path_from_root(root: &Path) -> PathBuf {
-    root.join(DEFAULT_WORKSPACE_DIR)
+fn default_project_path_from_root(root: &Path) -> PathBuf {
+    root.join(DEFAULT_PROJECT_DIR)
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -281,19 +336,20 @@ mod tests {
         let config = read_app_config_at(&config_path).expect("read config");
 
         assert_eq!(config.schema_version, APP_CONFIG_SCHEMA_VERSION);
-        assert!(config.last_opened_workspace_path.is_none());
+        assert!(config.last_opened_project_path.is_none());
         assert!(config_path.exists());
     }
 
     #[test]
-    fn app_config_update_persists_workspace_path_and_theme() {
+    fn app_config_update_persists_project_path_and_theme() {
         let temp_dir = tempdir().expect("create temp dir");
         let config_path = temp_dir.path().join(APP_CONFIG_FILE);
 
         let updated = update_app_config_at(
             &config_path,
             UpdateAppConfigInput {
-                last_opened_workspace_path: Some("/tmp/apifuck-workspace".to_string()),
+                last_opened_project_path: Some("/tmp/apifuck-project".to_string()),
+                recent_project_paths: None,
                 theme: AppTheme::Dark,
             },
         )
@@ -301,8 +357,8 @@ mod tests {
 
         assert!(matches!(updated.theme, AppTheme::Dark));
         assert_eq!(
-            updated.last_opened_workspace_path.as_deref(),
-            Some("/tmp/apifuck-workspace")
+            updated.last_opened_project_path.as_deref(),
+            Some("/tmp/apifuck-project")
         );
 
         let reloaded = read_app_config_at(&config_path).expect("reload config");
@@ -310,59 +366,97 @@ mod tests {
     }
 
     #[test]
-    fn startup_workspace_path_falls_back_to_default_workspace() {
+    fn startup_project_path_falls_back_to_default_project() {
         let temp_dir = tempdir().expect("create temp dir");
         let config_path = temp_dir.path().join(APP_CONFIG_FILE);
 
-        let startup_path = resolve_startup_workspace_path_at(&config_path).expect("startup path");
+        let startup_path = resolve_startup_project_path_at(&config_path).expect("startup path");
 
-        assert_eq!(startup_path, temp_dir.path().join(DEFAULT_WORKSPACE_DIR));
+        assert_eq!(startup_path, temp_dir.path().join(DEFAULT_PROJECT_DIR));
     }
 
     #[test]
-    fn startup_workspace_path_prefers_existing_last_opened_workspace() {
+    fn startup_project_path_prefers_existing_last_opened_project() {
         let temp_dir = tempdir().expect("create temp dir");
         let config_path = temp_dir.path().join(APP_CONFIG_FILE);
-        let existing_workspace = temp_dir.path().join("existing-workspace");
-        fs::create_dir_all(&existing_workspace).expect("create workspace");
+        let existing_project = temp_dir.path().join("existing-project");
+        fs::create_dir_all(&existing_project).expect("create project");
 
         update_app_config_at(
             &config_path,
             UpdateAppConfigInput {
-                last_opened_workspace_path: Some(existing_workspace.display().to_string()),
+                last_opened_project_path: Some(existing_project.display().to_string()),
+                recent_project_paths: None,
                 theme: AppTheme::System,
             },
         )
         .expect("update config");
 
-        let startup_path = resolve_startup_workspace_path_at(&config_path).expect("startup path");
+        let startup_path = resolve_startup_project_path_at(&config_path).expect("startup path");
 
-        assert_eq!(startup_path, existing_workspace);
+        assert_eq!(startup_path, existing_project);
     }
 
     #[test]
-    fn startup_workspace_path_ignores_missing_last_opened_workspace() {
+    fn startup_project_path_ignores_missing_last_opened_project() {
         let temp_dir = tempdir().expect("create temp dir");
         let config_path = temp_dir.path().join(APP_CONFIG_FILE);
 
         update_app_config_at(
             &config_path,
             UpdateAppConfigInput {
-                last_opened_workspace_path: Some(
+                last_opened_project_path: Some(
                     temp_dir
                         .path()
-                        .join("missing-workspace")
+                        .join("missing-project")
                         .display()
                         .to_string(),
                 ),
+                recent_project_paths: None,
                 theme: AppTheme::System,
             },
         )
         .expect("update config");
 
-        let startup_path = resolve_startup_workspace_path_at(&config_path).expect("startup path");
+        let startup_path = resolve_startup_project_path_at(&config_path).expect("startup path");
 
-        assert_eq!(startup_path, temp_dir.path().join(DEFAULT_WORKSPACE_DIR));
+        assert_eq!(startup_path, temp_dir.path().join(DEFAULT_PROJECT_DIR));
+    }
+
+    #[test]
+    fn updating_last_opened_project_tracks_recent_projects() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let config_path = temp_dir.path().join(APP_CONFIG_FILE);
+        let first_project = temp_dir.path().join("first-project");
+        let second_project = temp_dir.path().join("second-project");
+
+        update_app_config_at(
+            &config_path,
+            UpdateAppConfigInput {
+                last_opened_project_path: Some(first_project.display().to_string()),
+                recent_project_paths: None,
+                theme: AppTheme::System,
+            },
+        )
+        .expect("update first project");
+
+        let updated = update_app_config_at(
+            &config_path,
+            UpdateAppConfigInput {
+                last_opened_project_path: Some(second_project.display().to_string()),
+                recent_project_paths: None,
+                theme: AppTheme::System,
+            },
+        )
+        .expect("update second project");
+
+        assert_eq!(
+            updated.recent_project_paths,
+            vec![
+                second_project.display().to_string(),
+                first_project.display().to_string(),
+            ]
+        );
     }
 
     #[cfg(unix)]

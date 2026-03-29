@@ -4,7 +4,7 @@ import type {
   RequestEditorDraft,
   ResponseState,
 } from '../types'
-import type { KeyValue } from '@/lib/workspace'
+import type { AuthType, KeyValue } from '@/lib/project'
 import { PointerActivationConstraints } from '@dnd-kit/dom'
 import {
   DragDropProvider,
@@ -66,7 +66,7 @@ import {
 import { EnvironmentVariableInput } from './environment-variable-input'
 import { MethodBadge, ResponseMetaBadge } from './shared'
 
-interface RequestWorkspaceProps {
+interface RequestPaneProps {
   activeDraft: RequestEditorDraft | null
   activeEditorTab: EditorPanelTab
   activeRequestId: string | null
@@ -90,7 +90,7 @@ interface RequestWorkspaceProps {
   onSplitRatioChange: (value: number) => void
 }
 
-export function RequestWorkspace(props: RequestWorkspaceProps) {
+export function RequestPane(props: RequestPaneProps) {
   const hasUnsavedChanges = Boolean(props.activeRequestId && props.dirtyRequestIds.has(props.activeRequestId))
   const shouldShowResponsePane = props.activeResponse ? hasVisibleResponse(props.activeResponse) : false
   const handleSaveShortcut = React.useEffectEvent(() => {
@@ -212,7 +212,7 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
                 {shouldShowResponsePane
                   ? (
                       <ResizablePanelGroup
-                        id="request-workspace-panels"
+                        id="request-pane-panels"
                         orientation="vertical"
                         className="min-h-0 min-w-0 flex-1 overflow-hidden"
                         onLayoutChanged={(layout) => {
@@ -877,7 +877,7 @@ function RequestTabChip(props: RequestTabChipProps) {
         props.interactive && 'cursor-grab active:cursor-grabbing',
         props.isMacOSDesktop ? 'h-8 p-1.5' : 'p-1.5',
         props.visualState === 'selected' && 'border-primary/40 bg-primary/5',
-        props.visualState === 'preview' && 'border-border/80 bg-accent',
+        props.visualState === 'preview' && 'border-border/80 bg-accent opacity-50',
         props.visualState === 'overlay' && 'border-border/80 bg-accent shadow-sm',
         props.visualState === 'idle' && 'border-transparent bg-muted/50 hover:border-border/80 hover:bg-accent',
       )}
@@ -1159,6 +1159,18 @@ const requestBodyModeOptions = [
   { label: '无', value: 'none' },
 ] as const
 
+const authTypeOptions: Array<{ value: AuthType, label: string }> = [
+  { value: 'none', label: '无认证' },
+  { value: 'basic', label: 'Basic Auth' },
+  { value: 'bearer', label: 'Bearer Token' },
+  { value: 'api-key', label: 'API Key' },
+] as const
+
+const apiKeyAddToOptions = [
+  { value: 'header', label: 'Header' },
+  { value: 'query', label: 'Query' },
+] as const
+
 const requestBodyModeLabelMap = Object.fromEntries(
   requestBodyModeOptions.map(option => [option.value, option.label]),
 ) as Record<(typeof requestBodyModeOptions)[number]['value'], string>
@@ -1175,21 +1187,14 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
   const bodyMode = props.draft.request.body.mode
   const bodyModeLabel = requestBodyModeLabelMap[bodyMode as keyof typeof requestBodyModeLabelMap] ?? bodyMode
 
-  const activeProjectId = useWorkbenchStore(s => s.activeProjectId)
   const environments = useWorkbenchStore(s => s.environments)
   const activeEnvironmentId = useWorkbenchStore(s => s.activeEnvironmentId)
 
   const activeEnv = React.useMemo(() => {
-    if (!activeProjectId)
+    if (!activeEnvironmentId)
       return null
-    const projectEnvs = environments[activeProjectId]
-    if (!projectEnvs)
-      return null
-    const envId = activeEnvironmentId[activeProjectId]
-    if (!envId)
-      return null
-    return projectEnvs.find(e => e.id === envId) ?? null
-  }, [activeProjectId, environments, activeEnvironmentId])
+    return environments.find(e => e.id === activeEnvironmentId) ?? null
+  }, [activeEnvironmentId, environments])
 
   const envVariables = React.useMemo(() => {
     if (!activeEnv)
@@ -1230,7 +1235,7 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
     <div className="flex h-full min-h-0 flex-col overflow-hidden border-b border-border/70 px-3 py-3">
       <Tabs value={props.activeTab} onValueChange={value => props.onActiveTabChange(value as EditorPanelTab)} className="h-full min-h-0">
         <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
-          <TabsList variant="line">
+          <TabsList>
             {editorTabs.map(tab => (
               <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 py-0.5 text-[13px]">
                 {tab.label}
@@ -1275,6 +1280,40 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
                 </SelectContent>
               </Select>
             )}
+
+            {props.activeTab === 'auth' && (
+              <Select
+                value={props.draft.request.auth.authType}
+                onValueChange={(value) => {
+                  if (!value) {
+                    return
+                  }
+                  props.onChangeDraft(draft => ({
+                    ...draft,
+                    request: {
+                      ...draft.request,
+                      auth: {
+                        ...draft.request.auth,
+                        authType: value as AuthType,
+                      },
+                    },
+                  }))
+                }}
+              >
+                <SelectTrigger size="sm" className="w-[176px]">
+                  <SelectValue>
+                    {authTypeOptions.find(option => option.value === props.draft.request.auth.authType)?.label ?? '认证类型'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {authTypeOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
 
@@ -1297,6 +1336,21 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
             onChange={rows => props.onChangeDraft(draft => ({
               ...draft,
               request: { ...draft.request, headers: rows },
+            }))}
+          />
+        </TabsContent>
+
+        <TabsContent value="auth" className="min-h-0 overflow-auto">
+          <AuthEditor
+            auth={props.draft.request.auth}
+            environmentVariables={envVariables}
+            environmentName={envName}
+            onChange={auth => props.onChangeDraft(draft => ({
+              ...draft,
+              request: {
+                ...draft.request,
+                auth,
+              },
             }))}
           />
         </TabsContent>
@@ -1505,27 +1559,142 @@ function KeyValueTable(props: KeyValueTableProps) {
   )
 }
 
+function AuthEditor(props: {
+  auth: RequestEditorDraft['request']['auth']
+  environmentVariables: Array<{ key: string, value: string, description?: string }>
+  environmentName: string
+  onChange: (auth: RequestEditorDraft['request']['auth']) => void
+}) {
+  if (props.auth.authType === 'none') {
+    return (
+      <div className="grid min-h-[140px] place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
+        当前请求未启用认证。
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {props.auth.authType === 'basic' && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <EnvironmentVariableInput
+            value={props.auth.basic.username}
+            onChange={value => props.onChange({
+              ...props.auth,
+              basic: {
+                ...props.auth.basic,
+                username: value,
+              },
+            })}
+            variables={props.environmentVariables}
+            environmentName={props.environmentName}
+            placeholder="用户名"
+          />
+          <EnvironmentVariableInput
+            value={props.auth.basic.password}
+            onChange={value => props.onChange({
+              ...props.auth,
+              basic: {
+                ...props.auth.basic,
+                password: value,
+              },
+            })}
+            variables={props.environmentVariables}
+            environmentName={props.environmentName}
+            placeholder="密码"
+          />
+        </div>
+      )}
+
+      {props.auth.authType === 'bearer' && (
+        <EnvironmentVariableInput
+          value={props.auth.bearerToken}
+          onChange={value => props.onChange({
+            ...props.auth,
+            bearerToken: value,
+          })}
+          variables={props.environmentVariables}
+          environmentName={props.environmentName}
+          placeholder="Bearer Token"
+        />
+      )}
+
+      {props.auth.authType === 'api-key' && (
+        <div className="grid grid-cols-[140px_minmax(0,_1fr)_minmax(0,_1fr)] gap-3">
+          <Select
+            value={props.auth.apiKey.addTo}
+            onValueChange={(value) => {
+              if (!value) {
+                return
+              }
+              props.onChange({
+                ...props.auth,
+                apiKey: {
+                  ...props.auth.apiKey,
+                  addTo: value,
+                },
+              })
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue>
+                {apiKeyAddToOptions.find(option => option.value === props.auth.apiKey.addTo)?.label ?? '添加位置'}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {apiKeyAddToOptions.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <EnvironmentVariableInput
+            value={props.auth.apiKey.key}
+            onChange={value => props.onChange({
+              ...props.auth,
+              apiKey: {
+                ...props.auth.apiKey,
+                key: value,
+              },
+            })}
+            variables={props.environmentVariables}
+            environmentName={props.environmentName}
+            placeholder="参数名"
+          />
+          <EnvironmentVariableInput
+            value={props.auth.apiKey.value}
+            onChange={value => props.onChange({
+              ...props.auth,
+              apiKey: {
+                ...props.auth.apiKey,
+                value,
+              },
+            })}
+            variables={props.environmentVariables}
+            environmentName={props.environmentName}
+            placeholder="参数值"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function BodyEditor(props: {
   draft: RequestEditorDraft
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
 }) {
   const body = props.draft.request.body
 
-  const activeProjectId = useWorkbenchStore(state => state.activeProjectId)
   const environments = useWorkbenchStore(state => state.environments)
   const activeEnvironmentId = useWorkbenchStore(state => state.activeEnvironmentId)
 
   const activeEnv = React.useMemo(() => {
-    if (!activeProjectId)
+    if (!activeEnvironmentId)
       return null
-    const projectEnvs = environments[activeProjectId]
-    if (!projectEnvs)
-      return null
-    const envId = activeEnvironmentId[activeProjectId]
-    if (!envId)
-      return null
-    return projectEnvs.find(e => e.id === envId) ?? null
-  }, [activeProjectId, environments, activeEnvironmentId])
+    return environments.find(e => e.id === activeEnvironmentId) ?? null
+  }, [activeEnvironmentId, environments])
 
   const envVariables = React.useMemo(() => {
     if (!activeEnv)

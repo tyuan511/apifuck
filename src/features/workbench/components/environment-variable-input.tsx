@@ -169,10 +169,7 @@ export function EnvironmentVariableInput(props: EnvironmentVariableInputProps) {
                 index === selectedIndex && 'bg-accent',
               )}
             >
-              <span className="font-mono text-primary">
-                $
-                {variable.key}
-              </span>
+              <span className="font-mono text-primary">{variable.key}</span>
               <span className="text-muted-foreground">=</span>
               <span className="truncate text-muted-foreground">{variable.value}</span>
             </button>

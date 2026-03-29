@@ -2,7 +2,9 @@ import { useWorkbenchShell } from '../hooks/use-workbench-shell'
 import { isMacOSDesktop } from '../types'
 import {
   ConfirmDeleteCollectionDialog,
+  ConfirmDeleteEnvironmentDialog,
   ConfirmDeleteRequestDialog,
+  ConfirmRemoveRecentProjectDialog,
   CreateCollectionDialog,
   CreateProjectDialog,
   CreateRequestDialog,
@@ -11,7 +13,7 @@ import {
   EnvironmentDialog,
 } from './dialogs'
 import { ProjectSidebar } from './project-sidebar'
-import { RequestWorkspace } from './request-workspace'
+import { RequestPane } from './request-pane'
 
 export function WorkbenchShell() {
   const shell = useWorkbenchShell()
@@ -23,33 +25,36 @@ export function WorkbenchShell() {
         style={{ gridTemplateColumns: 'clamp(248px, 23vw, 308px) minmax(0, 1fr)' }}
       >
         <ProjectSidebar
-          activeProjectId={shell.activeProjectId}
           collapsedCollectionIds={shell.collapsedCollectionIds}
           environments={shell.environments}
           activeEnvironmentId={shell.activeEnvironmentId}
           isMacOSDesktop={isMacOSDesktop}
           openRequestTabs={shell.openRequestTabs}
-          projects={shell.workspace?.projects ?? []}
+          project={shell.project}
+          projectPath={shell.projectPath}
+          recentProjectPaths={shell.recentProjectPaths}
           selectedTreeNode={shell.selectedTreeNode}
           onCreateCollection={shell.openCreateCollectionDialog}
           onCreateEnvironment={shell.openCreateEnvironmentDialog}
           onCreateProject={shell.openCreateProjectDialog}
           onCreateRequest={shell.openCreateRequestDialog}
           onDeleteCollection={shell.requestDeleteCollection}
-          onDeleteEnvironment={shell.handleDeleteEnvironment}
+          onDeleteEnvironment={shell.requestDeleteEnvironment}
           onDeleteRequest={shell.requestDeleteRequest}
           onEditCollection={shell.openEditCollectionDialog}
           onEditEnvironment={shell.openEditEnvironmentDialog}
           onEditRequest={shell.openEditRequestDialog}
           onMoveTreeNode={shell.moveTreeNode}
+          onOpenExistingProject={() => { void shell.handleOpenExistingProject() }}
+          onRemoveRecentProject={shell.requestRemoveRecentProject}
+          onSelectProject={(path) => { void shell.handleSelectProject(path) }}
           onOpenRequest={(summary, parentCollectionId) => { void shell.openRequestFromSummary(summary, parentCollectionId) }}
-          onProjectChange={shell.setActiveProject}
           onSetActiveEnvironment={shell.handleSetActiveEnvironment}
           onToggleCollection={shell.toggleCollection}
           onTreeSelectionChange={shell.setNodeSelection}
         />
 
-        <RequestWorkspace
+        <RequestPane
           activeDraft={shell.activeDraft}
           activeEditorTab={shell.activeEditorTab}
           activeRequestId={shell.activeRequestId}
@@ -156,6 +161,19 @@ export function WorkbenchShell() {
         onOpenChange={open => !open && shell.clearPendingRequestDeletion()}
       />
 
+      <ConfirmDeleteEnvironmentDialog
+        deletion={shell.pendingEnvironmentDeletion}
+        onConfirm={() => { void shell.handleDeleteEnvironment() }}
+        onOpenChange={open => !open && shell.clearPendingEnvironmentDeletion()}
+      />
+
+      <ConfirmRemoveRecentProjectDialog
+        removal={shell.pendingRecentProjectRemoval}
+        onDeleteLocalFilesChange={shell.setDeleteLocalFilesForPendingRecentProjectRemoval}
+        onConfirm={() => { void shell.handleRemoveRecentProject() }}
+        onOpenChange={open => !open && shell.clearPendingRecentProjectRemoval()}
+      />
+
       <EnvironmentDialog
         name={shell.environmentNameDraft}
         baseUrl={shell.environmentBaseUrlDraft}
@@ -178,7 +196,7 @@ export function WorkbenchShell() {
             void shell.handleCreateEnvironment()
           }
         }}
-        onDelete={shell.editingEnvironmentId ? () => { void shell.handleDeleteEnvironment(shell.editingEnvironmentId!) } : undefined}
+        onDelete={shell.editingEnvironmentId ? () => { shell.requestDeleteEnvironment(shell.editingEnvironmentId!) } : undefined}
       />
     </main>
   )
