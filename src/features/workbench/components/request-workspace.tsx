@@ -56,11 +56,14 @@ import {
   methodOptions,
 } from '../types'
 import {
+  buildUrlWithQuery,
   createKeyValueDraft,
   formatBytes,
   hasVisibleResponse,
+  parseUrlQueryParams,
   startWindowDragging,
 } from '../utils'
+import { EnvironmentVariableInput } from './environment-variable-input'
 import { MethodBadge, ResponseMetaBadge } from './shared'
 
 interface RequestWorkspaceProps {
@@ -97,6 +100,62 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
 
     props.onSaveRequest()
   })
+
+  // Refs to prevent circular updates between URL and query params sync
+  const isUpdatingFromUrlRef = React.useRef(false)
+  const isUpdatingFromQueryRef = React.useRef(false)
+
+  // Handler for URL changes that also syncs to query params
+  const handleUrlChange = React.useCallback((newUrl: string) => {
+    if (isUpdatingFromQueryRef.current) {
+      // Skip - this update is coming from query params
+      return
+    }
+
+    isUpdatingFromUrlRef.current = true
+    try {
+      props.onChangeDraft((draft) => {
+        const newQueryParams = parseUrlQueryParams(newUrl, draft.request.query)
+        return {
+          ...draft,
+          url: newUrl,
+          request: {
+            ...draft.request,
+            query: newQueryParams,
+          },
+        }
+      })
+    }
+    finally {
+      isUpdatingFromUrlRef.current = false
+    }
+  }, [props.onChangeDraft])
+
+  // Handler for query params changes that also syncs to URL
+  const handleQueryChange = React.useCallback((newQuery: KeyValue[]) => {
+    if (isUpdatingFromUrlRef.current) {
+      // Skip - this update is coming from URL
+      return
+    }
+
+    isUpdatingFromQueryRef.current = true
+    try {
+      props.onChangeDraft((draft) => {
+        const newUrl = buildUrlWithQuery(draft.url, newQuery)
+        return {
+          ...draft,
+          url: newUrl,
+          request: {
+            ...draft.request,
+            query: newQuery,
+          },
+        }
+      })
+    }
+    finally {
+      isUpdatingFromQueryRef.current = false
+    }
+  }, [props.onChangeDraft])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -145,6 +204,7 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
                   hasUnsavedChanges={hasUnsavedChanges}
                   isBusy={props.isBusy}
                   onChangeDraft={props.onChangeDraft}
+                  onUrlChange={handleUrlChange}
                   onSaveRequest={props.onSaveRequest}
                   onSendRequest={props.onSendRequest}
                 />
@@ -168,6 +228,7 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
                             draft={props.activeDraft}
                             onActiveTabChange={props.onActiveEditorTabChange}
                             onChangeDraft={props.onChangeDraft}
+                            onQueryChange={handleQueryChange}
                           />
                         </ResizablePanel>
 
@@ -185,6 +246,7 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
                           draft={props.activeDraft}
                           onActiveTabChange={props.onActiveEditorTabChange}
                           onChangeDraft={props.onChangeDraft}
+                          onQueryChange={handleQueryChange}
                         />
                       </div>
                     )}
@@ -1032,6 +1094,7 @@ interface RequestHeaderBarProps {
   hasUnsavedChanges: boolean
   isBusy: boolean
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
+  onUrlChange: (url: string) => void
   onSaveRequest: () => void
   onSendRequest: () => void
 }
@@ -1063,7 +1126,7 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
         <Input
           className="h-7 min-w-[280px] flex-1 text-sm focus-visible:border-input focus-visible:ring-0"
           value={props.draft.url}
-          onChange={event => props.onChangeDraft(draft => ({ ...draft, url: event.target.value }))}
+          onChange={event => props.onUrlChange(event.target.value)}
           placeholder="请输入请求地址"
         />
 
@@ -1080,13 +1143,6 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
   )
 }
 
-interface RequestEditorTabsProps {
-  activeTab: EditorPanelTab
-  draft: RequestEditorDraft
-  onActiveTabChange: (tab: EditorPanelTab) => void
-  onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
-}
-
 const requestBodyModeOptions = [
   { label: 'JSON', value: 'json' },
   { label: '原始文本', value: 'raw' },
@@ -1097,9 +1153,45 @@ const requestBodyModeLabelMap = Object.fromEntries(
   requestBodyModeOptions.map(option => [option.value, option.label]),
 ) as Record<(typeof requestBodyModeOptions)[number]['value'], string>
 
+interface RequestEditorTabsProps {
+  activeTab: EditorPanelTab
+  draft: RequestEditorDraft
+  onActiveTabChange: (tab: EditorPanelTab) => void
+  onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
+  onQueryChange: (query: KeyValue[]) => void
+}
+
 function RequestEditorTabs(props: RequestEditorTabsProps) {
   const bodyMode = props.draft.request.body.mode
   const bodyModeLabel = requestBodyModeLabelMap[bodyMode as keyof typeof requestBodyModeLabelMap] ?? bodyMode
+
+  const activeProjectId = useWorkbenchStore(s => s.activeProjectId)
+  const environments = useWorkbenchStore(s => s.environments)
+  const activeEnvironmentId = useWorkbenchStore(s => s.activeEnvironmentId)
+
+  const activeEnv = React.useMemo(() => {
+    if (!activeProjectId)
+      return null
+    const projectEnvs = environments[activeProjectId]
+    if (!projectEnvs)
+      return null
+    const envId = activeEnvironmentId[activeProjectId]
+    if (!envId)
+      return null
+    return projectEnvs.find(e => e.id === envId) ?? null
+  }, [activeProjectId, environments, activeEnvironmentId])
+
+  const envVariables = React.useMemo(() => {
+    if (!activeEnv)
+      return []
+    return activeEnv.variables.filter(v => v.enabled).map(v => ({
+      key: v.key,
+      value: v.value,
+      description: v.description,
+    }))
+  }, [activeEnv])
+
+  const envName = activeEnv?.name ?? 'default'
 
   const handleAddKeyValueRow = React.useCallback(() => {
     if (props.activeTab === 'query') {
@@ -1180,10 +1272,9 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
           <KeyValueTable
             emptyLabel="暂无查询参数"
             rows={props.draft.request.query}
-            onChange={rows => props.onChangeDraft(draft => ({
-              ...draft,
-              request: { ...draft.request, query: rows },
-            }))}
+            environmentVariables={envVariables}
+            environmentName={envName}
+            onChange={props.onQueryChange}
           />
         </TabsContent>
 
@@ -1191,6 +1282,8 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
           <KeyValueTable
             emptyLabel="暂无请求头"
             rows={props.draft.request.headers}
+            environmentVariables={envVariables}
+            environmentName={envName}
             onChange={rows => props.onChangeDraft(draft => ({
               ...draft,
               request: { ...draft.request, headers: rows },
@@ -1301,6 +1394,8 @@ function TextResponseView(props: { body: string, contentType: string }) {
 interface KeyValueTableProps {
   emptyLabel: string
   rows: KeyValue[]
+  environmentVariables: Array<{ key: string, value: string, description?: string }>
+  environmentName: string
   onChange: (rows: KeyValue[]) => void
 }
 
@@ -1330,9 +1425,11 @@ function KeyValueTable(props: KeyValueTableProps) {
                   onChange={event => updateRow(row.id, current => ({ ...current, key: event.target.value }))}
                   placeholder="键"
                 />
-                <Input
+                <EnvironmentVariableInput
                   value={row.value}
-                  onChange={event => updateRow(row.id, current => ({ ...current, value: event.target.value }))}
+                  onChange={newValue => updateRow(row.id, current => ({ ...current, value: newValue }))}
+                  variables={props.environmentVariables}
+                  environmentName={props.environmentName}
                   placeholder="值"
                 />
                 <button

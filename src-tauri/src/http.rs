@@ -133,6 +133,9 @@ fn build_headers(entries: &[KeyValue]) -> AppResult<(HeaderMap, bool)> {
 }
 
 fn append_enabled_query_pairs(url: &mut Url, entries: &[KeyValue]) {
+    // Clear existing query pairs first - the query table is now the source of truth
+    // since URL query params are synced bidirectionally with the table
+    url.query_pairs_mut().clear();
     let mut pairs = url.query_pairs_mut();
     for entry in entries.iter().filter(|entry| entry.enabled && !entry.key.trim().is_empty()) {
         pairs.append_pair(entry.key.trim(), &entry.value);
