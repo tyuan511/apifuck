@@ -16,7 +16,7 @@ import { BracesIcon, CompassIcon, EllipsisIcon, Loader2Icon, PlusIcon, SaveIcon,
 import { AnimatePresence, motion } from 'motion/react'
 import * as React from 'react'
 import { toast } from 'sonner'
-import { MonacoCodeEditor, MonacoJsonEditor } from '@/components/monaco-editor'
+import { MonacoCodeEditor, MonacoJsonEditor, MonacoScriptEditor } from '@/components/monaco-editor'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -177,7 +177,7 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
   }, [handleSaveShortcut])
 
   return (
-    <section className="flex min-h-0 flex-col bg-background">
+    <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
       <RequestTabsBar
         activeRequestId={props.activeRequestId}
         isMacOSDesktop={props.isMacOSDesktop}
@@ -214,7 +214,7 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
                       <ResizablePanelGroup
                         id="request-workspace-panels"
                         orientation="vertical"
-                        className="min-h-0 flex-1"
+                        className="min-h-0 min-w-0 flex-1 overflow-hidden"
                         onLayoutChanged={(layout) => {
                           const requestEditorSize = layout.requestEditorPanel
                           if (typeof requestEditorSize === 'number') {
@@ -222,7 +222,12 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
                           }
                         }}
                       >
-                        <ResizablePanel id="requestEditorPanel" defaultSize={props.splitRatio * 100} minSize={28}>
+                        <ResizablePanel
+                          id="requestEditorPanel"
+                          className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+                          defaultSize={props.splitRatio * 100}
+                          minSize={28}
+                        >
                           <RequestEditorTabs
                             activeTab={props.activeEditorTab}
                             draft={props.activeDraft}
@@ -234,13 +239,18 @@ export function RequestWorkspace(props: RequestWorkspaceProps) {
 
                         <ResizableHandle withHandle className="mx-3 my-0.5 bg-transparent transition hover:bg-accent/50" />
 
-                        <ResizablePanel id="requestResponsePanel" defaultSize={(1 - props.splitRatio) * 100} minSize={22}>
+                        <ResizablePanel
+                          id="requestResponsePanel"
+                          className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+                          defaultSize={(1 - props.splitRatio) * 100}
+                          minSize={22}
+                        >
                           <ResponsePane response={props.activeResponse} />
                         </ResizablePanel>
                       </ResizablePanelGroup>
                     )
                   : (
-                      <div className="min-h-0 flex-1">
+                      <div className="min-h-0 flex-1 overflow-hidden">
                         <RequestEditorTabs
                           activeTab={props.activeEditorTab}
                           draft={props.activeDraft}
@@ -1218,8 +1228,8 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden border-b border-border/70 px-3 py-3">
-      <Tabs value={props.activeTab} onValueChange={value => props.onActiveTabChange(value as EditorPanelTab)} className="h-full">
-        <div className="mb-3 flex items-center justify-between gap-3">
+      <Tabs value={props.activeTab} onValueChange={value => props.onActiveTabChange(value as EditorPanelTab)} className="h-full min-h-0">
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
           <TabsList variant="line">
             {editorTabs.map(tab => (
               <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 py-0.5 text-[13px]">
@@ -1291,11 +1301,55 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
           />
         </TabsContent>
 
-        <TabsContent value="body" className="min-h-0">
+        <TabsContent value="body" className="min-h-0 overflow-auto">
           <BodyEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
+        </TabsContent>
+
+        <TabsContent value="preRequestScript" className="min-h-0">
+          <PreRequestScriptEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
+        </TabsContent>
+
+        <TabsContent value="postRequestScript" className="min-h-0">
+          <PostRequestScriptEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+function PreRequestScriptEditor(props: {
+  draft: RequestEditorDraft
+  onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
+}) {
+  return (
+    <MonacoScriptEditor
+      className="h-full min-h-[220px]"
+      modelUri="file:///pre-request-script.js"
+      language="javascript"
+      value={props.draft.preRequestScript}
+      onChange={(value) => {
+        props.onChangeDraft(draft => ({ ...draft, preRequestScript: value }))
+      }}
+      placeholder="// 请求发送前执行，可通过 fuck.config 修改请求配置，通过 fuck.env 操作环境变量"
+    />
+  )
+}
+
+function PostRequestScriptEditor(props: {
+  draft: RequestEditorDraft
+  onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
+}) {
+  return (
+    <MonacoScriptEditor
+      className="h-full min-h-[220px]"
+      modelUri="file:///post-request-script.js"
+      language="javascript"
+      value={props.draft.postRequestScript}
+      onChange={(value) => {
+        props.onChangeDraft(draft => ({ ...draft, postRequestScript: value }))
+      }}
+      placeholder="// 请求响应后执行，可通过 fuck.response 访问响应内容"
+    />
   )
 }
 
@@ -1314,7 +1368,7 @@ function ResponsePane(props: { response: ResponseState | null }) {
   }
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2 text-[11px] text-muted-foreground">
         <ResponseMetaBadge label="状态" value={props.response.status !== null ? String(props.response.status) : '等待中'} />
         <ResponseMetaBadge label="耗时" value={`${props.response.durationMs} 毫秒`} />
@@ -1323,7 +1377,7 @@ function ResponsePane(props: { response: ResponseState | null }) {
         {props.response.responseType && <ResponseMetaBadge label="视图" value={props.response.responseType === 'json' ? 'JSON' : '文本'} />}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden px-3 py-3">
+      <div className="flex min-h-0 flex-1 overflow-hidden px-3 py-3">
         {props.response.isLoading
           ? (
               <div className="grid h-full place-items-center">
@@ -1410,7 +1464,7 @@ function KeyValueTable(props: KeyValueTableProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 space-y-1.5 overflow-auto pr-1">
+      <div className="min-h-0 flex-1 space-y-1.5 overflow-auto pr-1">
         {props.rows.length > 0
           ? props.rows.map(row => (
               <div
@@ -1514,7 +1568,7 @@ function BodyEditor(props: {
 
       {body.mode === 'raw' && (
         <Textarea
-          className="min-h-[220px] flex-1 font-mono text-xs"
+          className="min-h-[220px] flex-1 overflow-auto font-mono text-xs"
           value={body.raw}
           onChange={event => props.onChangeDraft(draft => ({
             ...draft,
@@ -1528,7 +1582,7 @@ function BodyEditor(props: {
       )}
 
       {body.mode === 'json' && (
-        <div className="relative flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <Button
             type="button"
             size="icon-sm"
@@ -1544,7 +1598,7 @@ function BodyEditor(props: {
           <React.Suspense
             fallback={(
               <Textarea
-                className="min-h-[220px] flex-1 font-mono text-xs"
+                className="min-h-[220px] flex-1 overflow-auto font-mono text-xs"
                 value={body.json}
                 onChange={event => props.onChangeDraft(draft => ({
                   ...draft,
@@ -1557,7 +1611,7 @@ function BodyEditor(props: {
             )}
           >
             <MonacoJsonEditor
-              className="min-h-[220px]"
+              className="h-full min-h-[220px]"
               value={body.json}
               environmentVariables={envVariables}
               environmentName={activeEnv?.name}

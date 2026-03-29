@@ -248,6 +248,10 @@ pub struct ApiDefinition {
     pub documentation: ApiDocumentation,
     #[serde(default)]
     pub mock: ApiMock,
+    #[serde(default)]
+    pub pre_request_script: String,
+    #[serde(default)]
+    pub post_request_script: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -392,6 +396,10 @@ pub struct CreateApiInput {
     pub documentation: ApiDocumentation,
     #[serde(default)]
     pub mock: ApiMock,
+    #[serde(default)]
+    pub pre_request_script: String,
+    #[serde(default)]
+    pub post_request_script: String,
     pub slug: Option<String>,
 }
 
@@ -412,6 +420,10 @@ pub struct UpdateApiInput {
     pub documentation: ApiDocumentation,
     #[serde(default)]
     pub mock: ApiMock,
+    #[serde(default)]
+    pub pre_request_script: String,
+    #[serde(default)]
+    pub post_request_script: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -847,6 +859,8 @@ pub fn create_api(root: impl AsRef<Path>, input: CreateApiInput) -> AppResult<Ap
         request: normalize_request(input.request),
         documentation: input.documentation,
         mock: input.mock,
+        pre_request_script: input.pre_request_script,
+        post_request_script: input.post_request_script,
     };
 
     write_json_file(&parent_dir.join(file_name), &definition)?;
@@ -871,6 +885,8 @@ pub fn update_api(root: impl AsRef<Path>, input: UpdateApiInput) -> AppResult<Ap
     definition.request = normalize_request(input.request);
     definition.documentation = input.documentation;
     definition.mock = input.mock;
+    definition.pre_request_script = input.pre_request_script;
+    definition.post_request_script = input.post_request_script;
     definition.updated_at = now_iso_string();
     write_json_file(&entry.path, &definition)?;
 
@@ -1884,6 +1900,8 @@ mod tests {
                 request: RequestDefinition::default(),
                 documentation: ApiDocumentation::default(),
                 mock: ApiMock::default(),
+                pre_request_script: String::new(),
+                post_request_script: String::new(),
                 slug: None,
             },
         )
@@ -1932,6 +1950,8 @@ mod tests {
                 request: RequestDefinition::default(),
                 documentation: ApiDocumentation::default(),
                 mock: ApiMock::default(),
+                pre_request_script: String::new(),
+                post_request_script: String::new(),
                 slug: None,
             },
         )
@@ -1952,6 +1972,8 @@ mod tests {
                 request: RequestDefinition::default(),
                 documentation: ApiDocumentation::default(),
                 mock: ApiMock::default(),
+                pre_request_script: String::new(),
+                post_request_script: String::new(),
             },
         )
         .expect("update api");
@@ -2004,6 +2026,8 @@ mod tests {
                 request: RequestDefinition::default(),
                 documentation: ApiDocumentation::default(),
                 mock: ApiMock::default(),
+                pre_request_script: String::new(),
+                post_request_script: String::new(),
                 slug: None,
             },
         )
@@ -2071,6 +2095,8 @@ mod tests {
             request: RequestDefinition::default(),
             documentation: ApiDocumentation::default(),
             mock: ApiMock::default(),
+            pre_request_script: String::new(),
+            post_request_script: String::new(),
         };
         write_json_file(&api_path, &definition).expect("write duplicate api");
 

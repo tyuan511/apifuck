@@ -6,7 +6,7 @@ import type {
   WorkspaceSnapshot,
 } from '@/lib/workspace'
 
-export type EditorPanelTab = 'query' | 'headers' | 'body'
+export type EditorPanelTab = 'query' | 'headers' | 'body' | 'preRequestScript' | 'postRequestScript'
 
 export type TreeSelection
   = | { type: 'collection', id: string, parentCollectionId: string | null }
@@ -57,6 +57,8 @@ export const editorTabs: Array<{ value: EditorPanelTab, label: string }> = [
   { value: 'query', label: '查询参数' },
   { value: 'headers', label: '请求头' },
   { value: 'body', label: '请求体' },
+  { value: 'preRequestScript', label: '请求脚本' },
+  { value: 'postRequestScript', label: '响应脚本' },
 ]
 
 export const projectMonogramSeparatorPattern = /[-_\s]+/g

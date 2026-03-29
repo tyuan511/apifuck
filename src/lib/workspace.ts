@@ -123,6 +123,8 @@ export interface ApiDefinition {
   request: RequestDefinition
   documentation: ApiDocumentation
   mock: ApiMock
+  preRequestScript: string
+  postRequestScript: string
 }
 
 export interface ApiSummary {
@@ -209,6 +211,8 @@ export interface CreateApiInput {
   request: RequestDefinition
   documentation: ApiDocumentation
   mock: ApiMock
+  preRequestScript: string
+  postRequestScript: string
   slug?: string
 }
 
@@ -222,6 +226,8 @@ export interface UpdateApiInput {
   request: RequestDefinition
   documentation: ApiDocumentation
   mock: ApiMock
+  preRequestScript: string
+  postRequestScript: string
 }
 
 export interface MoveNodeInput {
