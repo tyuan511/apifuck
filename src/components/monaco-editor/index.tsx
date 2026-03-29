@@ -9,8 +9,122 @@ const lightThemeName = 'github-light-default'
 const darkThemeName = 'github-dark-default'
 const requestBodyModelUri = 'file:///request-body.json'
 
+const FUCK_GLOBAL_DTS_URI = 'file:///fuck-global.d.ts'
+const FUCK_GLOBAL_DTS_CONTENT = `export {}
+
+declare global {
+  interface FuckKeyValueItem {
+    id: string
+    key: string
+    value: string
+    enabled: boolean
+    description: string
+  }
+
+  interface FuckRequestConfig {
+    /** HTTP 方法，如 'GET' | 'POST' | 'PUT' | 'DELETE' 等 */
+    method: string
+    /** 请求 URL */
+    url: string
+    /** 请求头列表 */
+    headers: FuckKeyValueItem[]
+    /** 查询参数列表 */
+    query: FuckKeyValueItem[]
+    /** 请求体 */
+    body: {
+      /** 请求体模式：'raw' | 'json' | 'form-data' | 'urlencoded' | 'none' */
+      mode: string
+      /** 纯文本请求体 */
+      raw: string
+      /** JSON 请求体 */
+      json: string
+      /** Form-data 参数列表 */
+      formData: FuckKeyValueItem[]
+      /** URL-encoded 参数列表 */
+      urlEncoded: FuckKeyValueItem[]
+    }
+  }
+
+  interface FuckResponseData {
+    /** HTTP 状态码，如 200、404、500 */
+    status: number
+    /** 响应头键值对 */
+    headers: Record<string, string>
+    /** 响应体字符串 */
+    body: string
+    /** 请求耗时（毫秒） */
+    time: number
+    /**
+     * 解析响应体 JSON 并通过 JSONPath 取值
+     *
+     * 支持语法：\`$\`（根节点）、\`.key\`（属性）、\`[n]\`（数组下标）
+     *
+     * @param path JSONPath 表达式，如 \`'$.data.token'\`、\`'$.list[0].id'\`
+     * @returns 路径对应的值，路径不存在时返回 undefined
+     *
+     * @example
+     * // 取顶层字段
+     * const token = fuck.response.json('$.token')
+     *
+     * // 取嵌套字段
+     * const name = fuck.response.json('$.data.user.name')
+     *
+     * // 取数组元素
+     * const first = fuck.response.json('$.list[0]')
+     *
+     * // 不传参数时返回完整解析对象
+     * const all = fuck.response.json()
+     */
+    json(path?: string): unknown
+  }
+
+  interface FuckEnv {
+    /**
+     * 读取环境变量
+     * @param key 环境变量名称
+     * @returns 变量值，不存在则返回 undefined
+     */
+    get(key: string): string | undefined
+    /**
+     * 设置环境变量（修改当前环境的变量值）
+     * @param key 环境变量名称
+     * @param value 变量值
+     */
+    set(key: string, value: string): void
+  }
+
+  interface FuckVars {
+    /**
+     * 读取临时变量（跨请求持久化在内存中）
+     * @param key 变量名称
+     * @returns 变量值，不存在则返回 undefined
+     */
+    get(key: string): unknown
+    /**
+     * 设置临时变量（跨请求持久化在内存中，可存储任意类型）
+     * @param key 变量名称
+     * @param value 变量值（任意可序列化类型）
+     */
+    set(key: string, value: unknown): void
+  }
+
+  interface Fuck {
+    /** 请求配置对象（预请求脚本中可读写，后请求脚本中只读） */
+    config: FuckRequestConfig
+    /** 响应数据，仅后请求脚本中可用，预请求脚本中为 null */
+    response: FuckResponseData | null
+    /** 环境变量操作对象 */
+    env: FuckEnv
+    /** 跨请求临时变量存储 */
+    vars: FuckVars
+  }
+
+  /** apifuck 脚本全局对象，提供请求配置、响应数据和变量操作能力 */
+  const fuck: Fuck
+}`
+
 type Monaco = typeof monacoNS
-export type MonacoLanguage = 'html' | 'json' | 'plaintext'
+export type MonacoLanguage = 'html' | 'json' | 'plaintext' | 'javascript' | 'typescript'
 
 export interface EnvironmentVariable {
   key: string
@@ -195,7 +309,7 @@ async function ensureMonacoConfigured() {
     monacoSetupPromise = init({
       defaultTheme: lightThemeName,
       themes: [lightThemeName, darkThemeName],
-      langs: ['html', 'json'],
+      langs: ['html', 'json', 'javascript', 'typescript'],
       lsp: {
         formatting: {
           tabSize: 2,
@@ -209,8 +323,26 @@ async function ensureMonacoConfigured() {
             validate: true,
           },
         },
+        typescript: {
+          compilerOptions: {
+            checkJs: true,
+            strict: false,
+            noUnusedLocals: false,
+            noUnusedParameters: false,
+          },
+          diagnosticsOptions: {
+            validate: true,
+          },
+        },
       },
     }).then((instance) => {
+      // Register the fuck global type declarations so the TypeScript language
+      // service can provide completions, hover docs, parameter hints and type
+      // checking for the fuck object in pre/post-request scripts.
+      const dtsUri = instance.Uri.parse(FUCK_GLOBAL_DTS_URI)
+      if (!instance.editor.getModel(dtsUri)) {
+        instance.editor.createModel(FUCK_GLOBAL_DTS_CONTENT, 'typescript', dtsUri)
+      }
       monacoInstance = instance
       return instance
     })
@@ -241,7 +373,6 @@ function MonacoCodeEditor(props: {
   const lastEditorValueRef = React.useRef(props.value)
   const onChangeRef = React.useRef(props.onChange)
   const { resolvedTheme } = useTheme()
-  const [isFocused, setIsFocused] = React.useState(false)
   const [isReady, setIsReady] = React.useState(Boolean(monacoInstance))
 
   React.useEffect(() => {
@@ -314,6 +445,7 @@ function MonacoCodeEditor(props: {
           lineNumbersMinChars: 2,
           scrollBeyondLastLine: false,
           wordWrap: props.wordWrap ?? 'off',
+          placeholder: props.placeholder,
           minimap: {
             enabled: false,
           },
@@ -335,18 +467,44 @@ function MonacoCodeEditor(props: {
           lastEditorValueRef.current = nextValue
           onChangeRef.current?.(nextValue)
         })
-        const focusDisposable = editor.onDidFocusEditorText(() => {
-          setIsFocused(true)
+
+        let layoutFrameId = 0
+        let trailingLayoutFrameId = 0
+        const scheduleEditorLayout = () => {
+          window.cancelAnimationFrame(layoutFrameId)
+          window.cancelAnimationFrame(trailingLayoutFrameId)
+
+          layoutFrameId = window.requestAnimationFrame(() => {
+            layoutFrameId = 0
+            editor.layout()
+
+            // A trailing layout keeps Monaco in sync after flex and resizable
+            // containers finish settling their final dimensions.
+            trailingLayoutFrameId = window.requestAnimationFrame(() => {
+              trailingLayoutFrameId = 0
+              editor.layout()
+            })
+          })
+        }
+
+        scheduleEditorLayout()
+
+        // Use ResizeObserver to reliably inform Monaco of container size changes,
+        // especially important in flex/ResizablePanel layouts where automaticLayout
+        // may not detect height changes correctly.
+        const resizeObserver = new ResizeObserver(() => {
+          scheduleEditorLayout()
         })
-        const blurDisposable = editor.onDidBlurEditorText(() => {
-          setIsFocused(false)
-        })
+        if (containerRef.current) {
+          resizeObserver.observe(containerRef.current)
+        }
 
         cleanup = () => {
-          blurDisposable.dispose()
-          focusDisposable.dispose()
           valueDisposable.dispose()
           envProviderCleanup?.()
+          resizeObserver.disconnect()
+          window.cancelAnimationFrame(layoutFrameId)
+          window.cancelAnimationFrame(trailingLayoutFrameId)
           editor.dispose()
           model?.dispose()
           editorRef.current = null
@@ -412,19 +570,11 @@ function MonacoCodeEditor(props: {
   return (
     <div
       className={cn(
-        'relative min-h-[220px] flex-1 overflow-visible',
+        'relative flex min-h-[220px] min-w-0 flex-1 overflow-hidden',
         props.className,
       )}
     >
-      {!props.value && !isFocused && props.placeholder && (
-        <div className="pointer-events-none absolute top-3 left-12 z-10 font-mono text-xs leading-5 text-muted-foreground">
-          <pre className="whitespace-pre-wrap">{props.placeholder}</pre>
-        </div>
-      )}
-
-      <div className="h-full min-h-[220px] overflow-hidden rounded-xl border border-input">
-        <div ref={containerRef} className="h-full min-h-[220px] w-full" />
-      </div>
+      <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden rounded-xl border border-input" />
     </div>
   )
 }
@@ -447,6 +597,26 @@ function MonacoJsonEditor(props: {
       value={props.value}
       environmentVariables={props.environmentVariables}
       environmentName={props.environmentName}
+    />
+  )
+}
+
+export function MonacoScriptEditor(props: {
+  className?: string
+  language?: 'javascript' | 'typescript'
+  modelUri?: string
+  onChange: (value: string) => void
+  placeholder?: string
+  value: string
+}) {
+  return (
+    <MonacoCodeEditor
+      className={props.className}
+      language={props.language ?? 'javascript'}
+      modelUri={props.modelUri ?? 'file:///script.js'}
+      onChange={props.onChange}
+      placeholder={props.placeholder}
+      value={props.value}
     />
   )
 }

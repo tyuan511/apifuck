@@ -9,6 +9,7 @@ import type {
   TreeSelection,
   WorkbenchBootPayload,
 } from '../types'
+import type { RequestConfig, ResponseData } from '@/lib/script-runner'
 import type {
   ApiDefinition,
   ApiSummary,
@@ -22,6 +23,11 @@ import { startTransition } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import { updateTabState } from '@/lib/app-config'
+import {
+  createPostRequestContext,
+  createPreRequestContext,
+  runScript,
+} from '@/lib/script-runner'
 import {
   createApi,
   createCollection,
@@ -51,7 +57,6 @@ import {
   findApiLocationInProject,
   findCollectionName,
   getActiveProject,
-  mapSendResponseToState,
 } from '../utils'
 
 function generateId(): string {
@@ -627,6 +632,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         parentCollectionId ? findCollectionName(activeProject.children, parentCollectionId) : '',
       ),
       mock: createDefaultMock(),
+      preRequestScript: '',
+      postRequestScript: '',
     }
 
     await runTask(set, async () => {
@@ -703,6 +710,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         request: requestSource.request,
         documentation: requestSource.documentation,
         mock: requestSource.mock,
+        preRequestScript: requestSource.preRequestScript,
+        postRequestScript: requestSource.postRequestScript,
       })
       get().syncRequestState(saved)
       await get().refreshWorkspaceInternal()
@@ -805,6 +814,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         request: draft.request,
         documentation: draft.documentation,
         mock: draft.mock,
+        preRequestScript: draft.preRequestScript,
+        postRequestScript: draft.postRequestScript,
       })
       get().setRequestLoaded(saved)
       await get().refreshWorkspaceInternal()
@@ -833,20 +844,56 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       },
     }))
 
+    // Script-level vars storage (persists across pre and post scripts)
+    const scriptVars = new Map<string, unknown>()
+
+    // Env mutations from pre-script
+    const envMutations = new Map<string, string>()
+
     try {
+      // Build mutable config from draft
+      const mutableConfig: RequestConfig = {
+        method: draft.method,
+        url: draft.url,
+        headers: draft.request.headers.map(h => ({ ...h })),
+        query: draft.request.query.map(q => ({ ...q })),
+        body: {
+          mode: draft.request.body.mode,
+          raw: draft.request.body.raw,
+          json: draft.request.body.json,
+          formData: draft.request.body.formData.map(item => ({ ...item })),
+          urlEncoded: draft.request.body.urlEncoded.map(item => ({ ...item })),
+        },
+      }
+
+      // Run pre-request script
+      if (draft.preRequestScript.trim()) {
+        const ctx = createPreRequestContext(
+          mutableConfig,
+          key => envMutations.get(key) ?? activeEnv?.variables.find(v => v.key === key && v.enabled)?.value,
+          (key, value) => { envMutations.set(key, value) },
+          key => scriptVars.get(key),
+          (key, value) => { scriptVars.set(key, value) },
+        )
+        const result = runScript(draft.preRequestScript, ctx)
+        if (result.error) {
+          throw new Error(`Pre-request script error: ${result.error}`)
+        }
+      }
+
       const variables = activeEnv?.variables ?? []
 
-      // Resolve URL with baseURL joining
-      const resolvedUrl = resolveUrl(draft.url, activeEnv?.baseUrl)
+      // Resolve URL with baseURL joining (use config modified by pre-script)
+      const resolvedUrl = resolveUrl(mutableConfig.url, activeEnv?.baseUrl)
 
       // Resolve variables in headers
-      const resolvedHeaders = draft.request.headers.map(h => ({
+      const resolvedHeaders = mutableConfig.headers.map(h => ({
         ...h,
         value: resolveEnvironmentVariables(h.value, variables),
       }))
 
       // Resolve variables in query params
-      const resolvedQuery = draft.request.query.map(q => ({
+      const resolvedQuery = mutableConfig.query.map(q => ({
         ...q,
         key: resolveEnvironmentVariables(q.key, variables),
         value: resolveEnvironmentVariables(q.value, variables),
@@ -857,15 +904,15 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
       // Resolve variables in body
       const resolvedBody = {
-        ...draft.request.body,
-        raw: resolveEnvironmentVariables(draft.request.body.raw, variables),
-        json: resolveEnvironmentVariables(draft.request.body.json, variables),
-        formData: draft.request.body.formData.map(item => ({
+        ...mutableConfig.body,
+        raw: resolveEnvironmentVariables(mutableConfig.body.raw, variables),
+        json: resolveEnvironmentVariables(mutableConfig.body.json, variables),
+        formData: mutableConfig.body.formData.map(item => ({
           ...item,
           key: resolveEnvironmentVariables(item.key, variables),
           value: resolveEnvironmentVariables(item.value, variables),
         })),
-        urlEncoded: draft.request.body.urlEncoded.map(item => ({
+        urlEncoded: mutableConfig.body.urlEncoded.map(item => ({
           ...item,
           key: resolveEnvironmentVariables(item.key, variables),
           value: resolveEnvironmentVariables(item.value, variables),
@@ -873,19 +920,91 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       }
 
       const response = await sendRequest({
-        method: draft.method,
+        method: mutableConfig.method,
         url: finalUrl,
         request: {
-          ...draft.request,
           headers: resolvedHeaders,
           query: resolvedQuery,
-          body: resolvedBody,
+          pathParams: draft.request.pathParams,
+          cookies: draft.request.cookies,
+          auth: draft.request.auth,
+          body: {
+            ...resolvedBody,
+            binary: draft.request.body.binary,
+            mode: resolvedBody.mode as 'none' | 'raw' | 'json' | 'form-data' | 'x-www-form-urlencoded' | 'binary',
+          },
         },
       })
+
+      // Build response data for post-script
+      const responseData: ResponseData = {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.map((h: { name: string, value: string }) => [h.name, h.value])),
+        body: response.body,
+        time: response.durationMs,
+      }
+
+      // Run post-request script
+      let finalResponse = responseData
+      if (draft.postRequestScript.trim()) {
+        const postCtx = createPostRequestContext(
+          mutableConfig,
+          responseData,
+          key => envMutations.get(key) ?? activeEnv?.variables.find(v => v.key === key && v.enabled)?.value,
+          (key, value) => { envMutations.set(key, value) },
+          key => scriptVars.get(key),
+          (key, value) => { scriptVars.set(key, value) },
+        )
+        const postResult = runScript(draft.postRequestScript, postCtx)
+        if (postResult.error) {
+          throw new Error(`Post-request script error: ${postResult.error}`)
+        }
+        if (postResult.response) {
+          finalResponse = postResult.response
+        }
+      }
+
+      // Persist env mutations produced by fuck.env.set() back to the active environment.
+      if (envMutations.size > 0 && activeEnv && activeProjectId) {
+        const updatedVariables = activeEnv.variables.map(v =>
+          envMutations.has(v.key) ? { ...v, value: String(envMutations.get(v.key)) } : v,
+        )
+        for (const [key, value] of envMutations) {
+          if (!updatedVariables.some(v => v.key === key)) {
+            updatedVariables.push({ id: generateId(), key, value: String(value), enabled: true, description: '' })
+          }
+        }
+        await updateEnvironment({
+          id: activeEnv.id,
+          projectId: activeProjectId,
+          name: activeEnv.name,
+          baseUrl: activeEnv.baseUrl,
+          variables: updatedVariables,
+        })
+        set(state => ({
+          environments: {
+            ...state.environments,
+            [activeProjectId]: state.environments[activeProjectId]?.map(e =>
+              e.id === activeEnv.id ? { ...e, variables: updatedVariables } : e,
+            ) ?? [],
+          },
+        }))
+      }
+
       set(state => ({
         requestResponses: {
           ...state.requestResponses,
-          [activeRequestId]: mapSendResponseToState(response),
+          [activeRequestId]: {
+            status: finalResponse.status,
+            headers: Object.entries(finalResponse.headers).map(([name, value]) => ({ name, value, description: '' })),
+            durationMs: finalResponse.time,
+            sizeBytes: new Blob([finalResponse.body]).size,
+            contentType: finalResponse.headers['content-type'] ?? '',
+            responseType: finalResponse.body ? 'json' as const : null,
+            body: finalResponse.body,
+            isLoading: false,
+            error: null,
+          },
         },
       }))
     }
@@ -1397,7 +1516,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     if (!baseUrl) {
       return url
     }
-    // eslint-disable-next-line e18e/prefer-static-regex
+
     if (/^https?:\/\//.test(url)) {
       return url
     }
