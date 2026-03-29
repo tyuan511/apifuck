@@ -32,7 +32,7 @@ function getLocalStorage(key: string) {
 
 function setLocalStorage(key: string, value: string) {
   localStorage.setItem(key, value)
-  storageCache.set(key, value)  // keep cache in sync
+  storageCache.set(key, value) // keep cache in sync
 }
 ```
 
@@ -59,7 +59,8 @@ If storage can change externally (another tab, server-set cookies), invalidate c
 
 ```typescript
 window.addEventListener('storage', (e) => {
-  if (e.key) storageCache.delete(e.key)
+  if (e.key)
+    storageCache.delete(e.key)
 })
 
 document.addEventListener('visibilitychange', () => {

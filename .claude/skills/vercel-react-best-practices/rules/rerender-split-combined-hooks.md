@@ -13,9 +13,9 @@ When a hook contains multiple independent tasks with different dependencies, spl
 
 ```tsx
 const sortedProducts = useMemo(() => {
-  const filtered = products.filter((p) => p.category === category)
+  const filtered = products.filter(p => p.category === category)
   const sorted = filtered.toSorted((a, b) =>
-    sortOrder === "asc" ? a.price - b.price : b.price - a.price
+    sortOrder === 'asc' ? a.price - b.price : b.price - a.price
   )
   return sorted
 }, [products, category, sortOrder])
@@ -25,14 +25,14 @@ const sortedProducts = useMemo(() => {
 
 ```tsx
 const filteredProducts = useMemo(
-  () => products.filter((p) => p.category === category),
+  () => products.filter(p => p.category === category),
   [products, category]
 )
 
 const sortedProducts = useMemo(
   () =>
     filteredProducts.toSorted((a, b) =>
-      sortOrder === "asc" ? a.price - b.price : b.price - a.price
+      sortOrder === 'asc' ? a.price - b.price : b.price - a.price
     ),
   [filteredProducts, sortOrder]
 )

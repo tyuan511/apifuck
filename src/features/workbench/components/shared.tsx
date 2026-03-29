@@ -31,7 +31,7 @@ export function ResponseMetaBadge(props: { label: string, value: string }) {
 export function LabelBlock(props: { children: ReactNode, className?: string, label: string }) {
   return (
     <div className={cn('space-y-1.5', props.className)}>
-      <label className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+      <label className="text-xs font-medium text-muted-foreground">
         {props.label}
       </label>
       {props.children}

@@ -25,9 +25,9 @@ tauri::Builder::default()
 
 **Frontend:**
 ```typescript
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core'
 
-const result = await invoke<string>('greet', { name: 'World' });
+const result = await invoke<string>('greet', { name: 'World' })
 ```
 
 ### Command with Multiple Arguments
@@ -49,10 +49,10 @@ fn calculate(a: i32, b: i32, operation: String) -> i32 {
 **Frontend:**
 ```typescript
 const result = await invoke<number>('calculate', {
-    a: 10,
-    b: 5,
-    operation: 'add'
-});
+  a: 10,
+  b: 5,
+  operation: 'add'
+})
 ```
 
 ### Async Command
@@ -75,9 +75,10 @@ async fn fetch_data(url: String) -> Result<String, String> {
 **Frontend:**
 ```typescript
 try {
-    const data = await invoke<string>('fetch_data', { url: 'https://api.example.com' });
-} catch (error) {
-    console.error('Failed:', error);
+  const data = await invoke<string>('fetch_data', { url: 'https://api.example.com' })
+}
+catch (error) {
+  console.error('Failed:', error)
 }
 ```
 
@@ -116,10 +117,11 @@ fn read_config(path: String) -> Result<Config, AppError> {
 **Frontend:**
 ```typescript
 try {
-    const config = await invoke<Config>('read_config', { path: '/config.json' });
-} catch (error) {
-    // error is the serialized error string
-    console.error('Config error:', error);
+  const config = await invoke<Config>('read_config', { path: '/config.json' })
+}
+catch (error) {
+  // error is the serialized error string
+  console.error('Config error:', error)
 }
 ```
 
@@ -207,11 +209,11 @@ fn upload_file(request: tauri::ipc::Request) -> Result<(), String> {
 **Frontend:**
 ```typescript
 // Reading binary
-const data = await invoke<ArrayBuffer>('read_binary_file', { path: '/file.bin' });
+const data = await invoke<ArrayBuffer>('read_binary_file', { path: '/file.bin' })
 
 // Uploading binary
-const fileData = new Uint8Array([1, 2, 3, 4]);
-await invoke('upload_file', fileData);
+const fileData = new Uint8Array([1, 2, 3, 4])
+await invoke('upload_file', fileData)
 ```
 
 ---
@@ -244,29 +246,29 @@ fn notify_window(app: tauri::AppHandle, window_label: String, message: String) {
 
 **Frontend:**
 ```typescript
-import { listen, once } from '@tauri-apps/api/event';
+import { listen, once } from '@tauri-apps/api/event'
 
 // Listen continuously
 const unlisten = await listen<number>('progress', (event) => {
-    console.log(`Progress: ${event.payload}%`);
-});
+  console.log(`Progress: ${event.payload}%`)
+})
 
 // Listen once
 await once<string>('complete', (event) => {
-    console.log(event.payload);
-});
+  console.log(event.payload)
+})
 
 // Clean up when done
-unlisten();
+unlisten()
 ```
 
 ### Emit from Frontend to Rust
 
 **Frontend:**
 ```typescript
-import { emit } from '@tauri-apps/api/event';
+import { emit } from '@tauri-apps/api/event'
 
-await emit('user-action', { action: 'click', target: 'button' });
+await emit('user-action', { action: 'click', target: 'button' })
 ```
 
 **Rust (in setup or command):**
@@ -331,24 +333,24 @@ async fn process_files(
 
 **Frontend:**
 ```typescript
-import { invoke, Channel } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core'
 
 interface ProgressUpdate {
-    current: number;
-    total: number;
-    message: string;
+  current: number
+  total: number
+  message: string
 }
 
-const channel = new Channel<ProgressUpdate>();
+const channel = new Channel<ProgressUpdate>()
 channel.onmessage = (update) => {
-    const percent = (update.current / update.total) * 100;
-    console.log(`${percent}% - ${update.message}`);
-};
+  const percent = (update.current / update.total) * 100
+  console.log(`${percent}% - ${update.message}`)
+}
 
 await invoke('process_files', {
-    files: ['file1.txt', 'file2.txt'],
-    onProgress: channel
-});
+  files: ['file1.txt', 'file2.txt'],
+  onProgress: channel
+})
 ```
 
 ### Tagged Union Events (Discriminated)
@@ -395,37 +397,37 @@ async fn download_file(
 
 **Frontend:**
 ```typescript
-import { invoke, Channel } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core'
 
-type DownloadEvent =
-    | { event: 'Started'; data: { url: string; size: number } }
-    | { event: 'Progress'; data: { downloaded: number; total: number } }
-    | { event: 'Complete'; data: { path: string } }
-    | { event: 'Error'; data: { message: string } };
+type DownloadEvent
+  = | { event: 'Started', data: { url: string, size: number } }
+    | { event: 'Progress', data: { downloaded: number, total: number } }
+    | { event: 'Complete', data: { path: string } }
+    | { event: 'Error', data: { message: string } }
 
-const channel = new Channel<DownloadEvent>();
+const channel = new Channel<DownloadEvent>()
 channel.onmessage = (msg) => {
-    switch (msg.event) {
-        case 'Started':
-            console.log(`Starting download: ${msg.data.url} (${msg.data.size} bytes)`);
-            break;
-        case 'Progress':
-            const percent = (msg.data.downloaded / msg.data.total) * 100;
-            console.log(`Download: ${percent.toFixed(1)}%`);
-            break;
-        case 'Complete':
-            console.log(`Downloaded to: ${msg.data.path}`);
-            break;
-        case 'Error':
-            console.error(`Download failed: ${msg.data.message}`);
-            break;
-    }
-};
+  switch (msg.event) {
+    case 'Started':
+      console.log(`Starting download: ${msg.data.url} (${msg.data.size} bytes)`)
+      break
+    case 'Progress':
+      const percent = (msg.data.downloaded / msg.data.total) * 100
+      console.log(`Download: ${percent.toFixed(1)}%`)
+      break
+    case 'Complete':
+      console.log(`Downloaded to: ${msg.data.path}`)
+      break
+    case 'Error':
+      console.error(`Download failed: ${msg.data.message}`)
+      break
+  }
+}
 
 const path = await invoke<string>('download_file', {
-    url: 'https://example.com/file.zip',
-    onEvent: channel
-});
+  url: 'https://example.com/file.zip',
+  onEvent: channel
+})
 ```
 
 ---

@@ -44,12 +44,12 @@ const emails = responses.flatMap(r =>
 // Parse and filter valid numbers
 // Before
 const numbers = strings
-  .map(s => parseInt(s, 10))
+  .map(s => Number.parseInt(s, 10))
   .filter(n => !isNaN(n))
 
 // After
-const numbers = strings.flatMap(s => {
-  const n = parseInt(s, 10)
+const numbers = strings.flatMap((s) => {
+  const n = Number.parseInt(s, 10)
   return isNaN(n) ? [] : [n]
 })
 ```

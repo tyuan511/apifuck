@@ -14,6 +14,8 @@ import type {
   ApiSummary,
   CollectionTreeNode,
   CreateApiInput,
+  Environment,
+  KeyValue,
   WorkspaceSnapshot,
 } from '@/lib/workspace'
 import { startTransition } from 'react'
@@ -26,14 +28,18 @@ import {
   createDefaultDocumentation,
   createDefaultMock,
   createDefaultRequest,
+  createEnvironment,
   createProject,
+  deleteEnvironment,
   deleteNode,
   moveNode,
   openWorkspace,
   readApi,
   sendRequest,
+  setActiveEnvironment,
   updateApi,
   updateCollection,
+  updateEnvironment,
 } from '@/lib/workspace'
 import {
   areApiDefinitionsEqual,
@@ -47,6 +53,10 @@ import {
   getActiveProject,
   mapSendResponseToState,
 } from '../utils'
+
+function generateId(): string {
+  return crypto.randomUUID()
+}
 
 interface WorkbenchState {
   workspacePath: string
@@ -86,6 +96,13 @@ interface WorkbenchState {
   pendingCloseRequestId: string | null
   pendingRequestDeletion: PendingRequestDeletion | null
   pendingCollectionDeletion: PendingCollectionDeletion | null
+  environments: Record<string, Environment[]>
+  activeEnvironmentId: Record<string, string | null>
+  environmentDialogOpen: boolean
+  editingEnvironmentId: string | null
+  environmentNameDraft: string
+  environmentBaseUrlDraft: string
+  environmentVariablesDraft: KeyValue[]
 }
 
 interface WorkbenchActions {
@@ -149,6 +166,19 @@ interface WorkbenchActions {
     collectionIds: string[],
     nextWorkspace: WorkspaceSnapshot | null,
   ) => void
+  openCreateEnvironmentDialog: () => void
+  openEditEnvironmentDialog: (environment: Environment) => void
+  closeEnvironmentDialog: () => void
+  setEnvironmentNameDraft: (value: string) => void
+  setEnvironmentBaseUrlDraft: (value: string) => void
+  setEnvironmentVariablesDraft: (variables: KeyValue[]) => void
+  addEnvironmentVariable: () => void
+  handleCreateEnvironment: () => Promise<void>
+  handleEditEnvironment: () => Promise<void>
+  handleDeleteEnvironment: (environmentId: string) => Promise<void>
+  handleSetActiveEnvironment: (environmentId: string | null) => Promise<void>
+  resolveEnvironmentVariables: (text: string, variables: KeyValue[]) => string
+  resolveUrl: (url: string, baseUrl: string | undefined) => string
 }
 
 export type WorkbenchStore = WorkbenchState & WorkbenchActions
@@ -191,6 +221,13 @@ const initialState: WorkbenchState = {
   pendingCloseRequestId: null,
   pendingRequestDeletion: null,
   pendingCollectionDeletion: null,
+  environments: {},
+  activeEnvironmentId: {},
+  environmentDialogOpen: false,
+  editingEnvironmentId: null,
+  environmentNameDraft: '',
+  environmentBaseUrlDraft: '',
+  environmentVariablesDraft: [],
 }
 
 type WorkbenchSetState = (
@@ -225,6 +262,12 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   hydrateWorkspace(payload) {
     startTransition(() => {
+      const environments: Record<string, Environment[]> = {}
+      const activeEnvironmentId: Record<string, string | null> = {}
+      for (const project of payload.workspaceSnapshot.projects) {
+        environments[project.metadata.id] = project.environments
+        activeEnvironmentId[project.metadata.id] = project.metadata.activeEnvironmentId ?? null
+      }
       set({
         workspacePath: payload.workspacePath,
         workspace: payload.workspaceSnapshot,
@@ -258,6 +301,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         pendingCloseRequestId: null,
         pendingRequestDeletion: null,
         pendingCollectionDeletion: null,
+        environments,
+        activeEnvironmentId,
       })
     })
   },
@@ -767,12 +812,16 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   async handleSendRequest() {
-    const { activeRequestId, requestDrafts } = get()
+    const { activeRequestId, requestDrafts, activeProjectId, environments, activeEnvironmentId, resolveUrl, resolveEnvironmentVariables } = get()
     if (!activeRequestId || !requestDrafts[activeRequestId]) {
       return
     }
 
     const draft = cloneApiDefinition(requestDrafts[activeRequestId])
+    const projectEnvironments = activeProjectId ? environments[activeProjectId] ?? [] : []
+    const currentEnvId = activeProjectId ? activeEnvironmentId[activeProjectId] : null
+    const activeEnv = currentEnvId ? projectEnvironments.find(e => e.id === currentEnvId) : null
+
     set(state => ({
       requestResponses: {
         ...state.requestResponses,
@@ -785,10 +834,53 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }))
 
     try {
+      const variables = activeEnv?.variables ?? []
+
+      // Resolve URL with baseURL joining
+      const resolvedUrl = resolveUrl(draft.url, activeEnv?.baseUrl)
+
+      // Resolve variables in headers
+      const resolvedHeaders = draft.request.headers.map(h => ({
+        ...h,
+        value: resolveEnvironmentVariables(h.value, variables),
+      }))
+
+      // Resolve variables in query params
+      const resolvedQuery = draft.request.query.map(q => ({
+        ...q,
+        key: resolveEnvironmentVariables(q.key, variables),
+        value: resolveEnvironmentVariables(q.value, variables),
+      }))
+
+      // Resolve variables in URL
+      const finalUrl = resolveEnvironmentVariables(resolvedUrl, variables)
+
+      // Resolve variables in body
+      const resolvedBody = {
+        ...draft.request.body,
+        raw: resolveEnvironmentVariables(draft.request.body.raw, variables),
+        json: resolveEnvironmentVariables(draft.request.body.json, variables),
+        formData: draft.request.body.formData.map(item => ({
+          ...item,
+          key: resolveEnvironmentVariables(item.key, variables),
+          value: resolveEnvironmentVariables(item.value, variables),
+        })),
+        urlEncoded: draft.request.body.urlEncoded.map(item => ({
+          ...item,
+          key: resolveEnvironmentVariables(item.key, variables),
+          value: resolveEnvironmentVariables(item.value, variables),
+        })),
+      }
+
       const response = await sendRequest({
         method: draft.method,
-        url: draft.url,
-        request: draft.request,
+        url: finalUrl,
+        request: {
+          ...draft.request,
+          headers: resolvedHeaders,
+          query: resolvedQuery,
+          body: resolvedBody,
+        },
       })
       set(state => ({
         requestResponses: {
@@ -1126,6 +1218,192 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }).catch((error) => {
       console.error('Failed to sync tab state:', error)
     })
+  },
+
+  openCreateEnvironmentDialog() {
+    set({
+      environmentDialogOpen: true,
+      editingEnvironmentId: null,
+      environmentNameDraft: '',
+      environmentBaseUrlDraft: '',
+      environmentVariablesDraft: [],
+    })
+  },
+
+  openEditEnvironmentDialog(environment) {
+    set({
+      environmentDialogOpen: true,
+      editingEnvironmentId: environment.id,
+      environmentNameDraft: environment.name,
+      environmentBaseUrlDraft: environment.baseUrl,
+      environmentVariablesDraft: environment.variables.map(v => ({ ...v })),
+    })
+  },
+
+  closeEnvironmentDialog() {
+    set({
+      environmentDialogOpen: false,
+      editingEnvironmentId: null,
+      environmentNameDraft: '',
+      environmentBaseUrlDraft: '',
+      environmentVariablesDraft: [],
+    })
+  },
+
+  setEnvironmentNameDraft(value) {
+    set({ environmentNameDraft: value })
+  },
+
+  setEnvironmentBaseUrlDraft(value) {
+    set({ environmentBaseUrlDraft: value })
+  },
+
+  setEnvironmentVariablesDraft(variables) {
+    set({ environmentVariablesDraft: variables })
+  },
+
+  addEnvironmentVariable() {
+    set(state => ({
+      environmentVariablesDraft: [
+        ...state.environmentVariablesDraft,
+        { id: generateId(), key: '', value: '', enabled: true, description: '' },
+      ],
+    }))
+  },
+
+  async handleCreateEnvironment() {
+    const { activeProjectId, environmentNameDraft, environmentBaseUrlDraft, environmentVariablesDraft } = get()
+    if (!activeProjectId) {
+      toast.error('请先选择项目')
+      return
+    }
+    const name = environmentNameDraft.trim()
+    if (!name) {
+      toast.error('环境名称不能为空')
+      return
+    }
+
+    await runTask(set, async () => {
+      await createEnvironment({
+        projectId: activeProjectId,
+        name,
+        baseUrl: environmentBaseUrlDraft.trim(),
+        variables: environmentVariablesDraft,
+      })
+      const snapshot = await get().refreshWorkspaceInternal()
+      if (snapshot) {
+        set(state => ({
+          environments: {
+            ...state.environments,
+            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.environments ?? [],
+          },
+        }))
+      }
+      get().closeEnvironmentDialog()
+    }, '环境已创建')
+  },
+
+  async handleEditEnvironment() {
+    const { activeProjectId, editingEnvironmentId, environmentNameDraft, environmentBaseUrlDraft, environmentVariablesDraft } = get()
+    if (!activeProjectId || !editingEnvironmentId) {
+      return
+    }
+    const name = environmentNameDraft.trim()
+    if (!name) {
+      toast.error('环境名称不能为空')
+      return
+    }
+
+    await runTask(set, async () => {
+      await updateEnvironment({
+        id: editingEnvironmentId,
+        projectId: activeProjectId,
+        name,
+        baseUrl: environmentBaseUrlDraft.trim(),
+        variables: environmentVariablesDraft,
+      })
+      const snapshot = await get().refreshWorkspaceInternal()
+      if (snapshot) {
+        set(state => ({
+          environments: {
+            ...state.environments,
+            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.environments ?? [],
+          },
+        }))
+      }
+      get().closeEnvironmentDialog()
+    }, '环境已更新')
+  },
+
+  async handleDeleteEnvironment(environmentId) {
+    const { activeProjectId } = get()
+    if (!activeProjectId) {
+      return
+    }
+
+    await runTask(set, async () => {
+      await deleteEnvironment({
+        id: environmentId,
+        projectId: activeProjectId,
+      })
+      const snapshot = await get().refreshWorkspaceInternal()
+      if (snapshot) {
+        set(state => ({
+          environments: {
+            ...state.environments,
+            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.environments ?? [],
+          },
+          activeEnvironmentId: {
+            ...state.activeEnvironmentId,
+            [activeProjectId]: snapshot.projects.find(p => p.metadata.id === activeProjectId)?.metadata.activeEnvironmentId ?? null,
+          },
+        }))
+      }
+    }, '环境已删除')
+  },
+
+  async handleSetActiveEnvironment(environmentId) {
+    const { activeProjectId } = get()
+    if (!activeProjectId) {
+      return
+    }
+
+    await runTask(set, async () => {
+      const metadata = await setActiveEnvironment({
+        projectId: activeProjectId,
+        environmentId,
+      })
+      set(state => ({
+        activeEnvironmentId: {
+          ...state.activeEnvironmentId,
+          [activeProjectId]: metadata.activeEnvironmentId ?? null,
+        },
+      }))
+    })
+  },
+
+  resolveEnvironmentVariables(text, variables) {
+    let result = text
+    for (const variable of variables) {
+      if (!variable.enabled)
+        continue
+      const pattern = `\${${variable.key}}`
+      result = result.split(pattern).join(variable.value)
+    }
+    return result
+  },
+
+  resolveUrl(url, baseUrl) {
+    if (!baseUrl) {
+      return url
+    }
+    // eslint-disable-next-line e18e/prefer-static-regex
+    if (/^https?:\/\//.test(url)) {
+      return url
+    }
+    const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
+    const path = url.startsWith('/') ? url : `/${url}`
+    return `${base}${path}`
   },
 })
 

@@ -219,7 +219,7 @@ export function ConfirmDeleteCollectionDialog(props: {
           <AlertDialogTitle>删除目录？</AlertDialogTitle>
           <AlertDialogDescription>
             {props.deletion
-              ? `删除“${props.deletion.name}”后，下面的所有子目录和请求都会被一并删除，此操作不可撤销。`
+              ? `删除"${props.deletion.name}"后，下面的所有子目录和请求都会被一并删除，此操作不可撤销。`
               : '删除目录后，下面的所有子目录和请求都会被一并删除。'}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -251,7 +251,7 @@ export function ConfirmDeleteRequestDialog(props: {
           <AlertDialogTitle>删除请求？</AlertDialogTitle>
           <AlertDialogDescription>
             {props.deletion
-              ? `删除“${props.deletion.name}”后将无法恢复。`
+              ? `删除"${props.deletion.name}"后将无法恢复。`
               : '删除请求后将无法恢复。'}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -265,5 +265,123 @@ export function ConfirmDeleteRequestDialog(props: {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+export function EnvironmentDialog(props: {
+  name: string
+  baseUrl: string
+  variables: Array<{ id: string, key: string, value: string, enabled: boolean, description: string }>
+  open: boolean
+  isEditing: boolean
+  onNameChange: (value: string) => void
+  onBaseUrlChange: (value: string) => void
+  onVariablesChange: (variables: Array<{ id: string, key: string, value: string, enabled: boolean, description: string }>) => void
+  onOpenChange: (open: boolean) => void
+  onSubmit: () => void
+  onDelete?: () => void
+}) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{props.isEditing ? '编辑环境' : '新建环境'}</DialogTitle>
+          <DialogDescription>
+            {props.isEditing
+              // eslint-disable-next-line no-template-curly-in-string
+              ? '修改环境配置，变量使用 ${VARIABLE_NAME} 语法替换。'
+              // eslint-disable-next-line no-template-curly-in-string
+              : '创建新的环境配置，变量使用 ${VARIABLE_NAME} 语法替换。'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <LabelBlock label="环境名称">
+            <Input
+              value={props.name}
+              onChange={event => props.onNameChange(event.target.value)}
+              placeholder="开发环境"
+            />
+          </LabelBlock>
+          <LabelBlock label="Base URL">
+            <Input
+              value={props.baseUrl}
+              onChange={event => props.onBaseUrlChange(event.target.value)}
+              placeholder="https://api.example.com"
+            />
+          </LabelBlock>
+          <LabelBlock label="变量">
+            <div className="space-y-2">
+              {props.variables.map((variable, index) => (
+                <div key={variable.id} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={variable.enabled}
+                    onChange={(e) => {
+                      const newVars = [...props.variables]
+                      newVars[index] = { ...variable, enabled: e.target.checked }
+                      props.onVariablesChange(newVars)
+                    }}
+                    className="w-4 h-4"
+                  />
+                  <Input
+                    value={variable.key}
+                    onChange={(e) => {
+                      const newVars = [...props.variables]
+                      newVars[index] = { ...variable, key: e.target.value }
+                      props.onVariablesChange(newVars)
+                    }}
+                    placeholder="VARIABLE_NAME"
+                    className="w-32"
+                  />
+                  <Input
+                    value={variable.value}
+                    onChange={(e) => {
+                      const newVars = [...props.variables]
+                      newVars[index] = { ...variable, value: e.target.value }
+                      props.onVariablesChange(newVars)
+                    }}
+                    placeholder="值"
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      const newVars = props.variables.filter((_, i) => i !== index)
+                      props.onVariablesChange(newVars)
+                    }}
+                  >
+                    <span className="text-destructive">×</span>
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const newVars = [
+                    ...props.variables,
+                    { id: crypto.randomUUID(), key: '', value: '', enabled: true, description: '' },
+                  ]
+                  props.onVariablesChange(newVars)
+                }}
+              >
+                + 添加变量
+              </Button>
+            </div>
+          </LabelBlock>
+        </div>
+        <DialogFooter className="gap-2">
+          {props.isEditing && props.onDelete && (
+            <Button variant="destructive" onClick={props.onDelete}>
+              删除
+            </Button>
+          )}
+          <div className="flex-1" />
+          <Button variant="outline" onClick={() => props.onOpenChange(false)}>取消</Button>
+          <Button onClick={props.onSubmit}>{props.isEditing ? '保存' : '创建'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

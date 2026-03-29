@@ -27,7 +27,7 @@ function SearchResults() {
 
   return (
     <>
-      <input onChange={(e) => handleSearch(e.target.value)} />
+      <input onChange={e => handleSearch(e.target.value)} />
       {isLoading && <Spinner />}
       <ResultsList results={results} />
     </>
@@ -38,7 +38,7 @@ function SearchResults() {
 **Correct (useTransition with built-in pending state):**
 
 ```tsx
-import { useTransition, useState } from 'react'
+import { useState, useTransition } from 'react'
 
 function SearchResults() {
   const [query, setQuery] = useState('')
@@ -47,7 +47,7 @@ function SearchResults() {
 
   const handleSearch = (value: string) => {
     setQuery(value) // Update input immediately
-    
+
     startTransition(async () => {
       // Fetch and update results
       const data = await fetchResults(value)
@@ -57,7 +57,7 @@ function SearchResults() {
 
   return (
     <>
-      <input onChange={(e) => handleSearch(e.target.value)} />
+      <input onChange={e => handleSearch(e.target.value)} />
       {isPending && <Spinner />}
       <ResultsList results={results} />
     </>

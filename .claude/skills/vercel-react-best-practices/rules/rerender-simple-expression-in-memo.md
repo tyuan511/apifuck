@@ -18,7 +18,8 @@ function Header({ user, notifications }: Props) {
     return user.isLoading || notifications.isLoading
   }, [user.isLoading, notifications.isLoading])
 
-  if (isLoading) return <Skeleton />
+  if (isLoading)
+    return <Skeleton />
   // return some markup
 }
 ```
@@ -29,7 +30,8 @@ function Header({ user, notifications }: Props) {
 function Header({ user, notifications }: Props) {
   const isLoading = user.isLoading || notifications.isLoading
 
-  if (isLoading) return <Skeleton />
+  if (isLoading)
+    return <Skeleton />
   // return some markup
 }
 ```

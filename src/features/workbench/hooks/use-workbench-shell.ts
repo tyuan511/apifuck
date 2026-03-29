@@ -38,6 +38,13 @@ export function useWorkbenchShell() {
     pendingCloseRequestId: store.pendingCloseRequestId,
     pendingCollectionDeletion: store.pendingCollectionDeletion,
     pendingRequestDeletion: store.pendingRequestDeletion,
+    environments: store.environments,
+    activeEnvironmentId: store.activeEnvironmentId,
+    environmentDialogOpen: store.environmentDialogOpen,
+    editingEnvironmentId: store.editingEnvironmentId,
+    environmentNameDraft: store.environmentNameDraft,
+    environmentBaseUrlDraft: store.environmentBaseUrlDraft,
+    environmentVariablesDraft: store.environmentVariablesDraft,
   })))
 
   const actions = useWorkbenchStore(useShallow(store => ({
@@ -86,6 +93,16 @@ export function useWorkbenchShell() {
     handleSaveRequest: store.handleSaveRequest,
     handleSendRequest: store.handleSendRequest,
     setSplitRatio: store.setSplitRatio,
+    openCreateEnvironmentDialog: store.openCreateEnvironmentDialog,
+    openEditEnvironmentDialog: store.openEditEnvironmentDialog,
+    closeEnvironmentDialog: store.closeEnvironmentDialog,
+    setEnvironmentNameDraft: store.setEnvironmentNameDraft,
+    setEnvironmentBaseUrlDraft: store.setEnvironmentBaseUrlDraft,
+    setEnvironmentVariablesDraft: store.setEnvironmentVariablesDraft,
+    handleCreateEnvironment: store.handleCreateEnvironment,
+    handleEditEnvironment: store.handleEditEnvironment,
+    handleDeleteEnvironment: store.handleDeleteEnvironment,
+    handleSetActiveEnvironment: store.handleSetActiveEnvironment,
   })))
 
   const activeProject = getActiveProject(state.workspace, state.activeProjectId)
@@ -109,6 +126,9 @@ export function useWorkbenchShell() {
     currentProjectCollectionNames,
   )
 
+  const environments = state.activeProjectId ? state.environments[state.activeProjectId] ?? [] : []
+  const activeEnvironmentId = state.activeProjectId ? state.activeEnvironmentId[state.activeProjectId] ?? null : null
+
   return {
     ...state,
     ...actions,
@@ -118,5 +138,7 @@ export function useWorkbenchShell() {
     activeResponse,
     collectionDialogParentLabel,
     requestDialogParentLabel,
+    environments,
+    activeEnvironmentId,
   }
 }

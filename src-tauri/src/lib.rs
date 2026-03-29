@@ -19,14 +19,19 @@ use http::{
 };
 use storage::{
     bootstrap_workspace as bootstrap_workspace_storage, create_api as create_api_storage,
-    create_collection as create_collection_storage, create_project as create_project_storage,
-    delete_node as delete_node_storage, move_node as move_node_storage,
-    open_workspace as open_workspace_storage, read_api as read_api_storage,
-    reorder_children as reorder_children_storage, update_api as update_api_storage,
-    update_collection as update_collection_storage, update_project as update_project_storage,
-    ApiDefinition, CollectionSummary, CreateApiInput, CreateCollectionInput, CreateProjectInput,
-    DeleteNodeInput, MoveNodeInput, ProjectSummary, ReorderChildrenInput, UpdateApiInput,
-    UpdateCollectionInput, UpdateProjectInput, WorkspaceSnapshot,
+    create_collection as create_collection_storage, create_environment as create_environment_storage,
+    create_project as create_project_storage, delete_environment as delete_environment_storage,
+    delete_node as delete_node_storage, list_environments as list_environments_storage,
+    move_node as move_node_storage, open_workspace as open_workspace_storage,
+    read_api as read_api_storage, reorder_children as reorder_children_storage,
+    set_active_environment as set_active_environment_storage,
+    update_api as update_api_storage, update_collection as update_collection_storage,
+    update_environment as update_environment_storage, update_project as update_project_storage,
+    ApiDefinition, CollectionSummary, CreateApiInput, CreateCollectionInput,
+    CreateEnvironmentInput, CreateProjectInput, DeleteEnvironmentInput, DeleteNodeInput,
+    Environment, MoveNodeInput, ProjectSummary, ReorderChildrenInput, SetActiveEnvironmentInput,
+    UpdateApiInput, UpdateCollectionInput, UpdateEnvironmentInput, UpdateProjectInput,
+    WorkspaceSnapshot,
 };
 
 #[derive(Default)]
@@ -172,6 +177,46 @@ fn read_api(id: String, state: tauri::State<'_, WorkspaceState>) -> AppResult<Ap
 }
 
 #[tauri::command]
+fn create_environment(
+    input: CreateEnvironmentInput,
+    state: tauri::State<'_, WorkspaceState>,
+) -> AppResult<Environment> {
+    create_environment_storage(current_workspace_root(&state)?, input)
+}
+
+#[tauri::command]
+fn update_environment(
+    input: UpdateEnvironmentInput,
+    state: tauri::State<'_, WorkspaceState>,
+) -> AppResult<Environment> {
+    update_environment_storage(current_workspace_root(&state)?, input)
+}
+
+#[tauri::command]
+fn delete_environment(
+    input: DeleteEnvironmentInput,
+    state: tauri::State<'_, WorkspaceState>,
+) -> AppResult<()> {
+    delete_environment_storage(current_workspace_root(&state)?, input)
+}
+
+#[tauri::command]
+fn list_environments(
+    project_id: String,
+    state: tauri::State<'_, WorkspaceState>,
+) -> AppResult<Vec<Environment>> {
+    list_environments_storage(current_workspace_root(&state)?, &project_id)
+}
+
+#[tauri::command]
+fn set_active_environment(
+    input: SetActiveEnvironmentInput,
+    state: tauri::State<'_, WorkspaceState>,
+) -> AppResult<ProjectSummary> {
+    set_active_environment_storage(current_workspace_root(&state)?, input)
+}
+
+#[tauri::command]
 async fn send_request(input: SendRequestInput) -> AppResult<SendRequestResponse> {
     send_request_http(input).await
 }
@@ -228,6 +273,11 @@ pub fn run() {
             move_node,
             reorder_children,
             read_api,
+            create_environment,
+            update_environment,
+            delete_environment,
+            list_environments,
+            set_active_environment,
             send_request
         ])
         .run(tauri::generate_context!())

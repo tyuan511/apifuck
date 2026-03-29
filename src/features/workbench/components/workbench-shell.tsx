@@ -8,6 +8,7 @@ import {
   CreateRequestDialog,
   EditCollectionDialog,
   EditRequestDialog,
+  EnvironmentDialog,
 } from './dialogs'
 import { ProjectSidebar } from './project-sidebar'
 import { RequestWorkspace } from './request-workspace'
@@ -24,20 +25,26 @@ export function WorkbenchShell() {
         <ProjectSidebar
           activeProjectId={shell.activeProjectId}
           collapsedCollectionIds={shell.collapsedCollectionIds}
+          environments={shell.environments}
+          activeEnvironmentId={shell.activeEnvironmentId}
           isMacOSDesktop={isMacOSDesktop}
           openRequestTabs={shell.openRequestTabs}
           projects={shell.workspace?.projects ?? []}
           selectedTreeNode={shell.selectedTreeNode}
           onCreateCollection={shell.openCreateCollectionDialog}
+          onCreateEnvironment={shell.openCreateEnvironmentDialog}
           onCreateProject={shell.openCreateProjectDialog}
           onCreateRequest={shell.openCreateRequestDialog}
           onDeleteCollection={shell.requestDeleteCollection}
+          onDeleteEnvironment={shell.handleDeleteEnvironment}
           onDeleteRequest={shell.requestDeleteRequest}
           onEditCollection={shell.openEditCollectionDialog}
+          onEditEnvironment={shell.openEditEnvironmentDialog}
           onEditRequest={shell.openEditRequestDialog}
           onMoveTreeNode={shell.moveTreeNode}
           onOpenRequest={(summary, parentCollectionId) => { void shell.openRequestFromSummary(summary, parentCollectionId) }}
           onProjectChange={shell.setActiveProject}
+          onSetActiveEnvironment={shell.handleSetActiveEnvironment}
           onToggleCollection={shell.toggleCollection}
           onTreeSelectionChange={shell.setNodeSelection}
         />
@@ -147,6 +154,31 @@ export function WorkbenchShell() {
         deletion={shell.pendingRequestDeletion}
         onConfirm={() => { void shell.handleDeleteRequest() }}
         onOpenChange={open => !open && shell.clearPendingRequestDeletion()}
+      />
+
+      <EnvironmentDialog
+        name={shell.environmentNameDraft}
+        baseUrl={shell.environmentBaseUrlDraft}
+        variables={shell.environmentVariablesDraft}
+        open={shell.environmentDialogOpen}
+        isEditing={Boolean(shell.editingEnvironmentId)}
+        onNameChange={shell.setEnvironmentNameDraft}
+        onBaseUrlChange={shell.setEnvironmentBaseUrlDraft}
+        onVariablesChange={shell.setEnvironmentVariablesDraft}
+        onOpenChange={(open) => {
+          if (!open) {
+            shell.closeEnvironmentDialog()
+          }
+        }}
+        onSubmit={() => {
+          if (shell.editingEnvironmentId) {
+            void shell.handleEditEnvironment()
+          }
+          else {
+            void shell.handleCreateEnvironment()
+          }
+        }}
+        onDelete={shell.editingEnvironmentId ? () => { void shell.handleDeleteEnvironment(shell.editingEnvironmentId!) } : undefined}
       />
     </main>
   )

@@ -23,6 +23,7 @@ export interface ProjectMetadata {
   rootOrder: string[]
   docs: ProjectDocsConfig
   mock: ProjectMockConfig
+  activeEnvironmentId?: string
 }
 
 export interface CollectionMetadata {
@@ -43,6 +44,13 @@ export interface KeyValue {
   value: string
   enabled: boolean
   description: string
+}
+
+export interface Environment {
+  id: string
+  name: string
+  baseUrl: string
+  variables: KeyValue[]
 }
 
 export type AuthType = 'none' | 'basic' | 'bearer' | 'api-key'
@@ -146,6 +154,7 @@ export type TreeNode = CollectionTreeNode | ApiSummary
 export interface ProjectSnapshot {
   metadata: ProjectMetadata
   children: TreeNode[]
+  environments: Environment[]
 }
 
 export interface WorkspaceSnapshot {
@@ -345,4 +354,49 @@ export function readApi(id: string) {
 
 export function sendRequest(input: SendRequestInput) {
   return invoke<SendRequestResponse>('send_request', { input })
+}
+
+export interface CreateEnvironmentInput {
+  projectId: string
+  name: string
+  baseUrl?: string
+  variables?: KeyValue[]
+}
+
+export interface UpdateEnvironmentInput {
+  id: string
+  projectId: string
+  name: string
+  baseUrl?: string
+  variables?: KeyValue[]
+}
+
+export interface DeleteEnvironmentInput {
+  id: string
+  projectId: string
+}
+
+export interface SetActiveEnvironmentInput {
+  projectId: string
+  environmentId: string | null
+}
+
+export function createEnvironment(input: CreateEnvironmentInput) {
+  return invoke<Environment>('create_environment', { input })
+}
+
+export function updateEnvironment(input: UpdateEnvironmentInput) {
+  return invoke<Environment>('update_environment', { input })
+}
+
+export function deleteEnvironment(input: DeleteEnvironmentInput) {
+  return invoke<void>('delete_environment', { input })
+}
+
+export function listEnvironments(projectId: string) {
+  return invoke<Environment[]>('list_environments', { projectId })
+}
+
+export function setActiveEnvironment(input: SetActiveEnvironmentInput) {
+  return invoke<ProjectMetadata>('set_active_environment', { input })
 }
