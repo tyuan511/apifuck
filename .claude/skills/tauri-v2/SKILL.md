@@ -49,10 +49,10 @@ pub fn run() {
 ### Step 2: Call from Frontend
 
 ```typescript
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core'
 
-const greeting = await invoke<string>('greet', { name: 'World' });
-console.log(greeting); // "Hello, World!"
+const greeting = await invoke<string>('greet', { name: 'World' })
+console.log(greeting) // "Hello, World!"
 ```
 
 **Why this matters:** Use `@tauri-apps/api/core` (not `@tauri-apps/api/tauri` - that's v1 API).
@@ -62,10 +62,10 @@ console.log(greeting); // "Hello, World!"
 ```json
 // src-tauri/capabilities/default.json
 {
-    "$schema": "../gen/schemas/desktop-schema.json",
-    "identifier": "default",
-    "windows": ["main"],
-    "permissions": ["core:default"]
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "windows": ["main"],
+  "permissions": ["core:default"]
 }
 ```
 
@@ -125,33 +125,33 @@ async fn good(name: String) -> String {
 
 ```json
 {
-    "$schema": "./gen/schemas/desktop-schema.json",
-    "productName": "my-app",
-    "version": "1.0.0",
-    "identifier": "com.example.myapp",
-    "build": {
-        "devUrl": "http://localhost:5173",
-        "frontendDist": "../dist",
-        "beforeDevCommand": "npm run dev",
-        "beforeBuildCommand": "npm run build"
-    },
-    "app": {
-        "windows": [{
-            "label": "main",
-            "title": "My App",
-            "width": 800,
-            "height": 600
-        }],
-        "security": {
-            "csp": "default-src 'self'; img-src 'self' data:",
-            "capabilities": ["default"]
-        }
-    },
-    "bundle": {
-        "active": true,
-        "targets": "all",
-        "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"]
+  "$schema": "./gen/schemas/desktop-schema.json",
+  "productName": "my-app",
+  "version": "1.0.0",
+  "identifier": "com.example.myapp",
+  "build": {
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "My App",
+      "width": 800,
+      "height": 600
+    }],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:",
+      "capabilities": ["default"]
     }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"]
+  }
 }
 ```
 
@@ -169,14 +169,18 @@ edition = "2021"
 
 [lib]
 name = "app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = [
+  "staticlib",
+  "cdylib",
+  "rlib"
+]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = [ "derive" ] }
 serde_json = "1"
 ```
 
@@ -249,11 +253,11 @@ fn start_task(app: tauri::AppHandle) {
 ```
 
 ```typescript
-import { listen } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event'
 
 const unlisten = await listen('task-progress', (e) => {
-    console.log('Progress:', e.payload);
-});
+  console.log('Progress:', e.payload)
+})
 // Call unlisten() when done
 ```
 
@@ -279,11 +283,11 @@ async fn download(url: String, on_event: Channel<DownloadEvent>) {
 ```
 
 ```typescript
-import { invoke, Channel } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core'
 
-const channel = new Channel<DownloadEvent>();
-channel.onmessage = (msg) => console.log(msg.event, msg.data);
-await invoke('download', { url: 'https://...', onEvent: channel });
+const channel = new Channel<DownloadEvent>()
+channel.onmessage = msg => console.log(msg.event, msg.data)
+await invoke('download', { url: 'https://...', onEvent: channel })
 ```
 
 ## Bundled Resources

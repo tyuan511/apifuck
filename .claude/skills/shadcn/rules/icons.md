@@ -91,7 +91,7 @@ function StatusBadge({ icon }: { icon: string }) {
 
 ```tsx
 // Import from the project's configured iconLibrary (e.g. lucide-react, @tabler/icons-react).
-import { CheckIcon } from "lucide-react"
+import { CheckIcon } from 'lucide-react'
 
 function StatusBadge({ icon: Icon }: { icon: React.ComponentType }) {
   return <Icon />

@@ -29,7 +29,8 @@ let didInit = false
 
 function Comp() {
   useEffect(() => {
-    if (didInit) return
+    if (didInit)
+      return
     didInit = true
     loadFromStorage()
     checkAuthToken()

@@ -22,10 +22,11 @@ const data = localStorage.getItem('userConfig')
 ```typescript
 const VERSION = 'v2'
 
-function saveConfig(config: { theme: string; language: string }) {
+function saveConfig(config: { theme: string, language: string }) {
   try {
     localStorage.setItem(`userConfig:${VERSION}`, JSON.stringify(config))
-  } catch {
+  }
+  catch {
     // Throws in incognito/private browsing, quota exceeded, or disabled
   }
 }
@@ -34,7 +35,8 @@ function loadConfig() {
   try {
     const data = localStorage.getItem(`userConfig:${VERSION}`)
     return data ? JSON.parse(data) : null
-  } catch {
+  }
+  catch {
     return null
   }
 }
@@ -48,7 +50,8 @@ function migrate() {
       saveConfig({ theme: old.darkMode ? 'dark' : 'light', language: old.lang })
       localStorage.removeItem('userConfig:v1')
     }
-  } catch {}
+  }
+  catch {}
 }
 ```
 
@@ -62,7 +65,8 @@ function cachePrefs(user: FullUser) {
       theme: user.preferences.theme,
       notifications: user.preferences.notifications
     }))
-  } catch {}
+  }
+  catch {}
 }
 ```
 

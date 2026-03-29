@@ -16,7 +16,7 @@ function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {
   const [query, setQuery] = useState('')
 
   useEffect(() => {
-    const timeout = setTimeout(() => onSearch(query), 300)
+    const timeout = setTimeout(onSearch, 300, query)
     return () => clearTimeout(timeout)
   }, [query, onSearch])
 }
@@ -25,14 +25,14 @@ function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {
 **Correct (using React's useEffectEvent):**
 
 ```tsx
-import { useEffectEvent } from 'react';
+import { useEffectEvent } from 'react'
 
 function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {
   const [query, setQuery] = useState('')
   const onSearchEvent = useEffectEvent(onSearch)
 
   useEffect(() => {
-    const timeout = setTimeout(() => onSearchEvent(query), 300)
+    const timeout = setTimeout(onSearchEvent, 300, query)
     return () => clearTimeout(timeout)
   }, [query])
 }

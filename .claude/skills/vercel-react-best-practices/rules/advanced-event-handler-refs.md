@@ -30,7 +30,7 @@ function useWindowEvent(event: string, handler: (e) => void) {
   }, [handler])
 
   useEffect(() => {
-    const listener = (e) => handlerRef.current(e)
+    const listener = e => handlerRef.current(e)
     window.addEventListener(event, listener)
     return () => window.removeEventListener(event, listener)
   }, [event])

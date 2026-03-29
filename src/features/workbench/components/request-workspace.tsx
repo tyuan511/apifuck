@@ -49,6 +49,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { useWorkbenchStore } from '../store/workbench-store'
 import {
   editorTabs,
   macOSWindowChromeHeightClassName,
@@ -1358,6 +1359,33 @@ function BodyEditor(props: {
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
 }) {
   const body = props.draft.request.body
+
+  const activeProjectId = useWorkbenchStore(state => state.activeProjectId)
+  const environments = useWorkbenchStore(state => state.environments)
+  const activeEnvironmentId = useWorkbenchStore(state => state.activeEnvironmentId)
+
+  const activeEnv = React.useMemo(() => {
+    if (!activeProjectId)
+      return null
+    const projectEnvs = environments[activeProjectId]
+    if (!projectEnvs)
+      return null
+    const envId = activeEnvironmentId[activeProjectId]
+    if (!envId)
+      return null
+    return projectEnvs.find(e => e.id === envId) ?? null
+  }, [activeProjectId, environments, activeEnvironmentId])
+
+  const envVariables = React.useMemo(() => {
+    if (!activeEnv)
+      return []
+    return activeEnv.variables.filter(v => v.enabled).map(v => ({
+      key: v.key,
+      value: v.value,
+      description: v.description,
+    }))
+  }, [activeEnv])
+
   const handleFormatJson = React.useCallback(() => {
     const source = body.json.trim()
     if (!source) {
@@ -1434,6 +1462,8 @@ function BodyEditor(props: {
             <MonacoJsonEditor
               className="min-h-[220px]"
               value={body.json}
+              environmentVariables={envVariables}
+              environmentName={activeEnv?.name}
               onChange={value => props.onChangeDraft(draft => ({
                 ...draft,
                 request: {

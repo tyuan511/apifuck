@@ -31,7 +31,7 @@ Exact terms that strongly trigger this skill:
 - tauri v2
 - tauri.conf.json
 - src-tauri
-- #[tauri::command]
+- # [tauri::command]
 - tauri::invoke
 - capabilities.json
 

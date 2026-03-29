@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   const fontData = await fetch(
     new URL('./fonts/Inter.ttf', import.meta.url)
   ).then(res => res.arrayBuffer())
-  
+
   const logoData = await fetch(
     new URL('./images/logo.png', import.meta.url)
   ).then(res => res.arrayBuffer())
@@ -103,7 +103,7 @@ export async function processRequest(data: Data) {
     await fs.readFile('./config.json', 'utf-8')
   )
   const template = await fs.readFile('./template.html', 'utf-8')
-  
+
   return render(template, data, config)
 }
 
@@ -117,7 +117,7 @@ export async function processRequest(data: Data) {
     configPromise,
     templatePromise
   ])
-  
+
   return render(template, data, config)
 }
 ```

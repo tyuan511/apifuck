@@ -1,5 +1,5 @@
 import type { OpenRequestTab, TreeSelection } from '../types'
-import type { ApiSummary, CollectionTreeNode, TreeNode, WorkspaceSnapshot } from '@/lib/workspace'
+import type { ApiSummary, CollectionTreeNode, Environment, TreeNode, WorkspaceSnapshot } from '@/lib/workspace'
 import { PointerActivationConstraints } from '@dnd-kit/dom'
 import {
   DragDropProvider,
@@ -13,10 +13,12 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CircleIcon,
   EllipsisIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
+  GlobeIcon,
   PencilLineIcon,
   PlusIcon,
   Settings2Icon,
@@ -40,20 +42,26 @@ import { MethodBadge, SidebarEmptyState } from './shared'
 interface ProjectSidebarProps {
   activeProjectId: string | null
   collapsedCollectionIds: string[]
+  environments: Environment[]
+  activeEnvironmentId: string | null
   isMacOSDesktop: boolean
   openRequestTabs: OpenRequestTab[]
   projects: WorkspaceSnapshot['projects']
   selectedTreeNode: TreeSelection | null
   onCreateCollection: (parentCollectionId: string | null) => void
+  onCreateEnvironment: () => void
   onCreateProject: () => void
   onCreateRequest: (parentCollectionId: string | null) => void
   onDeleteCollection: (node: CollectionTreeNode) => void
+  onDeleteEnvironment: (environmentId: string) => void
   onDeleteRequest: (summary: ApiSummary) => void
   onEditCollection: (node: CollectionTreeNode) => void
+  onEditEnvironment: (environment: Environment) => void
   onEditRequest: (summary: ApiSummary) => void
   onMoveTreeNode: (nodeId: string, targetParentCollectionId: string | null, position: number) => void | Promise<void>
   onOpenRequest: (summary: ApiSummary, parentCollectionId: string | null) => void
   onProjectChange: (projectId: string) => void
+  onSetActiveEnvironment: (environmentId: string | null) => void
   onToggleCollection: (collectionId: string) => void
   onTreeSelectionChange: (selection: TreeSelection | null) => void
 }
@@ -1036,6 +1044,17 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
         </DropdownMenu>
       </div>
 
+      {activeProject && (
+        <EnvironmentSection
+          environments={props.environments}
+          activeEnvironmentId={props.activeEnvironmentId}
+          onCreateEnvironment={props.onCreateEnvironment}
+          onEditEnvironment={props.onEditEnvironment}
+          onDeleteEnvironment={props.onDeleteEnvironment}
+          onSetActiveEnvironment={props.onSetActiveEnvironment}
+        />
+      )}
+
       <DragDropProvider
         sensors={[
           PointerSensor.configure({
@@ -1592,6 +1611,120 @@ function TreeDragOverlay(props: { item: TreeDragItem }) {
               visualState="overlay"
             />
           )}
+    </div>
+  )
+}
+
+function EnvironmentSection(props: {
+  environments: Environment[]
+  activeEnvironmentId: string | null
+  onCreateEnvironment: () => void
+  onEditEnvironment: (environment: Environment) => void
+  onDeleteEnvironment: (environmentId: string) => void
+  onSetActiveEnvironment: (environmentId: string | null) => void
+}) {
+  const [isExpanded, setIsExpanded] = React.useState(false)
+  const activeEnvironment = props.environments.find(e => e.id === props.activeEnvironmentId)
+
+  return (
+    <div className="px-2.5 pb-2">
+      <button
+        type="button"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
+      >
+        <span className="flex items-center gap-1.5">
+          <GlobeIcon className="size-3.5" />
+          环境
+        </span>
+        <span className="flex items-center gap-1">
+          {activeEnvironment && (
+            <span className="rounded bg-primary/10 px-1 py-0.5 text-[9px] text-primary">
+              {activeEnvironment.name}
+            </span>
+          )}
+          {isExpanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+        </span>
+      </button>
+
+      {isExpanded && (
+        <div className="space-y-0.5">
+          {props.environments.length === 0
+            ? (
+                <div className="py-2 text-center text-[11px] text-muted-foreground">
+                  暂无环境
+                </div>
+              )
+            : (
+                props.environments.map(env => (
+                  <div
+                    key={env.id}
+                    className={cn(
+                      'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition',
+                      env.id === props.activeEnvironmentId
+                        ? 'bg-accent text-foreground'
+                        : 'text-foreground hover:bg-accent',
+                    )}
+                    onClick={() => {
+                      if (env.id === props.activeEnvironmentId) {
+                        props.onSetActiveEnvironment(null)
+                      }
+                      else {
+                        props.onSetActiveEnvironment(env.id)
+                      }
+                    }}
+                  >
+                    <span className="flex size-4 items-center justify-center">
+                      {env.id === props.activeEnvironmentId
+                        ? (
+                            <CheckIcon className="size-4 text-primary" />
+                          )
+                        : (
+                            <CircleIcon className="size-3 opacity-0 group-hover:opacity-50" />
+                          )}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{env.name}</span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={(
+                          <Button
+                            data-tree-action
+                            className="size-5 opacity-0 transition group-hover:opacity-100"
+                            size="icon-xs"
+                            variant="ghost"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <EllipsisIcon />
+                          </Button>
+                        )}
+                      />
+                      <DropdownMenuContent align="end" className="w-28">
+                        <DropdownMenuItem onClick={() => props.onEditEnvironment(env)}>
+                          <PencilLineIcon />
+                          编辑
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={() => props.onDeleteEnvironment(env.id)}
+                        >
+                          <Trash2Icon />
+                          删除
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                ))
+              )}
+          <button
+            type="button"
+            onClick={props.onCreateEnvironment}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          >
+            <PlusIcon className="size-3.5" />
+            新建环境
+          </button>
+        </div>
+      )}
     </div>
   )
 }

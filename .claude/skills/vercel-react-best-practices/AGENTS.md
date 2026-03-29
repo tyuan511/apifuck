@@ -1,13 +1,13 @@
 # React Best Practices
 
-**Version 1.0.0**  
-Vercel Engineering  
+**Version 1.0.0**
+Vercel Engineering
 January 2026
 
-> **Note:**  
-> This document is mainly for agents and LLMs to follow when maintaining,  
-> generating, or refactoring React and Next.js codebases. Humans  
-> may also find it useful, but guidance here is optimized for automation  
+> **Note:**
+> This document is mainly for agents and LLMs to follow when maintaining,
+> generating, or refactoring React and Next.js codebases. Humans
+> may also find it useful, but guidance here is optimized for automation
 > and consistency by AI-assisted workflows.
 
 ---
@@ -114,12 +114,12 @@ Move `await` operations into the branches where they're actually used to avoid b
 ```typescript
 async function handleRequest(userId: string, skipProcessing: boolean) {
   const userData = await fetchUserData(userId)
-  
+
   if (skipProcessing) {
     // Returns immediately but still waited for userData
     return { skipped: true }
   }
-  
+
   // Only this branch uses userData
   return processUserData(userData)
 }
@@ -133,7 +133,7 @@ async function handleRequest(userId: string, skipProcessing: boolean) {
     // Returns immediately without waiting
     return { skipped: true }
   }
-  
+
   // Fetch only when needed
   const userData = await fetchUserData(userId)
   return processUserData(userData)
@@ -147,32 +147,32 @@ async function handleRequest(userId: string, skipProcessing: boolean) {
 async function updateResource(resourceId: string, userId: string) {
   const permissions = await fetchPermissions(userId)
   const resource = await getResource(resourceId)
-  
+
   if (!resource) {
     return { error: 'Not found' }
   }
-  
+
   if (!permissions.canEdit) {
     return { error: 'Forbidden' }
   }
-  
+
   return await updateResourceData(resource, permissions)
 }
 
 // Correct: fetches only when needed
 async function updateResource(resourceId: string, userId: string) {
   const resource = await getResource(resourceId)
-  
+
   if (!resource) {
     return { error: 'Not found' }
   }
-  
+
   const permissions = await fetchPermissions(userId)
-  
+
   if (!permissions.canEdit) {
     return { error: 'Forbidden' }
   }
-  
+
   return await updateResourceData(resource, permissions)
 }
 ```
@@ -295,7 +295,7 @@ Instead of awaiting data in async components before returning JSX, use Suspense 
 ```tsx
 async function Page() {
   const data = await fetchData() // Blocks entire page
-  
+
   return (
     <div>
       <div>Sidebar</div>
@@ -343,7 +343,7 @@ Sidebar, Header, and Footer render immediately. Only DataDisplay waits for data.
 function Page() {
   // Start fetch immediately, but don't await
   const dataPromise = fetchData()
-  
+
   return (
     <div>
       <div>Sidebar</div>
@@ -403,11 +403,11 @@ Popular icon and component libraries can have **up to 10,000 re-exports** in the
 **Incorrect: imports entire library**
 
 ```tsx
-import { Check, X, Menu } from 'lucide-react'
+import { Button, TextField } from '@mui/material'
 // Loads 1,583 modules, takes ~2.8s extra in dev
 // Runtime cost: 200-800ms on every cold start
 
-import { Button, TextField } from '@mui/material'
+import { Check, Menu, X } from 'lucide-react'
 // Loads 2,225 modules, takes ~4.2s extra in dev
 ```
 
@@ -415,7 +415,7 @@ import { Button, TextField } from '@mui/material'
 
 ```tsx
 // Keep the standard imports - Next.js transforms them to direct imports
-import { Check, X, Menu } from 'lucide-react'
+import { Check, Menu, X } from 'lucide-react'
 // Full TypeScript support, no manual path wrangling
 ```
 
@@ -446,7 +446,7 @@ Load large data or modules only when a feature is activated.
 **Example: lazy-load animation frames**
 
 ```tsx
-function AnimationPlayer({ enabled, setEnabled }: { enabled: boolean; setEnabled: React.Dispatch<React.SetStateAction<boolean>> }) {
+function AnimationPlayer({ enabled, setEnabled }: { enabled: boolean, setEnabled: React.Dispatch<React.SetStateAction<boolean>> }) {
   const [frames, setFrames] = useState<Frame[] | null>(null)
 
   useEffect(() => {
@@ -457,7 +457,8 @@ function AnimationPlayer({ enabled, setEnabled }: { enabled: boolean; setEnabled
     }
   }, [enabled, frames, setEnabled])
 
-  if (!frames) return <Skeleton />
+  if (!frames)
+    return <Skeleton />
   return <Canvas frames={frames} />
 }
 ```
@@ -578,9 +579,11 @@ function FlagsProvider({ children, flags }: Props) {
     }
   }, [flags.editorEnabled])
 
-  return <FlagsContext.Provider value={flags}>
-    {children}
-  </FlagsContext.Provider>
+  return (
+    <FlagsContext.Provider value={flags}>
+      {children}
+    </FlagsContext.Provider>
+  )
 }
 ```
 
@@ -625,16 +628,16 @@ import { unauthorized } from '@/lib/errors'
 export async function deleteUser(userId: string) {
   // Always check auth inside the action
   const session = await verifySession()
-  
+
   if (!session) {
     throw unauthorized('Must be logged in')
   }
-  
+
   // Check authorization too
   if (session.user.role !== 'admin' && session.user.id !== userId) {
     throw unauthorized('Cannot delete other users')
   }
-  
+
   await db.user.delete({ where: { id: userId } })
   return { success: true }
 }
@@ -645,8 +648,8 @@ export async function deleteUser(userId: string) {
 ```typescript
 'use server'
 
-import { verifySession } from '@/lib/auth'
 import { z } from 'zod'
+import { verifySession } from '@/lib/auth'
 
 const updateProfileSchema = z.object({
   userId: z.string().uuid(),
@@ -657,18 +660,18 @@ const updateProfileSchema = z.object({
 export async function updateProfile(data: unknown) {
   // Validate input first
   const validated = updateProfileSchema.parse(data)
-  
+
   // Then authenticate
   const session = await verifySession()
   if (!session) {
     throw new Error('Unauthorized')
   }
-  
+
   // Then authorize
   if (session.user.id !== validated.userId) {
     throw new Error('Can only update own profile')
   }
-  
+
   // Finally perform the mutation
   await db.user.update({
     where: { id: validated.userId },
@@ -677,7 +680,7 @@ export async function updateProfile(data: unknown) {
       email: validated.email
     }
   })
-  
+
   return { success: true }
 }
 ```
@@ -758,12 +761,13 @@ import { LRUCache } from 'lru-cache'
 
 const cache = new LRUCache<string, any>({
   max: 1000,
-  ttl: 5 * 60 * 1000  // 5 minutes
+  ttl: 5 * 60 * 1000 // 5 minutes
 })
 
 export async function getUser(id: string) {
   const cached = cache.get(id)
-  if (cached) return cached
+  if (cached)
+    return cached
 
   const user = await db.user.findUnique({ where: { id } })
   cache.set(id, user)
@@ -832,13 +836,13 @@ The React Server/Client boundary serializes all object properties into strings a
 
 ```tsx
 async function Page() {
-  const user = await fetchUser()  // 50 fields
+  const user = await fetchUser() // 50 fields
   return <Profile user={user} />
 }
 
 'use client'
 function Profile({ user }: { user: User }) {
-  return <div>{user.name}</div>  // uses 1 field
+  return <div>{user.name}</div> // uses 1 field
 }
 ```
 
@@ -978,7 +982,8 @@ import { cache } from 'react'
 
 export const getCurrentUser = cache(async () => {
   const session = await auth()
-  if (!session?.user?.id) return null
+  if (!session?.user?.id)
+    return null
   return await db.user.findUnique({
     where: { id: session.user.id }
   })
@@ -1000,15 +1005,15 @@ const getUser = cache(async (params: { uid: number }) => {
 
 // Each call creates new object, never hits cache
 getUser({ uid: 1 })
-getUser({ uid: 1 })  // Cache miss, runs query again
+getUser({ uid: 1 }) // Cache miss, runs query again
 ```
 
 **Correct: cache hit**
 
 ```typescript
 const params = { uid: 1 }
-getUser(params)  // Query runs
-getUser(params)  // Cache hit (same reference)
+getUser(params) // Query runs
+getUser(params) // Cache hit (same reference)
 ```
 
 If you must pass objects, pass the same reference:
@@ -1045,11 +1050,11 @@ import { logUserAction } from '@/app/utils'
 export async function POST(request: Request) {
   // Perform mutation
   await updateDatabase(request)
-  
+
   // Logging blocks the response
   const userAgent = request.headers.get('user-agent') || 'unknown'
   await logUserAction({ userAgent })
-  
+
   return new Response(JSON.stringify({ status: 'success' }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' }
@@ -1060,22 +1065,22 @@ export async function POST(request: Request) {
 **Correct: non-blocking**
 
 ```tsx
+import { cookies, headers } from 'next/headers'
 import { after } from 'next/server'
-import { headers, cookies } from 'next/headers'
 import { logUserAction } from '@/app/utils'
 
 export async function POST(request: Request) {
   // Perform mutation
   await updateDatabase(request)
-  
+
   // Log after response is sent
   after(async () => {
     const userAgent = (await headers()).get('user-agent') || 'unknown'
     const sessionCookie = (await cookies()).get('session-id')?.value || 'anonymous'
-    
+
     logUserAction({ sessionCookie, userAgent })
   })
-  
+
   return new Response(JSON.stringify({ status: 'success' }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' }
@@ -1177,7 +1182,7 @@ function useKeyboardShortcut(key: string, callback: () => void) {
 
 function Profile() {
   // Multiple shortcuts will share the same listener
-  useKeyboardShortcut('p', () => { /* ... */ }) 
+  useKeyboardShortcut('p', () => { /* ... */ })
   useKeyboardShortcut('k', () => { /* ... */ })
   // ...
 }
@@ -1195,10 +1200,10 @@ Add `{ passive: true }` to touch and wheel event listeners to enable immediate s
 useEffect(() => {
   const handleTouch = (e: TouchEvent) => console.log(e.touches[0].clientX)
   const handleWheel = (e: WheelEvent) => console.log(e.deltaY)
-  
+
   document.addEventListener('touchstart', handleTouch)
   document.addEventListener('wheel', handleWheel)
-  
+
   return () => {
     document.removeEventListener('touchstart', handleTouch)
     document.removeEventListener('wheel', handleWheel)
@@ -1212,10 +1217,10 @@ useEffect(() => {
 useEffect(() => {
   const handleTouch = (e: TouchEvent) => console.log(e.touches[0].clientX)
   const handleWheel = (e: WheelEvent) => console.log(e.deltaY)
-  
+
   document.addEventListener('touchstart', handleTouch, { passive: true })
   document.addEventListener('wheel', handleWheel, { passive: true })
-  
+
   return () => {
     document.removeEventListener('touchstart', handleTouch)
     document.removeEventListener('wheel', handleWheel)
@@ -1298,10 +1303,11 @@ const data = localStorage.getItem('userConfig')
 ```typescript
 const VERSION = 'v2'
 
-function saveConfig(config: { theme: string; language: string }) {
+function saveConfig(config: { theme: string, language: string }) {
   try {
     localStorage.setItem(`userConfig:${VERSION}`, JSON.stringify(config))
-  } catch {
+  }
+  catch {
     // Throws in incognito/private browsing, quota exceeded, or disabled
   }
 }
@@ -1310,7 +1316,8 @@ function loadConfig() {
   try {
     const data = localStorage.getItem(`userConfig:${VERSION}`)
     return data ? JSON.parse(data) : null
-  } catch {
+  }
+  catch {
     return null
   }
 }
@@ -1324,7 +1331,8 @@ function migrate() {
       saveConfig({ theme: old.darkMode ? 'dark' : 'light', language: old.lang })
       localStorage.removeItem('userConfig:v1')
     }
-  } catch {}
+  }
+  catch {}
 }
 ```
 
@@ -1338,7 +1346,8 @@ function cachePrefs(user: FullUser) {
       theme: user.preferences.theme,
       notifications: user.preferences.notifications
     }))
-  } catch {}
+  }
+  catch {}
 }
 ```
 
@@ -1369,7 +1378,7 @@ function Form() {
   const [fullName, setFullName] = useState('')
 
   useEffect(() => {
-    setFullName(firstName + ' ' + lastName)
+    setFullName(`${firstName} ${lastName}`)
   }, [firstName, lastName])
 
   return <p>{fullName}</p>
@@ -1382,7 +1391,7 @@ function Form() {
 function Form() {
   const [firstName, setFirstName] = useState('First')
   const [lastName, setLastName] = useState('Last')
-  const fullName = firstName + ' ' + lastName
+  const fullName = `${firstName} ${lastName}`
 
   return <p>{fullName}</p>
 }
@@ -1441,7 +1450,8 @@ function Header({ user, notifications }: Props) {
     return user.isLoading || notifications.isLoading
   }, [user.isLoading, notifications.isLoading])
 
-  if (isLoading) return <Skeleton />
+  if (isLoading)
+    return <Skeleton />
   // return some markup
 }
 ```
@@ -1452,7 +1462,8 @@ function Header({ user, notifications }: Props) {
 function Header({ user, notifications }: Props) {
   const isLoading = user.isLoading || notifications.isLoading
 
-  if (isLoading) return <Skeleton />
+  if (isLoading)
+    return <Skeleton />
   // return some markup
 }
 ```
@@ -1480,8 +1491,16 @@ function UserProfile({ user, theme }) {
   // Defined inside to access `user` - BAD
   const Stats = () => (
     <div>
-      <span>{user.followers} followers</span>
-      <span>{user.posts} posts</span>
+      <span>
+        {user.followers}
+        {' '}
+        followers
+      </span>
+      <span>
+        {user.posts}
+        {' '}
+        posts
+      </span>
     </div>
   )
 
@@ -1499,7 +1518,7 @@ Every time `UserProfile` renders, `Avatar` and `Stats` are new component types. 
 **Correct: pass props instead**
 
 ```tsx
-function Avatar({ src, theme }: { src: string; theme: string }) {
+function Avatar({ src, theme }: { src: string, theme: string }) {
   return (
     <img
       src={src}
@@ -1508,11 +1527,19 @@ function Avatar({ src, theme }: { src: string; theme: string }) {
   )
 }
 
-function Stats({ followers, posts }: { followers: number; posts: number }) {
+function Stats({ followers, posts }: { followers: number, posts: number }) {
   return (
     <div>
-      <span>{followers} followers</span>
-      <span>{posts} posts</span>
+      <span>
+        {followers}
+        {' '}
+        followers
+      </span>
+      <span>
+        {posts}
+        {' '}
+        posts
+      </span>
     </div>
   )
 }
@@ -1584,7 +1611,8 @@ function Profile({ user, loading }: Props) {
     return <Avatar id={id} />
   }, [user])
 
-  if (loading) return <Skeleton />
+  if (loading)
+    return <Skeleton />
   return <div>{avatar}</div>
 }
 ```
@@ -1592,13 +1620,14 @@ function Profile({ user, loading }: Props) {
 **Correct: skips computation when loading**
 
 ```tsx
-const UserAvatar = memo(function UserAvatar({ user }: { user: User }) {
+const UserAvatar = memo(({ user }: { user: User }) => {
   const id = useMemo(() => computeAvatarId(user), [user])
   return <Avatar id={id} />
 })
 
 function Profile({ user, loading }: Props) {
-  if (loading) return <Skeleton />
+  if (loading)
+    return <Skeleton />
   return (
     <div>
       <UserAvatar user={user} />
@@ -1701,9 +1730,9 @@ When a hook contains multiple independent tasks with different dependencies, spl
 
 ```tsx
 const sortedProducts = useMemo(() => {
-  const filtered = products.filter((p) => p.category === category)
+  const filtered = products.filter(p => p.category === category)
   const sorted = filtered.toSorted((a, b) =>
-    sortOrder === "asc" ? a.price - b.price : b.price - a.price
+    sortOrder === 'asc' ? a.price - b.price : b.price - a.price
   )
   return sorted
 }, [products, category, sortOrder])
@@ -1713,14 +1742,14 @@ const sortedProducts = useMemo(() => {
 
 ```tsx
 const filteredProducts = useMemo(
-  () => products.filter((p) => p.category === category),
+  () => products.filter(p => p.category === category),
   [products, category]
 )
 
 const sortedProducts = useMemo(
   () =>
     filteredProducts.toSorted((a, b) =>
-      sortOrder === "asc" ? a.price - b.price : b.price - a.price
+      sortOrder === 'asc' ? a.price - b.price : b.price - a.price
     ),
   [filteredProducts, sortOrder]
 )
@@ -1761,7 +1790,7 @@ Subscribe to derived boolean state instead of continuous values to reduce re-ren
 
 ```tsx
 function Sidebar() {
-  const width = useWindowWidth()  // updates continuously
+  const width = useWindowWidth() // updates continuously
   const isMobile = width < 768
   return <nav className={isMobile ? 'mobile' : 'desktop'} />
 }
@@ -1787,17 +1816,17 @@ When updating state based on the current state value, use the functional update 
 ```tsx
 function TodoList() {
   const [items, setItems] = useState(initialItems)
-  
+
   // Callback must depend on items, recreated on every items change
   const addItems = useCallback((newItems: Item[]) => {
     setItems([...items, ...newItems])
-  }, [items])  // ❌ items dependency causes recreations
-  
+  }, [items]) // ❌ items dependency causes recreations
+
   // Risk of stale closure if dependency is forgotten
   const removeItem = useCallback((id: string) => {
     setItems(items.filter(item => item.id !== id))
-  }, [])  // ❌ Missing items dependency - will use stale items!
-  
+  }, []) // ❌ Missing items dependency - will use stale items!
+
   return <ItemsEditor items={items} onAdd={addItems} onRemove={removeItem} />
 }
 ```
@@ -1809,17 +1838,17 @@ The first callback is recreated every time `items` changes, which can cause chil
 ```tsx
 function TodoList() {
   const [items, setItems] = useState(initialItems)
-  
+
   // Stable callback, never recreated
   const addItems = useCallback((newItems: Item[]) => {
     setItems(curr => [...curr, ...newItems])
-  }, [])  // ✅ No dependencies needed
-  
+  }, []) // ✅ No dependencies needed
+
   // Always uses latest state, no stale closure risk
   const removeItem = useCallback((id: string) => {
     setItems(curr => curr.filter(item => item.id !== id))
-  }, [])  // ✅ Safe and stable
-  
+  }, []) // ✅ Safe and stable
+
   return <ItemsEditor items={items} onAdd={addItems} onRemove={removeItem} />
 }
 ```
@@ -1867,7 +1896,7 @@ function FilteredList({ items }: { items: Item[] }) {
   // buildSearchIndex() runs on EVERY render, even after initialization
   const [searchIndex, setSearchIndex] = useState(buildSearchIndex(items))
   const [query, setQuery] = useState('')
-  
+
   // When query changes, buildSearchIndex runs again unnecessarily
   return <SearchResults index={searchIndex} query={query} />
 }
@@ -1877,7 +1906,7 @@ function UserProfile() {
   const [settings, setSettings] = useState(
     JSON.parse(localStorage.getItem('settings') || '{}')
   )
-  
+
   return <SettingsForm settings={settings} onChange={setSettings} />
 }
 ```
@@ -1889,7 +1918,7 @@ function FilteredList({ items }: { items: Item[] }) {
   // buildSearchIndex() runs ONLY on initial render
   const [searchIndex, setSearchIndex] = useState(() => buildSearchIndex(items))
   const [query, setQuery] = useState('')
-  
+
   return <SearchResults index={searchIndex} query={query} />
 }
 
@@ -1899,7 +1928,7 @@ function UserProfile() {
     const stored = localStorage.getItem('settings')
     return stored ? JSON.parse(stored) : {}
   })
-  
+
   return <SettingsForm settings={settings} onChange={setSettings} />
 }
 ```
@@ -2089,10 +2118,10 @@ Many browsers don't have hardware acceleration for CSS3 animations on SVG elemen
 ```tsx
 function LoadingSpinner() {
   return (
-    <svg 
+    <svg
       className="animate-spin"
-      width="24" 
-      height="24" 
+      width="24"
+      height="24"
       viewBox="0 0 24 24"
     >
       <circle cx="12" cy="12" r="10" stroke="currentColor" />
@@ -2107,9 +2136,9 @@ function LoadingSpinner() {
 function LoadingSpinner() {
   return (
     <div className="animate-spin">
-      <svg 
-        width="24" 
-        height="24" 
+      <svg
+        width="24"
+        height="24"
         viewBox="0 0 24 24"
       >
         <circle cx="12" cy="12" r="10" stroke="currentColor" />
@@ -2233,7 +2262,7 @@ When rendering content that depends on client-side storage (localStorage, cookie
 function ThemeWrapper({ children }: { children: ReactNode }) {
   // localStorage is not available on server - throws error
   const theme = localStorage.getItem('theme') || 'light'
-  
+
   return (
     <div className={theme}>
       {children}
@@ -2249,7 +2278,7 @@ Server-side rendering will fail because `localStorage` is undefined.
 ```tsx
 function ThemeWrapper({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState('light')
-  
+
   useEffect(() => {
     // Runs after hydration - causes visible flash
     const stored = localStorage.getItem('theme')
@@ -2257,7 +2286,7 @@ function ThemeWrapper({ children }: { children: ReactNode }) {
       setTheme(stored)
     }
   }, [])
-  
+
   return (
     <div className={theme}>
       {children}
@@ -2464,7 +2493,7 @@ export default function App() {
 **Example: preload critical fonts and styles**
 
 ```tsx
-import { preload, preinit } from 'react-dom'
+import { preinit, preload } from 'react-dom'
 
 export default function RootLayout({ children }) {
   // Preload font file
@@ -2484,7 +2513,7 @@ export default function RootLayout({ children }) {
 **Example: preload modules for code-split routes**
 
 ```tsx
-import { preloadModule, preinitModule } from 'react-dom'
+import { preinitModule, preloadModule } from 'react-dom'
 
 function Navigation() {
   const preloadDashboard = () => {
@@ -2545,7 +2574,7 @@ function SearchResults() {
 
   return (
     <>
-      <input onChange={(e) => handleSearch(e.target.value)} />
+      <input onChange={e => handleSearch(e.target.value)} />
       {isLoading && <Spinner />}
       <ResultsList results={results} />
     </>
@@ -2556,7 +2585,7 @@ function SearchResults() {
 **Correct: useTransition with built-in pending state**
 
 ```tsx
-import { useTransition, useState } from 'react'
+import { useState, useTransition } from 'react'
 
 function SearchResults() {
   const [query, setQuery] = useState('')
@@ -2565,7 +2594,7 @@ function SearchResults() {
 
   const handleSearch = (value: string) => {
     setQuery(value) // Update input immediately
-    
+
     startTransition(async () => {
       // Fetch and update results
       const data = await fetchResults(value)
@@ -2575,7 +2604,7 @@ function SearchResults() {
 
   return (
     <>
-      <input onChange={(e) => handleSearch(e.target.value)} />
+      <input onChange={e => handleSearch(e.target.value)} />
       {isPending && <Spinner />}
       <ResultsList results={results} />
     </>
@@ -2626,9 +2655,9 @@ function updateElementStyles(element: HTMLElement) {
 ```typescript
 function layoutThrashing(element: HTMLElement) {
   element.style.width = '100px'
-  const width = element.offsetWidth  // Forces reflow
+  const width = element.offsetWidth // Forces reflow
   element.style.height = '200px'
-  const height = element.offsetHeight  // Forces another reflow
+  const height = element.offsetHeight // Forces another reflow
 }
 ```
 
@@ -2641,7 +2670,7 @@ function updateElementStyles(element: HTMLElement) {
   element.style.height = '200px'
   element.style.backgroundColor = 'blue'
   element.style.border = '1px solid black'
-  
+
   // Read after all writes are done (single reflow)
   const { width, height } = element.getBoundingClientRect()
 }
@@ -2652,7 +2681,7 @@ function updateElementStyles(element: HTMLElement) {
 ```typescript
 function updateElementStyles(element: HTMLElement) {
   element.classList.add('highlighted-box')
-  
+
   const { width, height } = element.getBoundingClientRect()
 }
 ```
@@ -2665,7 +2694,7 @@ function updateElementStyles(element: HTMLElement) {
 // Incorrect: interleaving style changes with layout queries
 function Box({ isHighlighted }: { isHighlighted: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
-  
+
   useEffect(() => {
     if (ref.current && isHighlighted) {
       ref.current.style.width = '100px'
@@ -2673,7 +2702,7 @@ function Box({ isHighlighted }: { isHighlighted: boolean }) {
       ref.current.style.height = '200px'
     }
   }, [isHighlighted])
-  
+
   return <div ref={ref}>Content</div>
 }
 
@@ -2764,7 +2793,7 @@ function ProjectList({ projects }: { projects: Project[] }) {
       {projects.map(project => {
         // slugify() called 100+ times for same project names
         const slug = slugify(project.name)
-        
+
         return <ProjectCard key={project.id} slug={slug} />
       })}
     </div>
@@ -2793,7 +2822,7 @@ function ProjectList({ projects }: { projects: Project[] }) {
       {projects.map(project => {
         // Computed only once per unique project name
         const slug = cachedSlugify(project.name)
-        
+
         return <ProjectCard key={project.id} slug={slug} />
       })}
     </div>
@@ -2810,7 +2839,7 @@ function isLoggedIn(): boolean {
   if (isLoggedInCache !== null) {
     return isLoggedInCache
   }
-  
+
   isLoggedInCache = document.cookie.includes('auth=')
   return isLoggedInCache
 }
@@ -2854,7 +2883,7 @@ function getLocalStorage(key: string) {
 
 function setLocalStorage(key: string, value: string) {
   localStorage.setItem(key, value)
-  storageCache.set(key, value)  // keep cache in sync
+  storageCache.set(key, value) // keep cache in sync
 }
 ```
 
@@ -2879,7 +2908,8 @@ function getCookie(name: string) {
 
 ```typescript
 window.addEventListener('storage', (e) => {
-  if (e.key) storageCache.delete(e.key)
+  if (e.key)
+    storageCache.delete(e.key)
 })
 
 document.addEventListener('visibilitychange', () => {
@@ -2913,9 +2943,12 @@ const testers: User[] = []
 const inactive: User[] = []
 
 for (const user of users) {
-  if (user.isAdmin) admins.push(user)
-  if (user.isTester) testers.push(user)
-  if (!user.isActive) inactive.push(user)
+  if (user.isAdmin)
+    admins.push(user)
+  if (user.isTester)
+    testers.push(user)
+  if (!user.isActive)
+    inactive.push(user)
 }
 ```
 
@@ -3085,7 +3118,7 @@ Return early when result is determined to skip unnecessary processing.
 function validateUsers(users: User[]) {
   let hasError = false
   let errorMessage = ''
-  
+
   for (const user of users) {
     if (!user.email) {
       hasError = true
@@ -3097,7 +3130,7 @@ function validateUsers(users: User[]) {
     }
     // Continues checking all users even after error found
   }
-  
+
   return hasError ? { valid: false, error: errorMessage } : { valid: true }
 }
 ```
@@ -3154,8 +3187,8 @@ function Highlighter({ text, query }: Props) {
 
 ```typescript
 const regex = /foo/g
-regex.test('foo')  // true, lastIndex = 3
-regex.test('foo')  // false, lastIndex = 0
+regex.test('foo') // true, lastIndex = 3
+regex.test('foo') // false, lastIndex = 0
 ```
 
 Global regex (`/g`) has mutable `lastIndex` state:
@@ -3199,12 +3232,12 @@ const emails = responses.flatMap(r =>
 // Parse and filter valid numbers
 // Before
 const numbers = strings
-  .map(s => parseInt(s, 10))
+  .map(s => Number.parseInt(s, 10))
   .filter(n => !isNaN(n))
 
 // After
-const numbers = strings.flatMap(s => {
-  const n = parseInt(s, 10)
+const numbers = strings.flatMap((s) => {
+  const n = Number.parseInt(s, 10)
   return isNaN(n) ? [] : [n]
 })
 ```
@@ -3245,7 +3278,7 @@ Sorts the entire array just to find the maximum value.
 ```typescript
 function getOldestAndNewest(projects: Project[]) {
   const sorted = [...projects].sort((a, b) => a.updatedAt - b.updatedAt)
-  return { oldest: sorted[0], newest: sorted[sorted.length - 1] }
+  return { oldest: sorted[0], newest: sorted.at(-1) }
 }
 ```
 
@@ -3255,30 +3288,34 @@ Still sorts unnecessarily when only min/max are needed.
 
 ```typescript
 function getLatestProject(projects: Project[]) {
-  if (projects.length === 0) return null
-  
+  if (projects.length === 0)
+    return null
+
   let latest = projects[0]
-  
+
   for (let i = 1; i < projects.length; i++) {
     if (projects[i].updatedAt > latest.updatedAt) {
       latest = projects[i]
     }
   }
-  
+
   return latest
 }
 
 function getOldestAndNewest(projects: Project[]) {
-  if (projects.length === 0) return { oldest: null, newest: null }
-  
+  if (projects.length === 0)
+    return { oldest: null, newest: null }
+
   let oldest = projects[0]
   let newest = projects[0]
-  
+
   for (let i = 1; i < projects.length; i++) {
-    if (projects[i].updatedAt < oldest.updatedAt) oldest = projects[i]
-    if (projects[i].updatedAt > newest.updatedAt) newest = projects[i]
+    if (projects[i].updatedAt < oldest.updatedAt)
+      oldest = projects[i]
+    if (projects[i].updatedAt > newest.updatedAt)
+      newest = projects[i]
   }
-  
+
   return { oldest, newest }
 }
 ```
@@ -3406,7 +3443,8 @@ let didInit = false
 
 function Comp() {
   useEffect(() => {
-    if (didInit) return
+    if (didInit)
+      return
     didInit = true
     loadFromStorage()
     checkAuthToken()
@@ -3467,7 +3505,7 @@ function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {
   const [query, setQuery] = useState('')
 
   useEffect(() => {
-    const timeout = setTimeout(() => onSearch(query), 300)
+    const timeout = setTimeout(onSearch, 300, query)
     return () => clearTimeout(timeout)
   }, [query, onSearch])
 }
@@ -3476,14 +3514,14 @@ function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {
 **Correct: using React's useEffectEvent**
 
 ```tsx
-import { useEffectEvent } from 'react';
+import { useEffectEvent } from 'react'
 
 function SearchInput({ onSearch }: { onSearch: (q: string) => void }) {
   const [query, setQuery] = useState('')
   const onSearchEvent = useEffectEvent(onSearch)
 
   useEffect(() => {
-    const timeout = setTimeout(() => onSearchEvent(query), 300)
+    const timeout = setTimeout(onSearchEvent, 300, query)
     return () => clearTimeout(timeout)
   }, [query])
 }

@@ -28,8 +28,16 @@ function UserProfile({ user, theme }) {
   // Defined inside to access `user` - BAD
   const Stats = () => (
     <div>
-      <span>{user.followers} followers</span>
-      <span>{user.posts} posts</span>
+      <span>
+        {user.followers}
+        {' '}
+        followers
+      </span>
+      <span>
+        {user.posts}
+        {' '}
+        posts
+      </span>
     </div>
   )
 
@@ -47,7 +55,7 @@ Every time `UserProfile` renders, `Avatar` and `Stats` are new component types. 
 **Correct (pass props instead):**
 
 ```tsx
-function Avatar({ src, theme }: { src: string; theme: string }) {
+function Avatar({ src, theme }: { src: string, theme: string }) {
   return (
     <img
       src={src}
@@ -56,11 +64,19 @@ function Avatar({ src, theme }: { src: string; theme: string }) {
   )
 }
 
-function Stats({ followers, posts }: { followers: number; posts: number }) {
+function Stats({ followers, posts }: { followers: number, posts: number }) {
   return (
     <div>
-      <span>{followers} followers</span>
-      <span>{posts} posts</span>
+      <span>
+        {followers}
+        {' '}
+        followers
+      </span>
+      <span>
+        {posts}
+        {' '}
+        posts
+      </span>
     </div>
   )
 }

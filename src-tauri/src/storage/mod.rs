@@ -74,6 +74,8 @@ pub struct ProjectMetadata {
     pub docs: ProjectDocsConfig,
     #[serde(default)]
     pub mock: ProjectMockConfig,
+    #[serde(default)]
+    pub active_environment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,6 +267,16 @@ pub struct ApiSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Environment {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub variables: Vec<KeyValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CollectionTreeNode {
     pub id: String,
     pub slug: String,
@@ -298,6 +310,8 @@ pub struct ProjectSnapshot {
     pub metadata: ProjectMetadata,
     #[serde(default)]
     pub children: Vec<TreeNode>,
+    #[serde(default)]
+    pub environments: Vec<Environment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,6 +436,43 @@ pub struct ReorderChildrenInput {
     pub parent_collection_id: Option<String>,
     #[serde(default)]
     pub ordered_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateEnvironmentInput {
+    pub project_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub variables: Vec<KeyValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateEnvironmentInput {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub variables: Vec<KeyValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteEnvironmentInput {
+    pub id: String,
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetActiveEnvironmentInput {
+    pub project_id: String,
+    pub environment_id: Option<String>,
 }
 
 pub type ProjectSummary = ProjectMetadata;
@@ -592,9 +643,11 @@ impl WorkspaceIndex {
             } else {
                 vec![]
             };
+            let environments = read_environments(&self.root, &project_entry.metadata.id)?;
             projects.push(ProjectSnapshot {
                 metadata: project_entry.metadata.clone(),
                 children,
+                environments,
             });
         }
 
@@ -663,6 +716,7 @@ pub fn create_project(
         root_order: vec![],
         docs: ProjectDocsConfig::default(),
         mock: ProjectMockConfig::default(),
+        active_environment_id: None,
     };
 
     write_json_file(&project_dir.join(METADATA_FILE), &metadata)?;
@@ -965,6 +1019,142 @@ pub fn read_api(root: impl AsRef<Path>, id: &str) -> AppResult<ApiDefinition> {
     Ok(entry.definition.clone())
 }
 
+const ENVIRONMENTS_FILE: &str = "environments.json";
+
+fn read_environments(root: &Path, project_id: &str) -> AppResult<Vec<Environment>> {
+    let index = WorkspaceIndex::load(root)?;
+    let project = index
+        .projects
+        .get(project_id)
+        .ok_or_else(|| AppError::NotFound(format!("project {}", project_id)))?;
+    let path = project.dir.join(ENVIRONMENTS_FILE);
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    read_json_file(&path)
+}
+
+fn write_environments(
+    root: &Path,
+    project_id: &str,
+    environments: &[Environment],
+) -> AppResult<()> {
+    let index = WorkspaceIndex::load(root)?;
+    let project = index
+        .projects
+        .get(project_id)
+        .ok_or_else(|| AppError::NotFound(format!("project {}", project_id)))?;
+    let path = project.dir.join(ENVIRONMENTS_FILE);
+    write_json_file(&path, &environments.to_vec())
+}
+
+pub fn create_environment(
+    root: impl AsRef<Path>,
+    input: CreateEnvironmentInput,
+) -> AppResult<Environment> {
+    let root = root.as_ref();
+    let index = WorkspaceIndex::load(root)?;
+    if !index.projects.contains_key(&input.project_id) {
+        return Err(AppError::NotFound(format!("project {}", input.project_id)));
+    }
+
+    let mut environments = read_environments(root, &input.project_id)?;
+    let environment = Environment {
+        id: new_id(),
+        name: required_name(&input.name, "environment")?,
+        base_url: input.base_url,
+        variables: input.variables,
+    };
+    environments.push(environment.clone());
+    write_environments(root, &input.project_id, &environments)?;
+    Ok(environment)
+}
+
+pub fn update_environment(
+    root: impl AsRef<Path>,
+    input: UpdateEnvironmentInput,
+) -> AppResult<Environment> {
+    let root = root.as_ref();
+    let mut environments = read_environments(root, &input.project_id)?;
+    let env = environments
+        .iter_mut()
+        .find(|e| e.id == input.id)
+        .ok_or_else(|| AppError::NotFound(format!("environment {}", input.id)))?;
+    env.name = required_name(&input.name, "environment")?;
+    env.base_url = input.base_url;
+    env.variables = input.variables;
+    let updated = env.clone();
+    write_environments(root, &input.project_id, &environments)?;
+    Ok(updated)
+}
+
+pub fn delete_environment(
+    root: impl AsRef<Path>,
+    input: DeleteEnvironmentInput,
+) -> AppResult<()> {
+    let root = root.as_ref();
+    let mut environments = read_environments(root, &input.project_id)?;
+    let original_len = environments.len();
+    environments.retain(|e| e.id != input.id);
+    if environments.len() == original_len {
+        return Err(AppError::NotFound(format!("environment {}", input.id)));
+    }
+    write_environments(root, &input.project_id, &environments)?;
+
+    // Clear active_environment_id if it was deleted
+    let index = WorkspaceIndex::load(root)?;
+    let project = index
+        .projects
+        .get(&input.project_id)
+        .ok_or_else(|| AppError::NotFound(format!("project {}", input.project_id)))?;
+    if project.metadata.active_environment_id.as_deref() == Some(&input.id) {
+        let mut metadata = project.metadata.clone();
+        metadata.active_environment_id = None;
+        metadata.updated_at = now_iso_string();
+        write_json_file(&project.dir.join(METADATA_FILE), &metadata)?;
+    }
+
+    Ok(())
+}
+
+pub fn list_environments(
+    root: impl AsRef<Path>,
+    project_id: &str,
+) -> AppResult<Vec<Environment>> {
+    let root = root.as_ref();
+    let index = WorkspaceIndex::load(root)?;
+    if !index.projects.contains_key(project_id) {
+        return Err(AppError::NotFound(format!("project {}", project_id)));
+    }
+    read_environments(root, project_id)
+}
+
+pub fn set_active_environment(
+    root: impl AsRef<Path>,
+    input: SetActiveEnvironmentInput,
+) -> AppResult<ProjectMetadata> {
+    let root = root.as_ref();
+    let index = WorkspaceIndex::load(root)?;
+    let project = index
+        .projects
+        .get(&input.project_id)
+        .ok_or_else(|| AppError::NotFound(format!("project {}", input.project_id)))?;
+
+    // Validate environment exists if not None
+    if let Some(ref env_id) = input.environment_id {
+        let environments = read_environments(root, &input.project_id)?;
+        if !environments.iter().any(|e| e.id == *env_id) {
+            return Err(AppError::NotFound(format!("environment {}", env_id)));
+        }
+    }
+
+    let mut metadata = project.metadata.clone();
+    metadata.active_environment_id = input.environment_id;
+    metadata.updated_at = now_iso_string();
+    write_json_file(&project.dir.join(METADATA_FILE), &metadata)?;
+    Ok(metadata)
+}
+
 fn initialize_workspace(root: &Path) -> AppResult<()> {
     let workspace_id = new_id();
     let project_id = new_id();
@@ -993,6 +1183,7 @@ fn initialize_workspace(root: &Path) -> AppResult<()> {
         root_order: vec![],
         docs: ProjectDocsConfig::default(),
         mock: ProjectMockConfig::default(),
+        active_environment_id: None,
     };
     write_json_file(&project_dir.join(METADATA_FILE), &project_metadata)?;
 

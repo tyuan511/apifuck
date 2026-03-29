@@ -18,7 +18,7 @@ function Form() {
   const [fullName, setFullName] = useState('')
 
   useEffect(() => {
-    setFullName(firstName + ' ' + lastName)
+    setFullName(`${firstName} ${lastName}`)
   }, [firstName, lastName])
 
   return <p>{fullName}</p>
@@ -31,7 +31,7 @@ function Form() {
 function Form() {
   const [firstName, setFirstName] = useState('First')
   const [lastName, setLastName] = useState('Last')
-  const fullName = firstName + ' ' + lastName
+  const fullName = `${firstName} ${lastName}`
 
   return <p>{fullName}</p>
 }
