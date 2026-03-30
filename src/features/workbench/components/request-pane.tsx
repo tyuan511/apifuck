@@ -70,7 +70,7 @@ import {
   startWindowDragging,
 } from '../utils'
 import { EnvironmentVariableInput } from './environment-variable-input'
-import { MethodBadge, ResponseMetaBadge } from './shared'
+import { MethodBadge } from './shared'
 
 interface RequestPaneProps {
   activeDraft: RequestEditorDraft | null
@@ -1513,34 +1513,118 @@ function ResponsePane(props: { response: ResponseState | null }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/70 px-3 py-2 text-[11px] text-muted-foreground">
-        <ResponseMetaBadge label="状态" value={props.response.status !== null ? String(props.response.status) : '等待中'} />
-        <ResponseMetaBadge label="耗时" value={`${props.response.durationMs} 毫秒`} />
-        <ResponseMetaBadge label="大小" value={formatBytes(props.response.sizeBytes)} />
-        <ResponseMetaBadge label="内容类型" value={props.response.contentType || '未知'} />
-        {props.response.responseType && <ResponseMetaBadge label="视图" value={props.response.responseType === 'json' ? 'JSON' : '文本'} />}
-      </div>
+      <Tabs defaultValue="body" className="flex h-full min-h-0 flex-col overflow-hidden">
+        <div className="border-b border-border/70 px-3 py-2">
+          <TabsList>
+            <TabsTrigger value="info" className="px-1.5 py-0.5 text-[13px]">
+              基本信息
+            </TabsTrigger>
+            <TabsTrigger value="headers" className="px-1.5 py-0.5 text-[13px]">
+              响应头
+            </TabsTrigger>
+            <TabsTrigger value="body" className="px-1.5 py-0.5 text-[13px]">
+              响应体
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden px-3 py-3">
-        {props.response.isLoading
-          ? (
-              <div className="grid h-full w-full flex-1 place-items-center">
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Loader2Icon className="size-4 animate-spin" />
-                  请求发送中...
-                </div>
-              </div>
-            )
-          : props.response.error
-            ? (
-                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
-                  {props.response.error}
-                </div>
-              )
-            : props.response.responseType === 'json'
-              ? <JsonResponseView body={props.response.body} />
-              : <TextResponseView body={props.response.body} contentType={props.response.contentType} />}
+        <TabsContent value="info" className="min-h-0 flex-1 overflow-auto px-3 py-3">
+          <ResponseInfoView response={props.response} />
+        </TabsContent>
+
+        <TabsContent value="headers" className="min-h-0 flex-1 overflow-auto px-3 py-3">
+          <ResponseHeadersView response={props.response} />
+        </TabsContent>
+
+        <TabsContent value="body" className="min-h-0 flex-1 overflow-hidden px-3 py-3">
+          <ResponseBodyView response={props.response} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function ResponseInfoView(props: { response: ResponseState }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <ResponseInfoCard label="状态" value={props.response.status !== null ? String(props.response.status) : '等待中'} />
+      <ResponseInfoCard label="耗时" value={`${props.response.durationMs} 毫秒`} />
+      <ResponseInfoCard label="大小" value={formatBytes(props.response.sizeBytes)} />
+      <ResponseInfoCard label="内容类型" value={props.response.contentType || '未知'} />
+      <ResponseInfoCard label="响应头数量" value={String(props.response.headers.length)} />
+      <ResponseInfoCard label="视图" value={props.response.responseType ? (props.response.responseType === 'json' ? 'JSON' : '文本') : '未知'} />
+      <ResponseInfoCard label="请求状态" value={props.response.isLoading ? '请求发送中' : props.response.error ? '请求失败' : '请求完成'} />
+      {props.response.error && (
+        <div className="sm:col-span-2 xl:col-span-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+          {props.response.error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ResponseInfoCard(props: { label: string, value: string }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-muted/25 p-3">
+      <div className="text-xs text-muted-foreground">{props.label}</div>
+      <div className="mt-1 text-sm font-medium break-all">{props.value}</div>
+    </div>
+  )
+}
+
+function ResponseBodyView(props: { response: ResponseState }) {
+  if (props.response.isLoading) {
+    return (
+      <div className="grid h-full w-full place-items-center">
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <Loader2Icon className="size-4 animate-spin" />
+          请求发送中...
+        </div>
       </div>
+    )
+  }
+
+  if (props.response.error) {
+    return (
+      <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
+        {props.response.error}
+      </div>
+    )
+  }
+
+  return props.response.responseType === 'json'
+    ? <JsonResponseView body={props.response.body} />
+    : <TextResponseView body={props.response.body} contentType={props.response.contentType} />
+}
+
+function ResponseHeadersView(props: { response: ResponseState }) {
+  if (props.response.isLoading) {
+    return (
+      <div className="grid h-full place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
+        请求发送中...
+      </div>
+    )
+  }
+
+  if (props.response.headers.length === 0) {
+    return (
+      <div className="grid h-full place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
+        暂无响应头
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {props.response.headers.map(header => (
+        <div
+          key={`${header.name}:${header.value}`}
+          className="grid grid-cols-[minmax(0,_220px)_minmax(0,_1fr)] gap-2 rounded-xl border border-border/70 bg-muted/25 p-2.5"
+        >
+          <div className="text-sm font-medium break-all">{header.name}</div>
+          <div className="text-sm text-muted-foreground break-all">{header.value}</div>
+        </div>
+      ))}
     </div>
   )
 }
