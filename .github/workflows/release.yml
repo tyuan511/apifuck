@@ -6,8 +6,57 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  create-release:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.release.outputs.release_id }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_NOTES_PATH=docs/release/${VERSION}.md" >> "$GITHUB_ENV"
+
+      - name: Create or update GitHub release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f "${RELEASE_NOTES_PATH}" ]; then
+            echo "Missing release notes file: ${RELEASE_NOTES_PATH}" >&2
+            exit 1
+          fi
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file "${RELEASE_NOTES_PATH}"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file "${RELEASE_NOTES_PATH}" \
+              --verify-tag
+          fi
+
+          RELEASE_ID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq '.id')"
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
   publish-tauri:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -59,15 +108,6 @@ jobs:
         run: |
           bun run release:sync-version -- "${RELEASE_VERSION}" --verify-release-notes
 
-      - name: Load release notes content
-        shell: bash
-        run: |
-          {
-            echo 'RELEASE_BODY<<EOF'
-            cat "${RELEASE_NOTES_PATH}"
-            echo 'EOF'
-          } >> "$GITHUB_ENV"
-
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
@@ -78,9 +118,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          releaseId: ${{ needs.create-release.outputs.release-id }}
           tagName: ${{ github.ref_name }}
-          releaseName: v${{ env.RELEASE_VERSION }}
-          releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
           tauriScript: bun tauri
