@@ -3,6 +3,7 @@ import type {
   ApiDefinition,
   CollectionMetadata,
   CollectionTreeNode,
+  Environment,
   ProjectMetadata,
   ProjectSnapshot,
   ResponseHeader,
@@ -20,9 +21,10 @@ export type TreeSelection
 export interface RequestEditorDraft extends ApiDefinition {}
 export interface CollectionEditorDraft extends CollectionMetadata {}
 export interface ProjectEditorDraft extends ProjectMetadata {}
+export interface EnvironmentEditorDraft extends Environment {}
 
 export interface OpenRequestTab {
-  entityType: 'request' | 'collection' | 'project'
+  entityType: 'request' | 'collection' | 'project' | 'environment'
   requestId: string
   entityId: string
   title: string

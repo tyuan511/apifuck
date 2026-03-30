@@ -6,7 +6,7 @@ export type AppTheme = 'light' | 'dark' | 'system'
 export type AppPrimaryColor = 'slate' | 'blue' | 'green' | 'amber' | 'rose' | 'violet'
 
 export interface OpenRequestTab {
-  entityType: 'request' | 'collection' | 'project'
+  entityType: 'request' | 'collection' | 'project' | 'environment'
   requestId: string
   entityId: string
   title: string

@@ -1,5 +1,10 @@
+import type { RequestExportLanguage, RequestExportSnippet } from '../request-export'
 import type { PendingCollectionDeletion, PendingEnvironmentDeletion, PendingRecentProjectRemoval, PendingRequestDeletion } from '../types'
 import type { RequestScopeConfig } from '@/lib/project'
+import { CopyIcon } from 'lucide-react'
+import * as React from 'react'
+import { toast } from 'sonner'
+import { MonacoCodeEditor } from '@/components/monaco-editor'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -184,7 +189,7 @@ export function CreateRequestDialog(props: {
         </DialogHeader>
         <div className="space-y-3">
           <LabelBlock label="请求名称">
-            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="健康检查" />
+            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="请求名称" />
           </LabelBlock>
           <LabelBlock label="描述（可选）">
             <Textarea
@@ -221,7 +226,7 @@ export function EditRequestDialog(props: {
         </DialogHeader>
         <div className="space-y-3">
           <LabelBlock label="请求名称">
-            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="健康检查" />
+            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="请求名称" />
           </LabelBlock>
           <LabelBlock label="描述（可选）">
             <Textarea
@@ -489,6 +494,83 @@ export function EnvironmentDialog(props: {
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>取消</Button>
           <Button onClick={props.onSubmit}>{props.isEditing ? '保存' : '创建'}</Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function CopyRequestDialog(props: {
+  open: boolean
+  requestName: string
+  snippets: Record<RequestExportLanguage, RequestExportSnippet> | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const [activeTab, setActiveTab] = React.useState<RequestExportLanguage>('curl')
+
+  React.useEffect(() => {
+    if (props.open) {
+      setActiveTab('curl')
+    }
+  }, [props.open, props.requestName])
+
+  async function handleCopy() {
+    if (!props.snippets) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(props.snippets[activeTab].code)
+      toast.success(`已复制 ${props.snippets[activeTab].title} 代码`)
+    }
+    catch (error) {
+      toast.error(error instanceof Error ? error.message : '复制失败')
+    }
+  }
+
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="flex h-[min(82vh,760px)] max-h-[82vh] max-w-5xl flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>复制为...</DialogTitle>
+          <DialogDescription>
+            导出
+            {' '}
+            <span className="font-medium text-foreground">{props.requestName || '当前接口'}</span>
+            {' '}
+            的完整请求代码。
+          </DialogDescription>
+        </DialogHeader>
+
+        {props.snippets && (
+          <Tabs value={activeTab} onValueChange={value => setActiveTab(value as RequestExportLanguage)} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-3">
+              <TabsList>
+                <TabsTrigger value="curl">cURL</TabsTrigger>
+                <TabsTrigger value="javascript">JavaScript</TabsTrigger>
+                <TabsTrigger value="python">Python</TabsTrigger>
+                <TabsTrigger value="go">Go</TabsTrigger>
+              </TabsList>
+              <Button size="sm" onClick={() => { void handleCopy() }}>
+                <CopyIcon />
+                复制代码
+              </Button>
+            </div>
+
+            {(['curl', 'javascript', 'python', 'go'] as RequestExportLanguage[]).map(language => (
+              <TabsContent key={language} value={language} className="min-h-0 flex-1 overflow-hidden pt-3">
+                <MonacoCodeEditor
+                  className="h-full"
+                  language={props.snippets[language].language}
+                  lineNumbers="on"
+                  modelUri={`file:///request-export-${language}.${language === 'curl' ? 'sh' : language === 'javascript' ? 'js' : language === 'python' ? 'py' : 'go'}`}
+                  readOnly
+                  value={props.snippets[language].code}
+                  wordWrap="on"
+                />
+              </TabsContent>
+            ))}
+          </Tabs>
+        )}
       </DialogContent>
     </Dialog>
   )

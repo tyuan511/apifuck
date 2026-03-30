@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand'
 import type {
   CollectionEditorDraft,
   EditorPanelTab,
+  EnvironmentEditorDraft,
   OpenRequestTab,
   PendingCollectionDeletion,
   PendingEnvironmentDeletion,
@@ -76,9 +77,11 @@ interface WorkbenchState {
   requestDrafts: Record<string, RequestEditorDraft>
   collectionDrafts: Record<string, CollectionEditorDraft>
   projectDrafts: Record<string, ProjectEditorDraft>
+  environmentDrafts: Record<string, EnvironmentEditorDraft>
   savedRequests: Record<string, ApiDefinition>
   savedCollections: Record<string, CollectionEditorDraft>
   savedProjects: Record<string, ProjectEditorDraft>
+  savedEnvironments: Record<string, EnvironmentEditorDraft>
   dirtyRequestIds: Set<string>
   loadingRequestIds: string[]
   requestResponses: Record<string, ResponseState>
@@ -200,14 +203,20 @@ interface WorkbenchActions {
     nextProject: ProjectSnapshot | null,
   ) => void
   openCreateEnvironmentDialog: () => void
+  openEnvironmentTab: () => void
   openEditEnvironmentDialog: (environment: Environment) => void
   closeEnvironmentDialog: () => void
   setEnvironmentNameDraft: (value: string) => void
   setEnvironmentBaseUrlDraft: (value: string) => void
   setEnvironmentVariablesDraft: (variables: KeyValue[]) => void
   addEnvironmentVariable: () => void
+  updateEnvironmentTabDraft: (updater: (draft: EnvironmentEditorDraft) => EnvironmentEditorDraft) => void
+  createEnvironmentFromTab: () => Promise<void>
   handleCreateEnvironment: () => Promise<void>
   handleEditEnvironment: () => Promise<void>
+  saveEnvironmentFromTab: () => Promise<void>
+  selectEnvironmentForTab: (environmentId: string | null) => void
+  startCreateEnvironmentInTab: () => Promise<void>
   requestDeleteEnvironment: (environmentId: string) => void
   clearPendingEnvironmentDeletion: () => void
   handleDeleteEnvironment: () => Promise<void>
@@ -233,9 +242,11 @@ const initialState: WorkbenchState = {
   requestDrafts: {},
   collectionDrafts: {},
   projectDrafts: {},
+  environmentDrafts: {},
   savedRequests: {},
   savedCollections: {},
   savedProjects: {},
+  savedEnvironments: {},
   dirtyRequestIds: new Set(),
   loadingRequestIds: [],
   requestResponses: {},
@@ -394,6 +405,13 @@ function createCollectionEditorDraft(collection: CollectionTreeNode): Collection
   })) as CollectionEditorDraft
 }
 
+function createEnvironmentEditorDraft(environment: Environment): EnvironmentEditorDraft {
+  return JSON.parse(JSON.stringify(environment)) as EnvironmentEditorDraft
+}
+
+const environmentSettingsTabId = 'environment:settings'
+const environmentSettingsTabTitle = '环境设置'
+
 function getActiveRequestEntityId(state: Pick<WorkbenchStore, 'activeRequestId' | 'openRequestTabs'>): string | null {
   if (!state.activeRequestId) {
     return null
@@ -451,6 +469,10 @@ function isTabRemoved(
 
   if (tab.entityType === 'collection') {
     return removedCollectionIds.has(tab.entityId)
+  }
+
+  if (tab.entityType === 'environment') {
+    return false
   }
 
   return false
@@ -610,6 +632,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     const savedCollections: Record<string, CollectionEditorDraft> = {}
     const projectDrafts: Record<string, ProjectEditorDraft> = {}
     const savedProjects: Record<string, ProjectEditorDraft> = {}
+    const environmentDrafts: Record<string, EnvironmentEditorDraft> = {}
+    const savedEnvironments: Record<string, EnvironmentEditorDraft> = {}
 
     for (const tab of tabs) {
       if (tab.entityType === 'project' && project?.metadata.id === tab.entityId) {
@@ -628,6 +652,17 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         collectionDrafts[tab.entityId] = draft
         savedCollections[tab.entityId] = draft
       }
+
+      if (tab.entityType === 'environment' && project) {
+        const environment = project.environments.find(item => item.id === tab.entityId)
+        if (!environment) {
+          continue
+        }
+
+        const draft = createEnvironmentEditorDraft(environment)
+        environmentDrafts[tab.entityId] = draft
+        savedEnvironments[tab.entityId] = draft
+      }
     }
 
     const activeRecord = tabs.find(tab => tab.requestId === activeRequestId) ?? null
@@ -640,6 +675,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       savedCollections,
       projectDrafts,
       savedProjects,
+      environmentDrafts,
+      savedEnvironments,
     })
   },
 
@@ -771,6 +808,51 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     get().openProjectTab()
   },
 
+  openEnvironmentTab() {
+    const { project } = get()
+    if (!project) {
+      toast.error('请先选择项目')
+      return
+    }
+
+    const environment = project.environments.find(item => item.id === get().activeEnvironmentId) ?? project.environments[0] ?? null
+    const entityId = environment?.id ?? '__new__'
+    const draft = environment
+      ? createEnvironmentEditorDraft(environment)
+      : {
+        id: '__new__',
+        name: '新的环境',
+        baseUrl: '',
+        variables: [],
+      } satisfies EnvironmentEditorDraft
+
+    set((state) => {
+      const existing = state.openRequestTabs.find(tab => tab.requestId === environmentSettingsTabId)
+      const nextTab: OpenRequestTab = {
+        entityType: 'environment',
+        requestId: environmentSettingsTabId,
+        entityId,
+        title: environmentSettingsTabTitle,
+        method: 'ENV',
+        dirty: false,
+        lastFocusedAt: Date.now(),
+        editorTab: existing?.editorTab as SettingsPanelTab ?? 'info',
+      }
+
+      return {
+        environmentDrafts: { ...state.environmentDrafts, [entityId]: draft },
+        savedEnvironments: { ...state.savedEnvironments, [entityId]: draft },
+        openRequestTabs: existing
+          ? state.openRequestTabs.map(tab => tab.requestId === environmentSettingsTabId ? nextTab : tab)
+          : [...state.openRequestTabs, nextTab],
+        activeRequestId: environmentSettingsTabId,
+        activeEditorTab: nextTab.editorTab,
+      }
+    })
+
+    get().syncTabState()
+  },
+
   closeCreateProjectDialog() {
     set({
       projectDialogOpen: false,
@@ -822,7 +904,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         entityType: 'project',
         requestId,
         entityId,
-        title: `${project.metadata.name} 设置`,
+        title: `${project.metadata.name}设置`,
         method: 'PROJ',
         dirty: false,
         lastFocusedAt: Date.now(),
@@ -1068,7 +1150,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         entityType: 'collection',
         requestId,
         entityId,
-        title: `${node.name} 设置`,
+        title: `${node.name}设置`,
         method: 'DIR',
         dirty: false,
         lastFocusedAt: Date.now(),
@@ -1143,7 +1225,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         dirtyRequestIds: nextDirtyIds,
         openRequestTabs: state.openRequestTabs.map(tab =>
           tab.entityType === 'collection' && tab.entityId === entityId
-            ? { ...tab, title: `${nextDraft.name} 设置`, dirty }
+            ? { ...tab, title: `${nextDraft.name}设置`, dirty }
             : tab,
         ),
       }
@@ -1175,7 +1257,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         dirtyRequestIds: nextDirtyIds,
         openRequestTabs: state.openRequestTabs.map(tab =>
           tab.entityType === 'project' && tab.entityId === entityId
-            ? { ...tab, title: `${nextDraft.name} 设置`, dirty }
+            ? { ...tab, title: `${nextDraft.name}设置`, dirty }
             : tab,
         ),
       }
@@ -1695,7 +1777,6 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           },
         },
       }))
-      toast.error(error instanceof Error ? error.message : String(error))
     }
   },
 
@@ -1738,6 +1819,12 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         ),
         savedProjects: Object.fromEntries(
           Object.entries(state.savedProjects).filter(([id]) => id !== closingTab?.entityId),
+        ),
+        environmentDrafts: Object.fromEntries(
+          Object.entries(state.environmentDrafts).filter(([id]) => id !== closingTab?.entityId),
+        ),
+        savedEnvironments: Object.fromEntries(
+          Object.entries(state.savedEnvironments).filter(([id]) => id !== closingTab?.entityId),
         ),
         requestResponses: Object.fromEntries(
           Object.entries(state.requestResponses).filter(([id]) => id !== closingTab?.entityId),
@@ -1883,6 +1970,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const nextSavedCollections = { ...state.savedCollections }
       const nextProjectDrafts = { ...state.projectDrafts }
       const nextSavedProjects = { ...state.savedProjects }
+      const nextEnvironmentDrafts = { ...state.environmentDrafts }
+      const nextSavedEnvironments = { ...state.savedEnvironments }
       const nextDirtyIds = new Set(state.dirtyRequestIds)
       const nextTabs = state.openRequestTabs.map((tab) => {
         if (tab.entityType === 'project' && tab.entityId === snapshot.metadata.id) {
@@ -1893,7 +1982,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           nextProjectDrafts[tab.entityId] = dirty && currentDraft ? currentDraft : saved
           return {
             ...tab,
-            title: `${(dirty && currentDraft ? currentDraft.name : saved.name) || saved.name} 设置`,
+            title: `${(dirty && currentDraft ? currentDraft.name : saved.name) || saved.name}设置`,
             dirty,
           }
         }
@@ -1911,7 +2000,25 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           nextCollectionDrafts[tab.entityId] = dirty && currentDraft ? currentDraft : saved
           return {
             ...tab,
-            title: `${(dirty && currentDraft ? currentDraft.name : saved.name) || saved.name} 设置`,
+            title: `${(dirty && currentDraft ? currentDraft.name : saved.name) || saved.name}设置`,
+            dirty,
+          }
+        }
+
+        if (tab.entityType === 'environment') {
+          const environment = snapshot.environments.find(item => item.id === tab.entityId)
+          if (!environment) {
+            return tab
+          }
+
+          const saved = createEnvironmentEditorDraft(environment)
+          const currentDraft = state.environmentDrafts[tab.entityId]
+          const dirty = nextDirtyIds.has(tab.entityId)
+          nextSavedEnvironments[tab.entityId] = saved
+          nextEnvironmentDrafts[tab.entityId] = dirty && currentDraft ? currentDraft : saved
+          return {
+            ...tab,
+            title: `环境: ${(dirty && currentDraft ? currentDraft.name : saved.name) || saved.name}`,
             dirty,
           }
         }
@@ -1928,6 +2035,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         savedCollections: nextSavedCollections,
         projectDrafts: nextProjectDrafts,
         savedProjects: nextSavedProjects,
+        environmentDrafts: nextEnvironmentDrafts,
+        savedEnvironments: nextSavedEnvironments,
       }
     })
 
@@ -2145,6 +2254,43 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }))
   },
 
+  updateEnvironmentTabDraft(updater) {
+    const { activeRequestId, openRequestTabs, environmentDrafts, savedEnvironments } = get() as WorkbenchStore & {
+      updateEnvironmentTabDraft?: unknown
+    }
+    const activeTab = activeRequestId ? openRequestTabs.find(tab => tab.requestId === activeRequestId) : null
+    const entityId = activeTab?.entityType === 'environment' ? activeTab.entityId : null
+    if (!entityId || !environmentDrafts[entityId]) {
+      return
+    }
+
+    const nextDraft = updater(JSON.parse(JSON.stringify(environmentDrafts[entityId])) as EnvironmentEditorDraft)
+    const dirty = JSON.stringify(savedEnvironments[entityId]) !== JSON.stringify(nextDraft)
+    set((state) => {
+      const nextDirtyIds = new Set(state.dirtyRequestIds)
+      if (dirty) {
+        nextDirtyIds.add(entityId)
+      }
+      else {
+        nextDirtyIds.delete(entityId)
+      }
+
+      const title = nextDraft.id === '__new__'
+        ? '环境设置'
+        : `环境: ${nextDraft.name || '未命名环境'}`
+
+      return {
+        environmentDrafts: { ...state.environmentDrafts, [entityId]: nextDraft },
+        dirtyRequestIds: nextDirtyIds,
+        openRequestTabs: state.openRequestTabs.map(tab =>
+          tab.entityType === 'environment' && tab.entityId === entityId
+            ? { ...tab, title, dirty }
+            : tab,
+        ),
+      }
+    })
+  },
+
   async handleCreateEnvironment() {
     const { project, environmentNameDraft, environmentBaseUrlDraft, environmentVariablesDraft } = get()
     const activeProjectId = project?.metadata.id ?? null
@@ -2172,6 +2318,59 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         })
       }
       get().closeEnvironmentDialog()
+    }, '环境已创建')
+  },
+
+  async createEnvironmentFromTab() {
+    const { project, activeRequestId, openRequestTabs, environmentDrafts } = get()
+    const activeTab = activeRequestId ? openRequestTabs.find(tab => tab.requestId === activeRequestId) : null
+    const entityId = activeTab?.entityType === 'environment' ? activeTab.entityId : null
+    const draft = entityId ? environmentDrafts[entityId] : null
+    const activeProjectId = project?.metadata.id ?? null
+    const name = draft?.name.trim() ?? ''
+    if (!activeProjectId || !draft || !name) {
+      toast.error('环境名称不能为空')
+      return
+    }
+
+    await runTask(set, async () => {
+      const created = await createEnvironment({
+        projectId: activeProjectId,
+        name,
+        baseUrl: draft.baseUrl.trim(),
+        variables: draft.variables,
+      })
+      const snapshot = await get().refreshProjectInternal()
+      if (!snapshot || !activeTab) {
+        return
+      }
+
+      const nextDraft = createEnvironmentEditorDraft(created)
+      set(state => ({
+        environmentDrafts: {
+          ...Object.fromEntries(Object.entries(state.environmentDrafts).filter(([id]) => id !== entityId)),
+          [created.id]: nextDraft,
+        },
+        savedEnvironments: {
+          ...Object.fromEntries(Object.entries(state.savedEnvironments).filter(([id]) => id !== entityId)),
+          [created.id]: nextDraft,
+        },
+        dirtyRequestIds: new Set([...state.dirtyRequestIds].filter(id => id !== entityId)),
+        openRequestTabs: state.openRequestTabs.map(tab =>
+          tab.requestId === environmentSettingsTabId
+            ? {
+                ...tab,
+                entityId: created.id,
+                requestId: environmentSettingsTabId,
+                title: environmentSettingsTabTitle,
+                dirty: false,
+              }
+            : tab,
+        ),
+        activeRequestId: environmentSettingsTabId,
+        activeEnvironmentId: snapshot.metadata.activeEnvironmentId ?? state.activeEnvironmentId,
+      }))
+      get().syncTabState()
     }, '环境已创建')
   },
 
@@ -2203,6 +2402,126 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       }
       get().closeEnvironmentDialog()
     }, '环境已更新')
+  },
+
+  async saveEnvironmentFromTab() {
+    const { project, activeRequestId, openRequestTabs, environmentDrafts } = get()
+    const activeTab = activeRequestId ? openRequestTabs.find(tab => tab.requestId === activeRequestId) : null
+    const entityId = activeTab?.entityType === 'environment' ? activeTab.entityId : null
+    const draft = entityId ? environmentDrafts[entityId] : null
+
+    if (!draft) {
+      return
+    }
+
+    if (draft.id === '__new__') {
+      await get().createEnvironmentFromTab()
+      return
+    }
+
+    const activeProjectId = project?.metadata.id ?? null
+    const name = draft.name.trim()
+    if (!activeProjectId || !name) {
+      toast.error('环境名称不能为空')
+      return
+    }
+
+    await runTask(set, async () => {
+      await updateEnvironment({
+        id: draft.id,
+        projectId: activeProjectId,
+        name,
+        baseUrl: draft.baseUrl.trim(),
+        variables: draft.variables,
+      })
+      const snapshot = await get().refreshProjectInternal()
+      if (!snapshot) {
+        return
+      }
+
+      const saved = snapshot.environments.find(item => item.id === draft.id)
+      if (!saved) {
+        return
+      }
+
+      const nextDraft = createEnvironmentEditorDraft(saved)
+      set((state) => {
+        const nextDirtyIds = new Set(state.dirtyRequestIds)
+        nextDirtyIds.delete(draft.id)
+        return {
+          environmentDrafts: { ...state.environmentDrafts, [draft.id]: nextDraft },
+          savedEnvironments: { ...state.savedEnvironments, [draft.id]: nextDraft },
+          dirtyRequestIds: nextDirtyIds,
+          openRequestTabs: state.openRequestTabs.map(tab =>
+            tab.entityType === 'environment' && tab.entityId === draft.id
+              ? { ...tab, title: environmentSettingsTabTitle, dirty: false }
+              : tab,
+          ),
+        }
+      })
+    }, '环境已更新')
+  },
+
+  selectEnvironmentForTab(environmentId) {
+    const { project, activeRequestId } = get()
+    if (!project || !activeRequestId) {
+      return
+    }
+
+    const environment = environmentId ? project.environments.find(item => item.id === environmentId) ?? null : null
+    const entityId = environment?.id ?? '__new__'
+    const draft = environment
+      ? createEnvironmentEditorDraft(environment)
+      : {
+        id: '__new__',
+        name: '新的环境',
+        baseUrl: '',
+        variables: [],
+      } satisfies EnvironmentEditorDraft
+
+    set(state => ({
+      environmentDrafts: { ...state.environmentDrafts, [entityId]: draft },
+      savedEnvironments: { ...state.savedEnvironments, [entityId]: draft },
+      dirtyRequestIds: new Set([...state.dirtyRequestIds].filter(id => id !== activeRequestId && id !== entityId)),
+      openRequestTabs: state.openRequestTabs.map(tab =>
+        tab.requestId === environmentSettingsTabId
+          ? {
+              ...tab,
+              entityId,
+              requestId: environmentSettingsTabId,
+              title: environmentSettingsTabTitle,
+              dirty: false,
+            }
+          : tab,
+      ),
+      activeRequestId: environmentSettingsTabId,
+      activeEditorTab: 'info',
+    }))
+
+    get().syncTabState()
+  },
+
+  async startCreateEnvironmentInTab() {
+    const activeProjectId = get().project?.metadata.id ?? null
+    if (!activeProjectId) {
+      toast.error('请先选择项目')
+      return
+    }
+
+    await runTask(set, async () => {
+      const created = await createEnvironment({
+        projectId: activeProjectId,
+        name: '新的环境',
+        baseUrl: '',
+        variables: [],
+      })
+      const snapshot = await get().refreshProjectInternal()
+      if (!snapshot) {
+        return
+      }
+
+      get().selectEnvironmentForTab(created.id)
+    }, '环境已创建')
   },
 
   requestDeleteEnvironment(environmentId) {
@@ -2242,11 +2561,13 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       })
       const snapshot = await get().refreshProjectInternal()
       if (snapshot) {
+        const nextSelectedEnvironmentId = snapshot.environments[0]?.id ?? null
         set({
           environments: snapshot.environments,
           activeEnvironmentId: snapshot.metadata.activeEnvironmentId ?? null,
           pendingEnvironmentDeletion: null,
         })
+        get().selectEnvironmentForTab(nextSelectedEnvironmentId)
       }
     }, '环境已删除')
   },

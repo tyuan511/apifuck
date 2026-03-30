@@ -1,20 +1,23 @@
 import { useTheme } from 'next-themes'
 import { useEffect } from 'react'
+import * as React from 'react'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { readAppConfig, updateAppConfig } from '@/lib/app-config'
 import { primaryColorPalettes } from '@/lib/appearance'
+import { readApi } from '@/lib/project'
 import { useWorkbenchShell } from '../hooks/use-workbench-shell'
+import { buildRequestExportSnippets } from '../request-export'
 import { isMacOSDesktop } from '../types'
 import {
   ConfirmDeleteCollectionDialog,
   ConfirmDeleteEnvironmentDialog,
   ConfirmDeleteRequestDialog,
   ConfirmRemoveRecentProjectDialog,
+  CopyRequestDialog,
   CreateCollectionDialog,
   CreateProjectDialog,
   CreateRequestDialog,
   EditRequestDialog,
-  EnvironmentDialog,
 } from './dialogs'
 import { ProjectSidebar } from './project-sidebar'
 import { RequestPane } from './request-pane'
@@ -22,6 +25,9 @@ import { RequestPane } from './request-pane'
 export function WorkbenchShell() {
   const shell = useWorkbenchShell()
   const { setTheme } = useTheme()
+  const [copyDialogOpen, setCopyDialogOpen] = React.useState(false)
+  const [copyRequestName, setCopyRequestName] = React.useState('')
+  const [copyRequestSnippets, setCopyRequestSnippets] = React.useState<ReturnType<typeof buildRequestExportSnippets> | null>(null)
 
   useEffect(() => {
     const root = document.documentElement
@@ -91,6 +97,21 @@ export function WorkbenchShell() {
     }
   }
 
+  async function handleOpenCopyRequestDialog(requestId: string) {
+    const request = shell.requestDrafts[requestId]
+      ?? shell.savedRequests[requestId]
+      ?? await readApi(requestId)
+
+    setCopyRequestName(request.name)
+    setCopyRequestSnippets(buildRequestExportSnippets({
+      activeEnvironmentId: shell.activeEnvironmentId,
+      environments: shell.environments,
+      project: shell.project,
+      request,
+    }))
+    setCopyDialogOpen(true)
+  }
+
   return (
     <main className="relative h-screen overflow-hidden bg-background text-foreground">
       <div
@@ -108,23 +129,23 @@ export function WorkbenchShell() {
           recentProjectPaths={shell.recentProjectPaths}
           selectedTreeNode={shell.selectedTreeNode}
           onCreateCollection={shell.openCreateCollectionDialog}
-          onCreateEnvironment={shell.openCreateEnvironmentDialog}
+          onCreateEnvironment={shell.startCreateEnvironmentInTab}
           onCreateProject={shell.openCreateProjectDialog}
           onEditProject={shell.openEditProjectDialog}
           onCreateRequest={shell.openCreateRequestDialog}
           onDeleteCollection={shell.requestDeleteCollection}
           onDeleteEnvironment={shell.requestDeleteEnvironment}
           onDeleteRequest={shell.requestDeleteRequest}
+          onCopyRequest={(requestId) => { void handleOpenCopyRequestDialog(requestId) }}
           onEditCollection={shell.openEditCollectionDialog}
-          onEditEnvironment={shell.openEditEnvironmentDialog}
           onEditRequest={shell.openEditRequestDialog}
+          onOpenEnvironmentTab={shell.openEnvironmentTab}
           onMoveTreeNode={shell.moveTreeNode}
           onOpenExistingProject={() => { void shell.handleOpenExistingProject() }}
           onOpenSettings={shell.openSettingsDialog}
           onRemoveRecentProject={shell.requestRemoveRecentProject}
           onSelectProject={(path) => { void shell.handleSelectProject(path) }}
           onOpenRequest={(summary, parentCollectionId) => { void shell.openRequestFromSummary(summary, parentCollectionId) }}
-          onSetActiveEnvironment={shell.handleSetActiveEnvironment}
           onToggleCollection={shell.toggleCollection}
           onTreeSelectionChange={shell.setNodeSelection}
         />
@@ -132,6 +153,8 @@ export function WorkbenchShell() {
         <RequestPane
           activeDraft={shell.activeDraft}
           activeCollectionDraft={shell.activeCollectionDraft}
+          activeEnvironmentDraft={shell.activeEnvironmentDraft}
+          activeEnvironmentId={shell.activeEnvironmentId}
           activeProjectDraft={shell.activeProjectDraft}
           activeTabRecord={shell.activeTabRecord}
           activeEditorTab={shell.activeEditorTab}
@@ -139,6 +162,8 @@ export function WorkbenchShell() {
           activeRequestIsLoading={shell.activeRequestIsLoading}
           activeResponse={shell.activeResponse}
           dirtyRequestIds={shell.dirtyRequestIds}
+          environmentDrafts={shell.environmentDrafts}
+          environments={shell.environments}
           isBusy={shell.isBusy}
           isMacOSDesktop={isMacOSDesktop}
           openRequestTabs={shell.openRequestTabs}
@@ -147,6 +172,7 @@ export function WorkbenchShell() {
           onActiveEditorTabChange={shell.setActiveEditorTab}
           onChangeDraft={shell.updateRequestDraft}
           onChangeCollectionDraft={shell.updateCollectionTabDraft}
+          onChangeEnvironmentDraft={shell.updateEnvironmentTabDraft}
           onChangeProjectDraft={shell.updateProjectTabDraft}
           onCloseRequestDialogChange={() => shell.clearPendingCloseRequest()}
           onCloseRequestTab={shell.requestCloseRequestTab}
@@ -155,8 +181,13 @@ export function WorkbenchShell() {
           onReorderRequestTabs={shell.reorderRequestTabs}
           onSaveRequest={() => { void shell.handleSaveRequest() }}
           onSaveCollection={() => { void shell.handleEditCollection() }}
+          onSaveEnvironment={() => { void shell.saveEnvironmentFromTab() }}
           onSaveProject={() => { void shell.handleEditProject() }}
           onSendRequest={() => { void shell.handleSendRequest() }}
+          onSetActiveEnvironment={(environmentId) => { void shell.handleSetActiveEnvironment(environmentId) }}
+          onSelectEnvironmentForTab={shell.selectEnvironmentForTab}
+          onStartCreateEnvironment={shell.startCreateEnvironmentInTab}
+          onDeleteEnvironment={shell.requestDeleteEnvironment}
           onSplitRatioChange={shell.setSplitRatio}
         />
       </div>
@@ -226,6 +257,13 @@ export function WorkbenchShell() {
         onSubmit={() => { void shell.handleEditRequest() }}
       />
 
+      <CopyRequestDialog
+        open={copyDialogOpen}
+        requestName={copyRequestName}
+        snippets={copyRequestSnippets}
+        onOpenChange={setCopyDialogOpen}
+      />
+
       <ConfirmDeleteCollectionDialog
         deletion={shell.pendingCollectionDeletion}
         onConfirm={() => { void shell.handleDeleteCollection() }}
@@ -249,31 +287,6 @@ export function WorkbenchShell() {
         onDeleteLocalFilesChange={shell.setDeleteLocalFilesForPendingRecentProjectRemoval}
         onConfirm={() => { void shell.handleRemoveRecentProject() }}
         onOpenChange={open => !open && shell.clearPendingRecentProjectRemoval()}
-      />
-
-      <EnvironmentDialog
-        name={shell.environmentNameDraft}
-        baseUrl={shell.environmentBaseUrlDraft}
-        variables={shell.environmentVariablesDraft}
-        open={shell.environmentDialogOpen}
-        isEditing={Boolean(shell.editingEnvironmentId)}
-        onNameChange={shell.setEnvironmentNameDraft}
-        onBaseUrlChange={shell.setEnvironmentBaseUrlDraft}
-        onVariablesChange={shell.setEnvironmentVariablesDraft}
-        onOpenChange={(open) => {
-          if (!open) {
-            shell.closeEnvironmentDialog()
-          }
-        }}
-        onSubmit={() => {
-          if (shell.editingEnvironmentId) {
-            void shell.handleEditEnvironment()
-          }
-          else {
-            void shell.handleCreateEnvironment()
-          }
-        }}
-        onDelete={shell.editingEnvironmentId ? () => { shell.requestDeleteEnvironment(shell.editingEnvironmentId!) } : undefined}
       />
 
       <SettingsDialog

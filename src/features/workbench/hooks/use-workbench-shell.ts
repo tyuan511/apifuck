@@ -15,8 +15,10 @@ export function useWorkbenchShell() {
     openRequestTabs: store.openRequestTabs,
     activeRequestId: store.activeRequestId,
     requestDrafts: store.requestDrafts,
+    savedRequests: store.savedRequests,
     collectionDrafts: store.collectionDrafts,
     projectDrafts: store.projectDrafts,
+    environmentDrafts: store.environmentDrafts,
     requestResponses: store.requestResponses,
     loadingRequestIds: store.loadingRequestIds,
     dirtyRequestIds: store.dirtyRequestIds,
@@ -113,13 +115,19 @@ export function useWorkbenchShell() {
     handleSendRequest: store.handleSendRequest,
     setSplitRatio: store.setSplitRatio,
     openCreateEnvironmentDialog: store.openCreateEnvironmentDialog,
+    openEnvironmentTab: store.openEnvironmentTab,
     openEditEnvironmentDialog: store.openEditEnvironmentDialog,
     closeEnvironmentDialog: store.closeEnvironmentDialog,
     setEnvironmentNameDraft: store.setEnvironmentNameDraft,
     setEnvironmentBaseUrlDraft: store.setEnvironmentBaseUrlDraft,
     setEnvironmentVariablesDraft: store.setEnvironmentVariablesDraft,
+    updateEnvironmentTabDraft: store.updateEnvironmentTabDraft,
+    createEnvironmentFromTab: store.createEnvironmentFromTab,
     handleCreateEnvironment: store.handleCreateEnvironment,
     handleEditEnvironment: store.handleEditEnvironment,
+    saveEnvironmentFromTab: store.saveEnvironmentFromTab,
+    selectEnvironmentForTab: store.selectEnvironmentForTab,
+    startCreateEnvironmentInTab: store.startCreateEnvironmentInTab,
     requestDeleteEnvironment: store.requestDeleteEnvironment,
     clearPendingEnvironmentDeletion: store.clearPendingEnvironmentDeletion,
     handleDeleteEnvironment: store.handleDeleteEnvironment,
@@ -137,6 +145,9 @@ export function useWorkbenchShell() {
     : null
   const activeProjectDraft = activeTabRecord?.entityType === 'project'
     ? state.projectDrafts[activeTabRecord.entityId] ?? null
+    : null
+  const activeEnvironmentDraft = activeTabRecord?.entityType === 'environment'
+    ? state.environmentDrafts[activeTabRecord.entityId] ?? null
     : null
   const activeResponse = activeTabRecord?.entityType === 'request'
     ? state.requestResponses[activeTabRecord.entityId] ?? null
@@ -167,6 +178,7 @@ export function useWorkbenchShell() {
     activeDraft,
     activeCollectionDraft,
     activeProjectDraft,
+    activeEnvironmentDraft,
     activeTabRecord,
     activeRequestIsLoading,
     activeResponse,
