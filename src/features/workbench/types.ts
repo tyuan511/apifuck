@@ -1,27 +1,35 @@
 import type { AppPrimaryColor, AppTheme } from '@/lib/app-config'
 import type {
   ApiDefinition,
+  CollectionMetadata,
   CollectionTreeNode,
+  ProjectMetadata,
   ProjectSnapshot,
   ResponseHeader,
   ResponseType,
 } from '@/lib/project'
 
 export type EditorPanelTab = 'query' | 'headers' | 'auth' | 'body' | 'preRequestScript' | 'postRequestScript'
+export type SettingsPanelTab = 'info' | 'headers' | 'auth' | 'preRequestScript' | 'postRequestScript'
+export type WorkbenchPanelTab = EditorPanelTab | SettingsPanelTab
 
 export type TreeSelection
   = | { type: 'collection', id: string, parentCollectionId: string | null }
     | { type: 'api', id: string, parentCollectionId: string | null }
 
 export interface RequestEditorDraft extends ApiDefinition {}
+export interface CollectionEditorDraft extends CollectionMetadata {}
+export interface ProjectEditorDraft extends ProjectMetadata {}
 
 export interface OpenRequestTab {
+  entityType: 'request' | 'collection' | 'project'
   requestId: string
+  entityId: string
   title: string
   method: string
   dirty: boolean
   lastFocusedAt: number
-  editorTab: EditorPanelTab
+  editorTab: WorkbenchPanelTab
 }
 
 export interface PendingCollectionDeletion {
@@ -73,6 +81,14 @@ export const editorTabs: Array<{ value: EditorPanelTab, label: string }> = [
   { value: 'query', label: '查询参数' },
   { value: 'headers', label: '请求头' },
   { value: 'body', label: '请求体' },
+  { value: 'auth', label: '认证' },
+  { value: 'preRequestScript', label: '请求脚本' },
+  { value: 'postRequestScript', label: '响应脚本' },
+]
+
+export const settingsTabs: Array<{ value: SettingsPanelTab, label: string }> = [
+  { value: 'info', label: '信息' },
+  { value: 'headers', label: '请求头' },
   { value: 'auth', label: '认证' },
   { value: 'preRequestScript', label: '请求脚本' },
   { value: 'postRequestScript', label: '响应脚本' },

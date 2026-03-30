@@ -175,3 +175,20 @@
 .monaco-editor .margin {
   padding-left: 8px;
 }
+
+.monaco-theme-surface,
+.monaco-theme-surface .monaco-editor,
+.monaco-theme-surface .monaco-editor-background,
+.monaco-theme-surface .margin,
+.monaco-theme-surface .monaco-scrollable-element,
+.monaco-theme-surface .lines-content,
+.monaco-theme-surface .view-overlays,
+.monaco-theme-surface .monaco-editor .inputarea.ime-input {
+  background-color: transparent !important;
+}
+
+.monaco-theme-surface .monaco-editor .current-line,
+.monaco-theme-surface .monaco-editor .margin-view-overlays .current-line-margin {
+  background-color: var(--muted) !important;
+  border-color: transparent !important;
+}

@@ -15,6 +15,8 @@ export function useWorkbenchShell() {
     openRequestTabs: store.openRequestTabs,
     activeRequestId: store.activeRequestId,
     requestDrafts: store.requestDrafts,
+    collectionDrafts: store.collectionDrafts,
+    projectDrafts: store.projectDrafts,
     requestResponses: store.requestResponses,
     loadingRequestIds: store.loadingRequestIds,
     dirtyRequestIds: store.dirtyRequestIds,
@@ -23,15 +25,13 @@ export function useWorkbenchShell() {
     settingsDialogOpen: store.settingsDialogOpen,
     isBusy: store.isBusy,
     projectDialogOpen: store.projectDialogOpen,
+    projectDialogMode: store.projectDialogMode,
     projectNameDraft: store.projectNameDraft,
     projectDescriptionDraft: store.projectDescriptionDraft,
+    projectRequestConfigDraft: store.projectRequestConfigDraft,
     collectionDialogOpen: store.collectionDialogOpen,
     collectionDialogParentCollectionId: store.collectionDialogParentCollectionId,
     collectionNameDraft: store.collectionNameDraft,
-    editCollectionDialogOpen: store.editCollectionDialogOpen,
-    editingCollectionId: store.editingCollectionId,
-    editCollectionNameDraft: store.editCollectionNameDraft,
-    editCollectionDescriptionDraft: store.editCollectionDescriptionDraft,
     requestDialogOpen: store.requestDialogOpen,
     requestDialogParentCollectionId: store.requestDialogParentCollectionId,
     requestNameDraft: store.requestNameDraft,
@@ -56,12 +56,16 @@ export function useWorkbenchShell() {
   const actions = useWorkbenchStore(useShallow(store => ({
     setProjectNameDraft: store.setProjectNameDraft,
     setProjectDescriptionDraft: store.setProjectDescriptionDraft,
+    setProjectRequestConfigDraft: store.setProjectRequestConfigDraft,
     setRecentProjectPaths: store.setRecentProjectPaths,
     setAppTheme: store.setAppTheme,
     setAppPrimaryColor: store.setAppPrimaryColor,
     openCreateProjectDialog: store.openCreateProjectDialog,
+    openEditProjectDialog: store.openEditProjectDialog,
     closeCreateProjectDialog: store.closeCreateProjectDialog,
     handleCreateProject: store.handleCreateProject,
+    handleEditProject: store.handleEditProject,
+    updateProjectTabDraft: store.updateProjectTabDraft,
     handleOpenExistingProject: store.handleOpenExistingProject,
     requestRemoveRecentProject: store.requestRemoveRecentProject,
     clearPendingRecentProjectRemoval: store.clearPendingRecentProjectRemoval,
@@ -73,9 +77,7 @@ export function useWorkbenchShell() {
     setCollectionNameDraft: store.setCollectionNameDraft,
     handleCreateCollection: store.handleCreateCollection,
     openEditCollectionDialog: store.openEditCollectionDialog,
-    closeEditCollectionDialog: store.closeEditCollectionDialog,
-    setEditCollectionNameDraft: store.setEditCollectionNameDraft,
-    setEditCollectionDescriptionDraft: store.setEditCollectionDescriptionDraft,
+    updateCollectionTabDraft: store.updateCollectionTabDraft,
     handleEditCollection: store.handleEditCollection,
     openCreateRequestDialog: store.openCreateRequestDialog,
     closeCreateRequestDialog: store.closeCreateRequestDialog,
@@ -124,10 +126,25 @@ export function useWorkbenchShell() {
     handleSetActiveEnvironment: store.handleSetActiveEnvironment,
   })))
 
-  const activeDraft = state.activeRequestId ? state.requestDrafts[state.activeRequestId] ?? null : null
-  const activeResponse = state.activeRequestId ? state.requestResponses[state.activeRequestId] ?? null : null
+  const activeTabRecord = state.activeRequestId
+    ? state.openRequestTabs.find(tab => tab.requestId === state.activeRequestId) ?? null
+    : null
+  const activeDraft = activeTabRecord?.entityType === 'request'
+    ? state.requestDrafts[activeTabRecord.entityId] ?? null
+    : null
+  const activeCollectionDraft = activeTabRecord?.entityType === 'collection'
+    ? state.collectionDrafts[activeTabRecord.entityId] ?? null
+    : null
+  const activeProjectDraft = activeTabRecord?.entityType === 'project'
+    ? state.projectDrafts[activeTabRecord.entityId] ?? null
+    : null
+  const activeResponse = activeTabRecord?.entityType === 'request'
+    ? state.requestResponses[activeTabRecord.entityId] ?? null
+    : null
   const activeRequestIsLoading = Boolean(
-    state.activeRequestId && state.loadingRequestIds.includes(state.activeRequestId) && !activeDraft,
+    activeTabRecord?.entityType === 'request'
+    && state.loadingRequestIds.includes(activeTabRecord.entityId)
+    && !activeDraft,
   )
 
   const currentProjectCollectionNames = useMemo(() => new Map(
@@ -148,6 +165,9 @@ export function useWorkbenchShell() {
     ...state,
     ...actions,
     activeDraft,
+    activeCollectionDraft,
+    activeProjectDraft,
+    activeTabRecord,
     activeRequestIsLoading,
     activeResponse,
     collectionDialogParentLabel,

@@ -1,4 +1,4 @@
-import type { EditorPanelTab } from '@/features/workbench/types'
+import type { WorkbenchPanelTab } from '@/features/workbench/types'
 import type { ProjectSnapshot } from '@/lib/project'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -6,12 +6,14 @@ export type AppTheme = 'light' | 'dark' | 'system'
 export type AppPrimaryColor = 'slate' | 'blue' | 'green' | 'amber' | 'rose' | 'violet'
 
 export interface OpenRequestTab {
+  entityType: 'request' | 'collection' | 'project'
   requestId: string
+  entityId: string
   title: string
   method: string
   dirty: boolean
   lastFocusedAt: number
-  editorTab: EditorPanelTab
+  editorTab: WorkbenchPanelTab
 }
 
 export interface AppConfig {

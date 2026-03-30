@@ -1,10 +1,14 @@
 import type {
+  CollectionEditorDraft,
   EditorPanelTab,
   OpenRequestTab,
+  ProjectEditorDraft,
   RequestEditorDraft,
   ResponseState,
+  SettingsPanelTab,
+  WorkbenchPanelTab,
 } from '../types'
-import type { AuthType, KeyValue } from '@/lib/project'
+import type { AuthType, KeyValue, RequestScopeConfig } from '@/lib/project'
 import { PointerActivationConstraints } from '@dnd-kit/dom'
 import {
   DragDropProvider,
@@ -44,6 +48,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -54,6 +59,7 @@ import {
   editorTabs,
   macOSWindowChromeHeightClassName,
   methodOptions,
+  settingsTabs,
 } from '../types'
 import {
   buildUrlWithQuery,
@@ -68,7 +74,10 @@ import { MethodBadge, ResponseMetaBadge } from './shared'
 
 interface RequestPaneProps {
   activeDraft: RequestEditorDraft | null
-  activeEditorTab: EditorPanelTab
+  activeCollectionDraft: CollectionEditorDraft | null
+  activeProjectDraft: ProjectEditorDraft | null
+  activeTabRecord: OpenRequestTab | null
+  activeEditorTab: WorkbenchPanelTab
   activeRequestId: string | null
   activeRequestIsLoading: boolean
   activeResponse: ResponseState | null
@@ -78,27 +87,41 @@ interface RequestPaneProps {
   openRequestTabs: OpenRequestTab[]
   pendingCloseRequestId: string | null
   splitRatio: number
-  onActiveEditorTabChange: (tab: EditorPanelTab) => void
+  onActiveEditorTabChange: (tab: WorkbenchPanelTab) => void
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
+  onChangeCollectionDraft: (updater: (draft: CollectionEditorDraft) => CollectionEditorDraft) => void
+  onChangeProjectDraft: (updater: (draft: ProjectEditorDraft) => ProjectEditorDraft) => void
   onCloseRequestDialogChange: (requestId: string | null) => void
   onCloseRequestTab: (requestId: string) => void
   onConfirmCloseRequestTab: () => void
   onFocusRequestTab: (requestId: string) => void
   onReorderRequestTabs: (tabs: OpenRequestTab[]) => void
   onSaveRequest: () => void
+  onSaveCollection: () => void
+  onSaveProject: () => void
   onSendRequest: () => void
   onSplitRatioChange: (value: number) => void
 }
 
 export function RequestPane(props: RequestPaneProps) {
-  const hasUnsavedChanges = Boolean(props.activeRequestId && props.dirtyRequestIds.has(props.activeRequestId))
+  const hasUnsavedChanges = Boolean(props.activeTabRecord && props.dirtyRequestIds.has(props.activeTabRecord.entityId))
   const shouldShowResponsePane = props.activeResponse ? hasVisibleResponse(props.activeResponse) : false
   const handleSaveShortcut = React.useEffectEvent(() => {
-    if (!props.activeDraft || props.isBusy) {
+    if (!props.activeTabRecord || props.isBusy || !hasUnsavedChanges) {
       return
     }
 
-    props.onSaveRequest()
+    if (props.activeTabRecord.entityType === 'request') {
+      props.onSaveRequest()
+      return
+    }
+
+    if (props.activeTabRecord.entityType === 'collection') {
+      props.onSaveCollection()
+      return
+    }
+
+    props.onSaveProject()
   })
 
   // Refs to prevent circular updates between URL and query params sync
@@ -196,7 +219,7 @@ export function RequestPane(props: RequestPaneProps) {
               </div>
             </div>
           )
-        : props.activeDraft
+        : props.activeTabRecord?.entityType === 'request' && props.activeDraft
           ? (
               <>
                 <RequestHeaderBar
@@ -229,7 +252,7 @@ export function RequestPane(props: RequestPaneProps) {
                           minSize={28}
                         >
                           <RequestEditorTabs
-                            activeTab={props.activeEditorTab}
+                            activeTab={props.activeEditorTab as EditorPanelTab}
                             draft={props.activeDraft}
                             onActiveTabChange={props.onActiveEditorTabChange}
                             onChangeDraft={props.onChangeDraft}
@@ -252,7 +275,7 @@ export function RequestPane(props: RequestPaneProps) {
                   : (
                       <div className="min-h-0 flex-1 overflow-hidden">
                         <RequestEditorTabs
-                          activeTab={props.activeEditorTab}
+                          activeTab={props.activeEditorTab as EditorPanelTab}
                           draft={props.activeDraft}
                           onActiveTabChange={props.onActiveEditorTabChange}
                           onChangeDraft={props.onChangeDraft}
@@ -262,27 +285,51 @@ export function RequestPane(props: RequestPaneProps) {
                     )}
               </>
             )
-          : (
-              <div className="grid flex-1 place-items-center">
-                <Empty className="max-w-lg border border-dashed border-border/70 bg-muted/20">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <CompassIcon />
-                    </EmptyMedia>
-                    <EmptyTitle>还没打开任何请求</EmptyTitle>
-                    <EmptyDescription>
-                      左侧随便点一个请求，我们就开工。
-                      草稿会先稳稳留在本地，放心改，不会一眨眼跑掉。
-                    </EmptyDescription>
-                  </EmptyHeader>
-                  <EmptyContent className="gap-2 text-xs text-muted-foreground">
-                    <div className="rounded-full border border-border/70 bg-background/80 px-3 py-1.5">
-                      小提示：双击左侧多开几个请求，对照调试更顺手。
-                    </div>
-                  </EmptyContent>
-                </Empty>
-              </div>
-            )}
+          : props.activeTabRecord?.entityType === 'collection' && props.activeCollectionDraft
+            ? (
+                <CollectionSettingsPane
+                  activeTab={props.activeEditorTab as SettingsPanelTab}
+                  draft={props.activeCollectionDraft}
+                  hasUnsavedChanges={hasUnsavedChanges}
+                  isBusy={props.isBusy}
+                  onChangeDraft={props.onChangeCollectionDraft}
+                  onActiveTabChange={props.onActiveEditorTabChange}
+                  onSave={props.onSaveCollection}
+                />
+              )
+            : props.activeTabRecord?.entityType === 'project' && props.activeProjectDraft
+              ? (
+                  <ProjectSettingsPane
+                    activeTab={props.activeEditorTab as SettingsPanelTab}
+                    draft={props.activeProjectDraft}
+                    hasUnsavedChanges={hasUnsavedChanges}
+                    isBusy={props.isBusy}
+                    onChangeDraft={props.onChangeProjectDraft}
+                    onActiveTabChange={props.onActiveEditorTabChange}
+                    onSave={props.onSaveProject}
+                  />
+                )
+              : (
+                  <div className="grid flex-1 place-items-center">
+                    <Empty className="max-w-lg border border-dashed border-border/70 bg-muted/20">
+                      <EmptyHeader>
+                        <EmptyMedia variant="icon">
+                          <CompassIcon />
+                        </EmptyMedia>
+                        <EmptyTitle>还没打开任何请求</EmptyTitle>
+                        <EmptyDescription>
+                          左侧随便点一个请求，我们就开工。
+                          草稿会先稳稳留在本地，放心改，不会一眨眼跑掉。
+                        </EmptyDescription>
+                      </EmptyHeader>
+                      <EmptyContent className="gap-2 text-xs text-muted-foreground">
+                        <div className="rounded-full border border-border/70 bg-background/80 px-3 py-1.5">
+                          小提示：双击左侧多开几个请求，对照调试更顺手。
+                        </div>
+                      </EmptyContent>
+                    </Empty>
+                  </div>
+                )}
 
       <AlertDialog open={Boolean(props.pendingCloseRequestId)} onOpenChange={open => !open && props.onCloseRequestDialogChange(null)}>
         <AlertDialogContent>
@@ -1166,6 +1213,11 @@ const authTypeOptions: Array<{ value: AuthType, label: string }> = [
   { value: 'api-key', label: 'API Key' },
 ] as const
 
+type AuthModeValue = AuthType | 'inherit'
+
+const inheritedAuthOption = { value: 'inherit' as const, label: '继承上一级' }
+const authModeOptions = [inheritedAuthOption, ...authTypeOptions] as const
+
 const apiKeyAddToOptions = [
   { value: 'header', label: 'Header' },
   { value: 'query', label: 'Query' },
@@ -1174,6 +1226,44 @@ const apiKeyAddToOptions = [
 const requestBodyModeLabelMap = Object.fromEntries(
   requestBodyModeOptions.map(option => [option.value, option.label]),
 ) as Record<(typeof requestBodyModeOptions)[number]['value'], string>
+
+function getAuthModeValue(auth: { inherit: boolean, authType: AuthType }, allowInherit: boolean): AuthModeValue {
+  if (allowInherit && auth.inherit) {
+    return 'inherit'
+  }
+
+  return auth.authType
+}
+
+function applyAuthMode<T extends { inherit: boolean, authType: AuthType }>(auth: T, mode: AuthModeValue): T {
+  if (mode === 'inherit') {
+    return {
+      ...auth,
+      inherit: true,
+      authType: 'none',
+    }
+  }
+
+  return {
+    ...auth,
+    inherit: false,
+    authType: mode,
+  }
+}
+
+function normalizeScopeAuthMode(config: RequestScopeConfig, allowInherit: boolean): RequestScopeConfig {
+  if (allowInherit) {
+    return config
+  }
+
+  return {
+    ...config,
+    auth: {
+      ...config.auth,
+      inherit: false,
+    },
+  }
+}
 
 interface RequestEditorTabsProps {
   activeTab: EditorPanelTab
@@ -1186,7 +1276,6 @@ interface RequestEditorTabsProps {
 function RequestEditorTabs(props: RequestEditorTabsProps) {
   const bodyMode = props.draft.request.body.mode
   const bodyModeLabel = requestBodyModeLabelMap[bodyMode as keyof typeof requestBodyModeLabelMap] ?? bodyMode
-
   const environments = useWorkbenchStore(s => s.environments)
   const activeEnvironmentId = useWorkbenchStore(s => s.activeEnvironmentId)
 
@@ -1283,30 +1372,28 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
 
             {props.activeTab === 'auth' && (
               <Select
-                value={props.draft.request.auth.authType}
+                value={getAuthModeValue(props.draft.request.auth, true)}
                 onValueChange={(value) => {
                   if (!value) {
                     return
                   }
+
                   props.onChangeDraft(draft => ({
                     ...draft,
                     request: {
                       ...draft.request,
-                      auth: {
-                        ...draft.request.auth,
-                        authType: value as AuthType,
-                      },
+                      auth: applyAuthMode(draft.request.auth, value as AuthModeValue),
                     },
                   }))
                 }}
               >
                 <SelectTrigger size="sm" className="w-[176px]">
                   <SelectValue>
-                    {authTypeOptions.find(option => option.value === props.draft.request.auth.authType)?.label ?? '认证类型'}
+                    {authModeOptions.find(option => option.value === getAuthModeValue(props.draft.request.auth, true))?.label ?? '认证方式'}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {authTypeOptions.map(option => (
+                  {authModeOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -1314,6 +1401,7 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
                 </SelectContent>
               </Select>
             )}
+
           </div>
         </div>
 
@@ -1343,6 +1431,8 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
         <TabsContent value="auth" className="min-h-0 overflow-auto">
           <AuthEditor
             auth={props.draft.request.auth}
+            allowInherit
+            showModeSelector={false}
             environmentVariables={envVariables}
             environmentName={envName}
             onChange={auth => props.onChangeDraft(draft => ({
@@ -1359,11 +1449,11 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
           <BodyEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
         </TabsContent>
 
-        <TabsContent value="preRequestScript" className="min-h-0">
+        <TabsContent value="preRequestScript" className="flex min-h-0 flex-1 overflow-hidden">
           <PreRequestScriptEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
         </TabsContent>
 
-        <TabsContent value="postRequestScript" className="min-h-0">
+        <TabsContent value="postRequestScript" className="flex min-h-0 flex-1 overflow-hidden">
           <PostRequestScriptEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
         </TabsContent>
       </Tabs>
@@ -1371,13 +1461,13 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
   )
 }
 
-function PreRequestScriptEditor(props: {
+export function PreRequestScriptEditor(props: {
   draft: RequestEditorDraft
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
 }) {
   return (
     <MonacoScriptEditor
-      className="h-full min-h-[220px]"
+      className="min-h-0 flex-1"
       modelUri="file:///pre-request-script.js"
       language="javascript"
       value={props.draft.preRequestScript}
@@ -1389,13 +1479,13 @@ function PreRequestScriptEditor(props: {
   )
 }
 
-function PostRequestScriptEditor(props: {
+export function PostRequestScriptEditor(props: {
   draft: RequestEditorDraft
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
 }) {
   return (
     <MonacoScriptEditor
-      className="h-full min-h-[220px]"
+      className="min-h-0 flex-1"
       modelUri="file:///post-request-script.js"
       language="javascript"
       value={props.draft.postRequestScript}
@@ -1434,7 +1524,7 @@ function ResponsePane(props: { response: ResponseState | null }) {
       <div className="flex min-h-0 flex-1 overflow-hidden px-3 py-3">
         {props.response.isLoading
           ? (
-              <div className="grid h-full place-items-center">
+              <div className="grid h-full w-full flex-1 place-items-center">
                 <div className="flex items-center gap-3 text-sm text-muted-foreground">
                   <Loader2Icon className="size-4 animate-spin" />
                   请求发送中...
@@ -1499,7 +1589,7 @@ function TextResponseView(props: { body: string, contentType: string }) {
   )
 }
 
-interface KeyValueTableProps {
+export interface KeyValueTableProps {
   emptyLabel: string
   rows: KeyValue[]
   environmentVariables: Array<{ key: string, value: string, description?: string }>
@@ -1507,7 +1597,7 @@ interface KeyValueTableProps {
   onChange: (rows: KeyValue[]) => void
 }
 
-function KeyValueTable(props: KeyValueTableProps) {
+export function KeyValueTable(props: KeyValueTableProps) {
   function updateRow(rowId: string, updater: (row: KeyValue) => KeyValue) {
     props.onChange(props.rows.map(row => (row.id === rowId ? updater(row) : row)))
   }
@@ -1559,23 +1649,70 @@ function KeyValueTable(props: KeyValueTableProps) {
   )
 }
 
-function AuthEditor(props: {
+export function AuthEditor(props: {
   auth: RequestEditorDraft['request']['auth']
+  allowInherit?: boolean
+  showModeSelector?: boolean
+  showInheritHint?: boolean
   environmentVariables: Array<{ key: string, value: string, description?: string }>
   environmentName: string
   onChange: (auth: RequestEditorDraft['request']['auth']) => void
 }) {
-  if (props.auth.authType === 'none') {
-    return (
-      <div className="grid min-h-[140px] place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
-        当前请求未启用认证。
-      </div>
-    )
-  }
+  const authMode = getAuthModeValue(props.auth, props.allowInherit ?? false)
+  const options = props.allowInherit ? authModeOptions : authTypeOptions
 
   return (
     <div className="space-y-3">
-      {props.auth.authType === 'basic' && (
+      {props.showModeSelector !== false && (
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-[220px] max-w-full">
+            <Label className="mb-1.5 block text-sm">认证方式</Label>
+            <Select
+              value={authMode}
+              onValueChange={(value) => {
+                if (!value) {
+                  return
+                }
+
+                props.onChange(applyAuthMode(props.auth, value as AuthModeValue))
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {options.find(option => option.value === authMode)?.label ?? '认证方式'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {options.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {props.showInheritHint !== false && authMode === 'inherit' && (
+            <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+              当前层会直接沿用上一级认证配置。
+            </div>
+          )}
+        </div>
+      )}
+
+      {props.showInheritHint !== false && props.showModeSelector === false && authMode === 'inherit' && (
+        <div className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          当前请求会直接沿用上一级认证配置。
+        </div>
+      )}
+
+      {authMode === 'inherit' && null}
+      {authMode === 'none' && (
+        <div className="grid min-h-[140px] place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
+          当前层未启用认证。
+        </div>
+      )}
+
+      {authMode === 'basic' && (
         <div className="grid gap-3 md:grid-cols-2">
           <EnvironmentVariableInput
             value={props.auth.basic.username}
@@ -1606,7 +1743,7 @@ function AuthEditor(props: {
         </div>
       )}
 
-      {props.auth.authType === 'bearer' && (
+      {authMode === 'bearer' && (
         <EnvironmentVariableInput
           value={props.auth.bearerToken}
           onChange={value => props.onChange({
@@ -1619,7 +1756,7 @@ function AuthEditor(props: {
         />
       )}
 
-      {props.auth.authType === 'api-key' && (
+      {authMode === 'api-key' && (
         <div className="grid grid-cols-[140px_minmax(0,_1fr)_minmax(0,_1fr)] gap-3">
           <Select
             value={props.auth.apiKey.addTo}
@@ -1677,6 +1814,222 @@ function AuthEditor(props: {
           />
         </div>
       )}
+    </div>
+  )
+}
+
+export function RequestScopeConfigEditor(props: {
+  config: RequestScopeConfig
+  activeTab?: Exclude<SettingsPanelTab, 'info'>
+  allowInherit?: boolean
+  onChange: (value: RequestScopeConfig) => void
+  title: string
+  description: string
+}) {
+  const activeTab = props.activeTab ?? 'headers'
+  const allowInherit = props.allowInherit ?? true
+  const environments = useWorkbenchStore(state => state.environments)
+  const activeEnvironmentId = useWorkbenchStore(state => state.activeEnvironmentId)
+
+  const activeEnv = React.useMemo(() => {
+    if (!activeEnvironmentId)
+      return null
+    return environments.find(environment => environment.id === activeEnvironmentId) ?? null
+  }, [activeEnvironmentId, environments])
+
+  const envVariables = React.useMemo(() => {
+    if (!activeEnv)
+      return []
+    return activeEnv.variables.filter(variable => variable.enabled).map(variable => ({
+      key: variable.key,
+      value: variable.value,
+      description: variable.description,
+    }))
+  }, [activeEnv])
+
+  const envName = activeEnv?.name ?? 'default'
+
+  const handleAddHeader = React.useCallback(() => {
+    props.onChange({
+      ...props.config,
+      headers: [...props.config.headers, createKeyValueDraft()],
+    })
+  }, [props])
+
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-3 rounded-xl border border-border/70 bg-muted/20 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium">{props.title}</h3>
+          <p className="text-xs leading-5 text-muted-foreground">{props.description}</p>
+        </div>
+
+        {activeTab === 'headers' && (
+          <Button size="xs" variant="outline" onClick={handleAddHeader}>
+            <PlusIcon className="size-4" />
+            新增
+          </Button>
+        )}
+      </div>
+
+      {activeTab === 'headers' && (
+        <KeyValueTable
+          emptyLabel="暂无默认请求头"
+          rows={props.config.headers}
+          environmentVariables={envVariables}
+          environmentName={envName}
+          onChange={headers => props.onChange({ ...props.config, headers })}
+        />
+      )}
+
+      {activeTab === 'auth' && (
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+          <AuthEditor
+            auth={props.config.auth as RequestEditorDraft['request']['auth']}
+            allowInherit={allowInherit}
+            showInheritHint={false}
+            environmentVariables={envVariables}
+            environmentName={envName}
+            onChange={auth => props.onChange({ ...props.config, auth })}
+          />
+        </div>
+      )}
+
+      {activeTab === 'preRequestScript' && (
+        <MonacoScriptEditor
+          className="min-h-0 flex-1"
+          modelUri="file:///request-scope-pre-request-script.js"
+          language="javascript"
+          value={props.config.preRequestScript}
+          onChange={value => props.onChange({ ...props.config, preRequestScript: value })}
+          placeholder="// 默认请求脚本，会在更下层的脚本前执行"
+        />
+      )}
+
+      {activeTab === 'postRequestScript' && (
+        <MonacoScriptEditor
+          className="min-h-0 flex-1"
+          modelUri="file:///request-scope-post-request-script.js"
+          language="javascript"
+          value={props.config.postRequestScript}
+          onChange={value => props.onChange({ ...props.config, postRequestScript: value })}
+          placeholder="// 默认响应脚本，会在更下层的脚本前执行"
+        />
+      )}
+    </div>
+  )
+}
+
+function CollectionSettingsPane(props: {
+  activeTab: SettingsPanelTab
+  draft: CollectionEditorDraft
+  hasUnsavedChanges: boolean
+  isBusy: boolean
+  onChangeDraft: (updater: (draft: CollectionEditorDraft) => CollectionEditorDraft) => void
+  onActiveTabChange: (tab: WorkbenchPanelTab) => void
+  onSave: () => void
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden border-b border-border/70 px-3 py-3">
+      <Tabs value={props.activeTab} onValueChange={value => props.onActiveTabChange(value as WorkbenchPanelTab)} className="h-full min-h-0">
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+          <TabsList>
+            {settingsTabs.map(tab => (
+              <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 py-0.5 text-[13px]">
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <Button size="sm" disabled={props.isBusy || !props.hasUnsavedChanges} variant="outline" onClick={props.onSave}>
+            <SaveIcon />
+            保存
+          </Button>
+        </div>
+
+        <TabsContent value="info" className="min-h-0 overflow-auto">
+          <div className="space-y-4 rounded-xl border border-border/70 bg-muted/20 p-4">
+            <div className="grid gap-3">
+              <div className="space-y-1">
+                <Label>目录名称</Label>
+                <Input value={props.draft.name} onChange={event => props.onChangeDraft(draft => ({ ...draft, name: event.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>描述</Label>
+                <Textarea value={props.draft.description} onChange={event => props.onChangeDraft(draft => ({ ...draft, description: event.target.value }))} />
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+        <TabsContent value="headers" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="headers" config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig }))} title="目录默认请求设置" description="会叠加项目级设置，并被当前目录下的请求继续继承。" />
+        </TabsContent>
+        <TabsContent value="auth" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="auth" allowInherit config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig: normalizeScopeAuthMode(requestConfig, true) }))} title="目录默认认证设置" description="可以继承项目级认证，也可以在当前目录单独指定认证方式。" />
+        </TabsContent>
+        <TabsContent value="preRequestScript" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="preRequestScript" config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig }))} title="目录默认请求脚本" description="会在当前目录下请求自身脚本之前执行。" />
+        </TabsContent>
+        <TabsContent value="postRequestScript" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="postRequestScript" config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig }))} title="目录默认响应脚本" description="会在当前目录下请求自身响应脚本之前执行。" />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function ProjectSettingsPane(props: {
+  activeTab: SettingsPanelTab
+  draft: ProjectEditorDraft
+  hasUnsavedChanges: boolean
+  isBusy: boolean
+  onChangeDraft: (updater: (draft: ProjectEditorDraft) => ProjectEditorDraft) => void
+  onActiveTabChange: (tab: WorkbenchPanelTab) => void
+  onSave: () => void
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden border-b border-border/70 px-3 py-3">
+      <Tabs value={props.activeTab} onValueChange={value => props.onActiveTabChange(value as WorkbenchPanelTab)} className="h-full min-h-0">
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+          <TabsList>
+            {settingsTabs.map(tab => (
+              <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 py-0.5 text-[13px]">
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <Button size="sm" disabled={props.isBusy || !props.hasUnsavedChanges} variant="outline" onClick={props.onSave}>
+            <SaveIcon />
+            保存
+          </Button>
+        </div>
+
+        <TabsContent value="info" className="min-h-0 overflow-auto">
+          <div className="space-y-4 rounded-xl border border-border/70 bg-muted/20 p-4">
+            <div className="grid gap-3">
+              <div className="space-y-1">
+                <Label>项目名称</Label>
+                <Input value={props.draft.name} onChange={event => props.onChangeDraft(draft => ({ ...draft, name: event.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <Label>描述</Label>
+                <Textarea value={props.draft.description} onChange={event => props.onChangeDraft(draft => ({ ...draft, description: event.target.value }))} />
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+        <TabsContent value="headers" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="headers" config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig }))} title="项目默认请求头" description="会作为整个项目的默认请求头，被所有目录和请求继承。" />
+        </TabsContent>
+        <TabsContent value="auth" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="auth" allowInherit={false} config={normalizeScopeAuthMode(props.draft.requestConfig, false)} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig: normalizeScopeAuthMode(requestConfig, false) }))} title="项目默认认证设置" description="会作为整个项目的认证基线，被所有目录和请求继承。" />
+        </TabsContent>
+        <TabsContent value="preRequestScript" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="preRequestScript" config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig }))} title="项目默认请求脚本" description="会在项目内所有请求的前置脚本之前执行。" />
+        </TabsContent>
+        <TabsContent value="postRequestScript" className="min-h-0 overflow-hidden">
+          <RequestScopeConfigEditor activeTab="postRequestScript" config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig }))} title="项目默认响应脚本" description="会在项目内所有请求的响应脚本之前执行。" />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

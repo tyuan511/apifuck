@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { openStartupProject, readTabState } from '@/lib/app-config'
 import { readApi } from '@/lib/project'
 import { useWorkbenchStore } from '../store/workbench-store'
-import { findApiLocation } from '../utils'
+import { findApiLocation, findCollectionById } from '../utils'
 
 export function useWorkbenchBootstrap() {
   const { setTheme } = useTheme()
@@ -47,34 +47,40 @@ export function useWorkbenchBootstrap() {
         // Restore saved tab state and load tab content
         const [savedTabs, savedActiveId] = await readTabState()
         if (savedTabs.length > 0 && startup.projectSnapshot) {
-          // Filter tabs to only include requests that still exist in project
           const validTabs = savedTabs.filter(tab =>
-            findApiLocation(startup.projectSnapshot, tab.requestId) !== null,
+            tab.entityType === 'request'
+              ? findApiLocation(startup.projectSnapshot, tab.entityId) !== null
+              : tab.entityType === 'collection'
+                ? findCollectionById(startup.projectSnapshot.children, tab.entityId) !== null
+                : tab.entityType === 'project'
+                  ? startup.projectSnapshot.metadata.id === tab.entityId
+                  : false,
           )
 
-          // Ensure active tab is a valid one
           const activeIdIsValid = savedActiveId && validTabs.some(t => t.requestId === savedActiveId)
           const initialActiveId = activeIdIsValid ? savedActiveId : validTabs[0]?.requestId ?? null
 
           hydrateTabState(validTabs, initialActiveId)
 
-          // Load each valid tab's request content (don't change active tab)
           const loadedTabs: string[] = []
           await Promise.all(
-            validTabs.map(tab =>
-              readApi(tab.requestId)
-                .then((definition) => {
-                  setRequestLoaded(definition, false) // Don't change active tab
-                  loadedTabs.push(tab.requestId)
-                })
-                .catch(() => {
-                  // Tab will be removed - request no longer exists
-                }),
-            ),
+            validTabs
+              .filter(tab => tab.entityType === 'request')
+              .map(tab =>
+                readApi(tab.entityId)
+                  .then((definition) => {
+                    setRequestLoaded(definition, false)
+                    loadedTabs.push(tab.requestId)
+                  })
+                  .catch(() => {
+                    // Tab will be removed below if the request cannot be loaded.
+                  }),
+              ),
           )
 
-          // Remove tabs that failed to load content (request was deleted)
-          const failedTabs = validTabs.filter(tab => !loadedTabs.includes(tab.requestId))
+          const failedTabs = validTabs.filter(tab =>
+            tab.entityType === 'request' && !loadedTabs.includes(tab.requestId),
+          )
           if (failedTabs.length > 0) {
             for (const tab of failedTabs) {
               useWorkbenchStore.getState().closeRequestTab(tab.requestId)

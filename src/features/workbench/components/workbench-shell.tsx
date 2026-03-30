@@ -13,7 +13,6 @@ import {
   CreateCollectionDialog,
   CreateProjectDialog,
   CreateRequestDialog,
-  EditCollectionDialog,
   EditRequestDialog,
   EnvironmentDialog,
 } from './dialogs'
@@ -111,6 +110,7 @@ export function WorkbenchShell() {
           onCreateCollection={shell.openCreateCollectionDialog}
           onCreateEnvironment={shell.openCreateEnvironmentDialog}
           onCreateProject={shell.openCreateProjectDialog}
+          onEditProject={shell.openEditProjectDialog}
           onCreateRequest={shell.openCreateRequestDialog}
           onDeleteCollection={shell.requestDeleteCollection}
           onDeleteEnvironment={shell.requestDeleteEnvironment}
@@ -131,6 +131,9 @@ export function WorkbenchShell() {
 
         <RequestPane
           activeDraft={shell.activeDraft}
+          activeCollectionDraft={shell.activeCollectionDraft}
+          activeProjectDraft={shell.activeProjectDraft}
+          activeTabRecord={shell.activeTabRecord}
           activeEditorTab={shell.activeEditorTab}
           activeRequestId={shell.activeRequestId}
           activeRequestIsLoading={shell.activeRequestIsLoading}
@@ -143,12 +146,16 @@ export function WorkbenchShell() {
           splitRatio={shell.splitRatio}
           onActiveEditorTabChange={shell.setActiveEditorTab}
           onChangeDraft={shell.updateRequestDraft}
+          onChangeCollectionDraft={shell.updateCollectionTabDraft}
+          onChangeProjectDraft={shell.updateProjectTabDraft}
           onCloseRequestDialogChange={() => shell.clearPendingCloseRequest()}
           onCloseRequestTab={shell.requestCloseRequestTab}
           onConfirmCloseRequestTab={shell.confirmCloseRequestTab}
           onFocusRequestTab={shell.focusRequestTab}
           onReorderRequestTabs={shell.reorderRequestTabs}
           onSaveRequest={() => { void shell.handleSaveRequest() }}
+          onSaveCollection={() => { void shell.handleEditCollection() }}
+          onSaveProject={() => { void shell.handleEditProject() }}
           onSendRequest={() => { void shell.handleSendRequest() }}
           onSplitRatioChange={shell.setSplitRatio}
         />
@@ -157,15 +164,24 @@ export function WorkbenchShell() {
       <CreateProjectDialog
         description={shell.projectDescriptionDraft}
         name={shell.projectNameDraft}
+        requestConfig={shell.projectRequestConfigDraft}
         open={shell.projectDialogOpen}
         onDescriptionChange={shell.setProjectDescriptionDraft}
         onNameChange={shell.setProjectNameDraft}
+        onRequestConfigChange={shell.setProjectRequestConfigDraft}
         onOpenChange={(open) => {
           if (!open) {
             shell.closeCreateProjectDialog()
           }
         }}
-        onSubmit={() => { void shell.handleCreateProject() }}
+        onSubmit={() => {
+          if (shell.projectDialogMode === 'edit') {
+            void shell.handleEditProject()
+          }
+          else {
+            void shell.handleCreateProject()
+          }
+        }}
       />
 
       <CreateCollectionDialog
@@ -179,20 +195,6 @@ export function WorkbenchShell() {
           }
         }}
         onSubmit={() => { void shell.handleCreateCollection() }}
-      />
-
-      <EditCollectionDialog
-        description={shell.editCollectionDescriptionDraft}
-        name={shell.editCollectionNameDraft}
-        open={shell.editCollectionDialogOpen}
-        onDescriptionChange={shell.setEditCollectionDescriptionDraft}
-        onNameChange={shell.setEditCollectionNameDraft}
-        onOpenChange={(open) => {
-          if (!open) {
-            shell.closeEditCollectionDialog()
-          }
-        }}
-        onSubmit={() => { void shell.handleEditCollection() }}
       />
 
       <CreateRequestDialog

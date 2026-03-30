@@ -1,4 +1,5 @@
 import type { PendingCollectionDeletion, PendingEnvironmentDeletion, PendingRecentProjectRemoval, PendingRequestDeletion } from '../types'
+import type { RequestScopeConfig } from '@/lib/project'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,33 +21,51 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { RequestScopeConfigEditor } from './request-pane'
 import { LabelBlock } from './shared'
 
 export function CreateProjectDialog(props: {
   description: string
   name: string
+  requestConfig: RequestScopeConfig
   open: boolean
   onDescriptionChange: (value: string) => void
   onNameChange: (value: string) => void
+  onRequestConfigChange: (value: RequestScopeConfig) => void
   onOpenChange: (open: boolean) => void
   onSubmit: () => void
 }) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent>
+      <DialogContent className="flex h-[min(85vh,820px)] max-h-[85vh] max-w-5xl flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>新建项目</DialogTitle>
           <DialogDescription>选择一个本地目录并在其中初始化项目，请求树和环境会直接保存在该目录下。</DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
-          <LabelBlock label="项目名称">
-            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="核心接口" />
-          </LabelBlock>
-          <LabelBlock label="描述">
-            <Textarea value={props.description} onChange={event => props.onDescriptionChange(event.target.value)} placeholder="可选的项目说明。" />
-          </LabelBlock>
-        </div>
+        <Tabs defaultValue="basic" className="min-h-0 flex-1 overflow-hidden">
+          <TabsList>
+            <TabsTrigger value="basic">基础信息</TabsTrigger>
+            <TabsTrigger value="request">请求设置</TabsTrigger>
+          </TabsList>
+          <TabsContent value="basic" className="space-y-3 overflow-auto pr-1">
+            <LabelBlock label="项目名称">
+              <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="核心接口" />
+            </LabelBlock>
+            <LabelBlock label="描述">
+              <Textarea value={props.description} onChange={event => props.onDescriptionChange(event.target.value)} placeholder="可选的项目说明。" />
+            </LabelBlock>
+          </TabsContent>
+          <TabsContent value="request" className="min-h-0 flex-1 overflow-hidden">
+            <RequestScopeConfigEditor
+              config={props.requestConfig}
+              onChange={props.onRequestConfigChange}
+              title="项目级默认请求设置"
+              description="会被这个项目下所有目录和请求继承，请求自身可以覆盖。"
+            />
+          </TabsContent>
+        </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>取消</Button>
           <Button onClick={props.onSubmit}>创建项目</Button>
@@ -91,31 +110,47 @@ export function CreateCollectionDialog(props: {
 export function EditCollectionDialog(props: {
   description: string
   name: string
+  requestConfig: RequestScopeConfig
   open: boolean
   onDescriptionChange: (value: string) => void
   onNameChange: (value: string) => void
+  onRequestConfigChange: (value: RequestScopeConfig) => void
   onOpenChange: (open: boolean) => void
   onSubmit: () => void
 }) {
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent>
+      <DialogContent className="flex h-[min(85vh,820px)] max-h-[85vh] max-w-5xl flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>编辑目录</DialogTitle>
           <DialogDescription>修改目录名称和描述。</DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
-          <LabelBlock label="目录名称">
-            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="鉴权" />
-          </LabelBlock>
-          <LabelBlock label="描述（可选）">
-            <Textarea
-              value={props.description}
-              onChange={event => props.onDescriptionChange(event.target.value)}
-              placeholder="补充这个目录的用途或备注。"
+        <Tabs defaultValue="basic" className="min-h-0 flex-1 overflow-hidden">
+          <TabsList>
+            <TabsTrigger value="basic">基础信息</TabsTrigger>
+            <TabsTrigger value="request">请求设置</TabsTrigger>
+          </TabsList>
+          <TabsContent value="basic" className="space-y-3 overflow-auto pr-1">
+            <LabelBlock label="目录名称">
+              <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="鉴权" />
+            </LabelBlock>
+            <LabelBlock label="描述（可选）">
+              <Textarea
+                value={props.description}
+                onChange={event => props.onDescriptionChange(event.target.value)}
+                placeholder="补充这个目录的用途或备注。"
+              />
+            </LabelBlock>
+          </TabsContent>
+          <TabsContent value="request" className="min-h-0 flex-1 overflow-hidden">
+            <RequestScopeConfigEditor
+              config={props.requestConfig}
+              onChange={props.onRequestConfigChange}
+              title="目录级默认请求设置"
+              description="会叠加在项目级设置之上，并被当前目录下的请求继承。"
             />
-          </LabelBlock>
-        </div>
+          </TabsContent>
+        </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>取消</Button>
           <Button onClick={props.onSubmit}>保存修改</Button>
