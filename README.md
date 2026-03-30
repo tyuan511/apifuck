@@ -1,94 +1,105 @@
 # ApiFuck
 
-A powerful desktop API client built with Tauri v2, React, and TypeScript. Manage projects, collections, and API requests with a professional high-density workspace interface.
+[![GitHub Release](https://img.shields.io/github/v/release/tyuan511/apifuck?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/tyuan511/apifuck/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-[中文版](./README_zh.md)
+一款基于 Tauri v2、React 和 TypeScript 构建的桌面 API 客户端，面向本地调试、项目化接口管理和高密度工作台场景。
 
-## Features
+[English](./README_en.md)
 
-- **Project-based Organization**: Organize your APIs into projects and collections
-- **Multi-tab Request Editor**: Work on multiple requests simultaneously with tabbed interface
-- **Request Builder**: Support for Query params, Headers, Body (Raw/JSON), Auth (Basic/Bearer/API Key)
-- **Response Viewer**: Automatic JSON formatting with syntax highlighting, text fallback
-- **Workspace Storage**: File-based workspace model with Git-friendly JSON files
-- **Desktop Native**: Native window controls, macOS traffic lights support
+## 功能特性
 
-## Tech Stack
+- **项目化管理**：支持项目、集合、请求三级结构，适合按业务模块组织接口。
+- **多标签请求编辑**：支持同时打开多个请求，快速切换、重排、关闭，并恢复上次标签状态。
+- **完整请求构建**：支持 HTTP 方法、URL、Query、Headers、Auth、Body 等常见请求配置。
+- **认证方式支持**：支持 `None`、`Basic`、`Bearer`、`API Key`。
+- **响应结果查看**：展示状态码、耗时、大小、响应头和响应体，并对 JSON 做格式化与高亮。
+- **环境变量管理**：支持多个环境配置、切换当前激活环境、按环境替换请求内容。
+- **请求脚本能力**：支持 Pre-request Script 和 Post-request Script，可读写环境变量与脚本变量。
+- **工作区文件存储**：项目数据基于文件夹与 JSON 存储，便于迁移、备份和 Git 管理。
+- **桌面自动更新**：支持通过 GitHub Releases 分发新版本。
+- **原生桌面体验**：基于 Tauri v2 构建，适配 macOS 窗口拖拽区域与交通灯按钮。
 
-- **Backend**: Tauri v2 (Rust)
-- **Frontend**: React 19 + TypeScript + Vite
-- **UI**: shadcn/ui components + Tailwind CSS v4
-- **State**: Zustand
-- **Editor**: Monaco Editor
-- **HTTP Client**: Rust reqwest
+## 使用方式
 
-## Getting Started
+### 下载
 
-### Prerequisites
+- 最新版本：[GitHub Releases](https://github.com/tyuan511/apifuck/releases/latest)
+
+### 环境要求
 
 - Node.js 18+
-- Bun (recommended) or npm
+- Bun
 - Rust 1.70+
 
-### Installation
+### 本地开发
 
 ```bash
-# Install dependencies
+# 安装依赖
 bun install
 
-# Run in development mode (web)
+# 启动前端开发模式
 bun run dev
 
-# Run as desktop app
+# 启动桌面开发模式
 bun run tauri dev
+```
 
-# Build for production
+### 生产构建
+
+```bash
+bun run build
 bun run tauri build
 ```
 
-### Available Scripts
+### 常用命令
 
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Start Vite dev server |
-| `bun run build` | TypeScript check + production build |
-| `bun run lint` | ESLint check |
-| `bun run lint:fix` | Apply ESLint fixes |
-| `bun run tauri dev` | Launch desktop app in dev mode |
-| `bun run tauri build` | Build native desktop bundle |
-| `cd src-tauri && cargo test` | Run Rust tests |
+| 命令 | 说明 |
+|------|------|
+| `bun install` | 安装依赖 |
+| `bun run dev` | 启动 Vite 开发服务器 |
+| `bun run build` | TypeScript 检查并构建前端 |
+| `bun run lint` | 运行 ESLint |
+| `bun run lint:fix` | 自动修复部分 ESLint 问题 |
+| `bun run tauri dev` | 启动桌面开发环境 |
+| `bun run tauri build` | 构建桌面应用 |
+| `cd src-tauri && cargo test` | 运行 Rust 测试 |
 
-## Project Structure
+## 实现方式
 
-```
+### 技术栈
+
+- **桌面容器**：Tauri v2
+- **前端**：React 19 + TypeScript + Vite
+- **UI**：shadcn/ui + Tailwind CSS v4
+- **状态管理**：Zustand
+- **代码编辑器**：Monaco Editor
+- **HTTP 请求执行**：Rust `reqwest`
+
+### 目录结构
+
+```text
 apifuck/
-├── src/                      # React frontend
-│   ├── app.tsx               # Main app entry
-│   ├── main.tsx              # React bootstrapping
-│   ├── components/ui/        # shadcn/ui primitives
-│   ├── features/workbench/    # Main workbench feature
-│   │   ├── components/       # UI components
-│   │   ├── hooks/           # Custom React hooks
-│   │   ├── store/           # Zustand store
-│   │   ├── types.ts         # Feature types
-│   │   └── utils.ts         # Utilities
-│   └── lib/                  # Shared utilities
-├── src-tauri/                # Tauri/Rust backend
+├── src/                      # React 前端
+│   ├── app.tsx               # 主应用入口
+│   ├── main.tsx              # React 引导
+│   ├── components/ui/        # 通用 UI 组件
+│   ├── features/workbench/   # 主工作台功能
+│   └── lib/                  # 前端公共逻辑
+├── src-tauri/                # Tauri / Rust 后端
 │   ├── src/
-│   │   ├── main.rs          # Entry point
-│   │   ├── http.rs          # HTTP request handling
-│   │   └── error.rs         # Error types
-│   ├── capabilities/        # Tauri capabilities
-│   └── tauri.conf.json      # Tauri configuration
-├── docs/                     # Design documents
-└── CLAUDE.md                 # Project guidelines
+│   ├── capabilities/
+│   └── tauri.conf.json
+├── docs/                     # 文档与 release notes
+├── scripts/                  # 发布辅助脚本
+└── AGENTS.md                 # 协作约定
 ```
 
-## Workspace Storage Model
+### 数据存储
 
-The app uses a workspace folder-based storage system:
+工作区采用基于文件夹和 JSON 的结构化存储：
 
-```
+```text
 <workspace>/
 ├── workspace.json
 └── <project>/
@@ -100,21 +111,34 @@ The app uses a workspace folder-based storage system:
             └── items/
 ```
 
-## Development
+这种方式的特点是：
 
-### Adding shadcn Components
+- 内容可读、可备份
+- 易于版本管理
+- 不依赖数据库
+
+## 如何贡献
+
+欢迎提交 Issue 或 Pull Request。
+
+在开始贡献前，建议先阅读：
+
+- [AGENTS.md](./AGENTS.md)
+- [docs/auto-update.md](./docs/auto-update.md)
+
+提交前建议至少执行：
 
 ```bash
-bun shadcn add <component>
+bun run lint
+bun run build
 ```
 
-### Code Style
+如果涉及 Rust 逻辑，再执行：
 
-- React components: named exports, PascalCase filenames
-- Utilities: camelCase
-- Uses `@antfu/eslint-config` for linting
-- Prettier formatting via ESLint
+```bash
+cd src-tauri && cargo test
+```
 
-## License
+## 许可证
 
-Private project
+本项目使用 [MIT License](./LICENSE)。
