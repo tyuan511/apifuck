@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  create-release:
+  create-release-draft:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -30,7 +30,7 @@ jobs:
           echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "RELEASE_NOTES_PATH=docs/release/${VERSION}.md" >> "$GITHUB_ENV"
 
-      - name: Create or update GitHub release
+      - name: Create or update GitHub release draft
         id: release
         shell: bash
         env:
@@ -44,11 +44,13 @@ jobs:
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" \
               --title "${GITHUB_REF_NAME}" \
-              --notes-file "${RELEASE_NOTES_PATH}"
+              --notes-file "${RELEASE_NOTES_PATH}" \
+              --draft
           else
             gh release create "${GITHUB_REF_NAME}" \
               --title "${GITHUB_REF_NAME}" \
               --notes-file "${RELEASE_NOTES_PATH}" \
+              --draft \
               --verify-tag
           fi
 
@@ -56,7 +58,7 @@ jobs:
           echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
 
   publish-tauri:
-    needs: create-release
+    needs: create-release-draft
     permissions:
       contents: write
     strategy:
@@ -118,9 +120,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release-id }}
+          releaseId: ${{ needs.create-release-draft.outputs.release-id }}
           tagName: ${{ github.ref_name }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           tauriScript: bun tauri
           args: ${{ matrix.args }}
@@ -180,3 +182,19 @@ jobs:
           git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json README.md README_en.md "${RELEASE_NOTES_PATH}"
           git commit -m "chore: bump version to ${RELEASE_VERSION}"
           git push origin HEAD:main
+
+  publish-release:
+    needs:
+      - publish-tauri
+      - bump-version
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
