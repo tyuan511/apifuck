@@ -57,16 +57,7 @@ jobs:
       - name: Sync package versions from tag
         shell: bash
         run: |
-          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const pkgPath='package.json'; const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8')); pkg.version=version; fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');"
-          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const cargoPath='src-tauri/Cargo.toml'; const cargo=fs.readFileSync(cargoPath,'utf8').replace(/version = \"[^\"]+\"/, `version = \"${version}\"`); fs.writeFileSync(cargoPath, cargo);"
-
-      - name: Verify release notes file exists
-        shell: bash
-        run: |
-          if [ ! -f "${RELEASE_NOTES_PATH}" ]; then
-            echo "Missing release notes file: ${RELEASE_NOTES_PATH}"
-            exit 1
-          fi
+          bun run release:sync-version -- "${RELEASE_VERSION}" --verify-release-notes
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -113,19 +104,18 @@ jobs:
       - name: Sync version files on main
         shell: bash
         run: |
-          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const pkgPath='package.json'; const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8')); pkg.version=version; fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');"
-          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const cargoPath='src-tauri/Cargo.toml'; const cargo=fs.readFileSync(cargoPath,'utf8').replace(/version = \"[^\"]+\"/, `version = \"${version}\"`); fs.writeFileSync(cargoPath, cargo);"
+          bun run release:sync-version -- "${RELEASE_VERSION}"
 
       - name: Commit and push version bump
         shell: bash
         run: |
-          if git diff --quiet -- package.json src-tauri/Cargo.toml "${RELEASE_NOTES_PATH}"; then
+          if git diff --quiet -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json "${RELEASE_NOTES_PATH}"; then
             echo "No version bump needed"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/Cargo.toml "${RELEASE_NOTES_PATH}"
+          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json "${RELEASE_NOTES_PATH}"
           git commit -m "chore: bump version to ${RELEASE_VERSION}"
           git push origin HEAD:main
