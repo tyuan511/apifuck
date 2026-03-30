@@ -506,6 +506,7 @@ export function CopyRequestDialog(props: {
   onOpenChange: (open: boolean) => void
 }) {
   const [activeTab, setActiveTab] = React.useState<RequestExportLanguage>('curl')
+  const snippets = props.snippets
 
   React.useEffect(() => {
     if (props.open) {
@@ -514,13 +515,13 @@ export function CopyRequestDialog(props: {
   }, [props.open, props.requestName])
 
   async function handleCopy() {
-    if (!props.snippets) {
+    if (!snippets) {
       return
     }
 
     try {
-      await navigator.clipboard.writeText(props.snippets[activeTab].code)
-      toast.success(`已复制 ${props.snippets[activeTab].title} 代码`)
+      await navigator.clipboard.writeText(snippets[activeTab].code)
+      toast.success(`已复制 ${snippets[activeTab].title} 代码`)
     }
     catch (error) {
       toast.error(error instanceof Error ? error.message : '复制失败')
@@ -541,7 +542,7 @@ export function CopyRequestDialog(props: {
           </DialogDescription>
         </DialogHeader>
 
-        {props.snippets && (
+        {snippets && (
           <Tabs value={activeTab} onValueChange={value => setActiveTab(value as RequestExportLanguage)} className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="flex items-center justify-between gap-3 border-b border-border/70 pb-3">
               <TabsList>
@@ -560,11 +561,11 @@ export function CopyRequestDialog(props: {
               <TabsContent key={language} value={language} className="min-h-0 flex-1 overflow-hidden pt-3">
                 <MonacoCodeEditor
                   className="h-full"
-                  language={props.snippets[language].language}
+                  language={snippets[language].language}
                   lineNumbers="on"
                   modelUri={`file:///request-export-${language}.${language === 'curl' ? 'sh' : language === 'javascript' ? 'js' : language === 'python' ? 'py' : 'go'}`}
                   readOnly
-                  value={props.snippets[language].code}
+                  value={snippets[language].code}
                   wordWrap="on"
                 />
               </TabsContent>
