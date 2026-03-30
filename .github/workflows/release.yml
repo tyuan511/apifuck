@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -34,7 +34,7 @@ jobs:
           bun-version: latest
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -59,6 +59,15 @@ jobs:
         run: |
           bun run release:sync-version -- "${RELEASE_VERSION}" --verify-release-notes
 
+      - name: Load release notes content
+        shell: bash
+        run: |
+          {
+            echo 'RELEASE_BODY<<EOF'
+            cat "${RELEASE_NOTES_PATH}"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
@@ -71,7 +80,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ApiFuck v${{ env.RELEASE_VERSION }}
-          releaseBody: ${{ env.RELEASE_NOTES_PATH }}
+          releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
           tauriScript: bun tauri
@@ -85,13 +94,13 @@ jobs:
 
     steps:
       - name: Checkout main branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
