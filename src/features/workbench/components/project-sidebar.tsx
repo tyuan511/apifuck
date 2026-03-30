@@ -63,6 +63,7 @@ interface ProjectSidebarProps {
   onMoveTreeNode: (nodeId: string, targetParentCollectionId: string | null, position: number) => void | Promise<void>
   onOpenExistingProject: () => void | Promise<void>
   onRemoveRecentProject: (path: string, name: string) => void | Promise<void>
+  onOpenSettings: () => void
   onSelectProject: (path: string) => void | Promise<void>
   onOpenRequest: (summary: ApiSummary, parentCollectionId: string | null) => void
   onSetActiveEnvironment: (environmentId: string | null) => void
@@ -1241,6 +1242,7 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
         <button
           type="button"
           className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          onClick={props.onOpenSettings}
         >
           <Settings2Icon className="size-4" />
           设置

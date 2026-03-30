@@ -1,5 +1,5 @@
 import { useTheme } from 'next-themes'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import { openStartupProject, readTabState } from '@/lib/app-config'
 import { readApi } from '@/lib/project'
@@ -8,6 +8,7 @@ import { findApiLocation } from '../utils'
 
 export function useWorkbenchBootstrap() {
   const { setTheme } = useTheme()
+  const hasBootstrappedRef = useRef(false)
 
   const selectedTreeNode = useWorkbenchStore(state => state.selectedTreeNode)
   const project = useWorkbenchStore(state => state.project)
@@ -19,6 +20,11 @@ export function useWorkbenchBootstrap() {
   const ensureTreeSelection = useWorkbenchStore(state => state.ensureTreeSelection)
 
   useEffect(() => {
+    if (hasBootstrappedRef.current) {
+      return
+    }
+
+    hasBootstrappedRef.current = true
     let cancelled = false
 
     async function bootstrapWorkbench() {
@@ -33,6 +39,8 @@ export function useWorkbenchBootstrap() {
           projectPath: startup.projectPath,
           projectSnapshot: startup.projectSnapshot,
           recentProjectPaths: startup.appConfig.recentProjectPaths,
+          appTheme: startup.appConfig.theme,
+          appPrimaryColor: startup.appConfig.primaryColor,
         })
         setTheme(startup.appConfig.theme)
 

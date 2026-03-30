@@ -11,6 +11,7 @@ import type {
   TreeSelection,
   WorkbenchBootPayload,
 } from '../types'
+import type { AppPrimaryColor, AppTheme } from '@/lib/app-config'
 import type {
   ApiDefinition,
   ApiSummary,
@@ -70,6 +71,8 @@ interface WorkbenchState {
   projectPath: string
   project: ProjectSnapshot | null
   recentProjectPaths: string[]
+  appTheme: AppTheme
+  appPrimaryColor: AppPrimaryColor
   isBooting: boolean
   isBusy: boolean
   selectedTreeNode: TreeSelection | null
@@ -83,6 +86,7 @@ interface WorkbenchState {
   requestResponses: Record<string, ResponseState>
   activeEditorTab: EditorPanelTab
   splitRatio: number
+  settingsDialogOpen: boolean
   projectDialogOpen: boolean
   projectNameDraft: string
   projectDescriptionDraft: string
@@ -126,11 +130,16 @@ interface WorkbenchActions {
   setNodeSelection: (selection: TreeSelection | null) => void
   focusRequestTab: (requestId: string) => void
   reorderRequestTabs: (tabs: OpenRequestTab[]) => void
+  openSettingsDialog: () => void
+  closeSettingsDialog: () => void
+  setSettingsDialogOpen: (open: boolean) => void
   openCreateProjectDialog: () => void
   closeCreateProjectDialog: () => void
   setProjectNameDraft: (value: string) => void
   setProjectDescriptionDraft: (value: string) => void
   setRecentProjectPaths: (paths: string[]) => void
+  setAppTheme: (theme: AppTheme) => void
+  setAppPrimaryColor: (color: AppPrimaryColor) => void
   handleCreateProject: () => Promise<void>
   handleOpenExistingProject: () => Promise<void>
   requestRemoveRecentProject: (path: string, name: string) => void
@@ -204,6 +213,8 @@ const initialState: WorkbenchState = {
   projectPath: '',
   project: null,
   recentProjectPaths: [],
+  appTheme: 'system',
+  appPrimaryColor: 'slate',
   isBooting: true,
   isBusy: false,
   selectedTreeNode: null,
@@ -217,6 +228,7 @@ const initialState: WorkbenchState = {
   requestResponses: {},
   activeEditorTab: 'query',
   splitRatio: 0.55,
+  settingsDialogOpen: false,
   projectDialogOpen: false,
   projectNameDraft: '',
   projectDescriptionDraft: '',
@@ -289,6 +301,8 @@ async function openProjectInStore(
       projectPath: path,
       projectSnapshot: snapshot,
       recentProjectPaths: appConfig.recentProjectPaths,
+      appTheme: appConfig.theme,
+      appPrimaryColor: appConfig.primaryColor,
     })
     get().syncTabState()
   }, successMessage)
@@ -303,6 +317,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         projectPath: payload.projectPath,
         project: payload.projectSnapshot,
         recentProjectPaths: payload.recentProjectPaths,
+        appTheme: payload.appTheme,
+        appPrimaryColor: payload.appPrimaryColor,
         selectedTreeNode: null,
         openRequestTabs: [],
         activeRequestId: null,
@@ -312,6 +328,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         dirtyRequestIds: new Set(),
         requestResponses: {},
         loadingRequestIds: [],
+        settingsDialogOpen: false,
         projectDialogOpen: false,
         projectNameDraft: '',
         projectDescriptionDraft: '',
@@ -454,6 +471,18 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     get().syncTabState()
   },
 
+  openSettingsDialog() {
+    set({ settingsDialogOpen: true })
+  },
+
+  closeSettingsDialog() {
+    set({ settingsDialogOpen: false })
+  },
+
+  setSettingsDialogOpen(open) {
+    set({ settingsDialogOpen: open })
+  },
+
   openCreateProjectDialog() {
     set({
       projectDialogOpen: true,
@@ -480,6 +509,14 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   setRecentProjectPaths(paths) {
     set({ recentProjectPaths: paths })
+  },
+
+  setAppTheme(theme) {
+    set({ appTheme: theme })
+  },
+
+  setAppPrimaryColor(color) {
+    set({ appPrimaryColor: color })
   },
 
   async handleCreateProject() {
@@ -511,6 +548,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           projectPath: selectedPath,
           projectSnapshot: snapshot,
           recentProjectPaths: appConfig.recentProjectPaths,
+          appTheme: appConfig.theme,
+          appPrimaryColor: appConfig.primaryColor,
         })
         get().closeCreateProjectDialog()
         get().syncTabState()
@@ -589,6 +628,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         lastOpenedProjectPath: appConfig.lastOpenedProjectPath,
         recentProjectPaths: recentProjectPaths.filter(item => item !== targetPath),
         theme: appConfig.theme,
+        primaryColor: appConfig.primaryColor,
       })
       set({
         pendingRecentProjectRemoval: null,

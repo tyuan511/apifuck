@@ -3,6 +3,7 @@ import type { ProjectSnapshot } from '@/lib/project'
 import { invoke } from '@tauri-apps/api/core'
 
 export type AppTheme = 'light' | 'dark' | 'system'
+export type AppPrimaryColor = 'slate' | 'blue' | 'green' | 'amber' | 'rose' | 'violet'
 
 export interface OpenRequestTab {
   requestId: string
@@ -20,6 +21,7 @@ export interface AppConfig {
   lastOpenedProjectPath: string | null
   recentProjectPaths: string[]
   theme: AppTheme
+  primaryColor: AppPrimaryColor
   openRequestTabs: OpenRequestTab[]
   activeRequestId: string | null
 }
@@ -28,6 +30,7 @@ export interface UpdateAppConfigInput {
   lastOpenedProjectPath: string | null
   recentProjectPaths?: string[]
   theme: AppTheme
+  primaryColor: AppPrimaryColor
 }
 
 export interface UpdateTabStateInput {

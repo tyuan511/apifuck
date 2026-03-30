@@ -1,3 +1,8 @@
+import { useTheme } from 'next-themes'
+import { useEffect } from 'react'
+import { SettingsDialog } from '@/components/settings-dialog'
+import { readAppConfig, updateAppConfig } from '@/lib/app-config'
+import { primaryColorPalettes } from '@/lib/appearance'
 import { useWorkbenchShell } from '../hooks/use-workbench-shell'
 import { isMacOSDesktop } from '../types'
 import {
@@ -17,6 +22,75 @@ import { RequestPane } from './request-pane'
 
 export function WorkbenchShell() {
   const shell = useWorkbenchShell()
+  const { setTheme } = useTheme()
+
+  useEffect(() => {
+    const root = document.documentElement
+    const palette = primaryColorPalettes[shell.appPrimaryColor]
+    const lightPalette = palette.light
+    const darkPalette = palette.dark
+
+    root.style.setProperty('--primary', lightPalette.primary)
+    root.style.setProperty('--primary-foreground', lightPalette.primaryForeground)
+    root.style.setProperty('--ring', lightPalette.ring)
+    root.style.setProperty('--sidebar-primary', lightPalette.sidebarPrimary)
+    root.style.setProperty('--sidebar-primary-foreground', lightPalette.sidebarPrimaryForeground)
+    root.style.setProperty('--sidebar-ring', lightPalette.ring)
+
+    root.style.setProperty('--primary-dark', darkPalette.primary)
+    root.style.setProperty('--primary-foreground-dark', darkPalette.primaryForeground)
+    root.style.setProperty('--ring-dark', darkPalette.ring)
+    root.style.setProperty('--sidebar-primary-dark', darkPalette.sidebarPrimary)
+    root.style.setProperty('--sidebar-primary-foreground-dark', darkPalette.sidebarPrimaryForeground)
+    root.style.setProperty('--sidebar-ring-dark', darkPalette.ring)
+  }, [shell.appPrimaryColor])
+
+  async function persistAppearance(nextValues: {
+    primaryColor?: typeof shell.appPrimaryColor
+    theme?: typeof shell.appTheme
+  }) {
+    const appConfig = await readAppConfig()
+    const nextTheme = nextValues.theme ?? shell.appTheme
+    const nextPrimaryColor = nextValues.primaryColor ?? shell.appPrimaryColor
+
+    await updateAppConfig({
+      lastOpenedProjectPath: appConfig.lastOpenedProjectPath,
+      recentProjectPaths: appConfig.recentProjectPaths,
+      theme: nextTheme,
+      primaryColor: nextPrimaryColor,
+    })
+
+    if (nextValues.theme) {
+      shell.setAppTheme(nextTheme)
+    }
+
+    if (nextValues.primaryColor) {
+      shell.setAppPrimaryColor(nextPrimaryColor)
+    }
+  }
+
+  async function handleThemeChange(theme: typeof shell.appTheme) {
+    shell.setAppTheme(theme)
+    setTheme(theme)
+
+    try {
+      await persistAppearance({ theme })
+    }
+    catch {
+      // Errors are already surfaced via the shared task toasts elsewhere.
+    }
+  }
+
+  async function handlePrimaryColorChange(primaryColor: typeof shell.appPrimaryColor) {
+    shell.setAppPrimaryColor(primaryColor)
+
+    try {
+      await persistAppearance({ primaryColor })
+    }
+    catch {
+      // Errors are already surfaced by the Tauri invoke promise chain.
+    }
+  }
 
   return (
     <main className="relative h-screen overflow-hidden bg-background text-foreground">
@@ -46,6 +120,7 @@ export function WorkbenchShell() {
           onEditRequest={shell.openEditRequestDialog}
           onMoveTreeNode={shell.moveTreeNode}
           onOpenExistingProject={() => { void shell.handleOpenExistingProject() }}
+          onOpenSettings={shell.openSettingsDialog}
           onRemoveRecentProject={shell.requestRemoveRecentProject}
           onSelectProject={(path) => { void shell.handleSelectProject(path) }}
           onOpenRequest={(summary, parentCollectionId) => { void shell.openRequestFromSummary(summary, parentCollectionId) }}
@@ -197,6 +272,15 @@ export function WorkbenchShell() {
           }
         }}
         onDelete={shell.editingEnvironmentId ? () => { shell.requestDeleteEnvironment(shell.editingEnvironmentId!) } : undefined}
+      />
+
+      <SettingsDialog
+        currentPrimaryColor={shell.appPrimaryColor}
+        currentTheme={shell.appTheme}
+        open={shell.settingsDialogOpen}
+        onOpenChange={shell.setSettingsDialogOpen}
+        onPrimaryColorChange={(value) => { void handlePrimaryColorChange(value) }}
+        onThemeChange={(value) => { void handleThemeChange(value) }}
       />
     </main>
   )
