@@ -32,6 +32,8 @@ After the release job succeeds, CI also checks out `main`, updates `package.json
 
 GitHub Release notes come from `docs/release/<version>.md`, for example `docs/release/0.1.1.md`. If that file does not exist when the tag is pushed, the release workflow fails on purpose.
 
+Do not include a top-level title like `# ApiFuck v0.1.1` in the release note file, because GitHub Release already has its own title.
+
 The version sync logic is centralized in `scripts/release/sync-version.mjs`, so both CI jobs use the same implementation.
 
 ## 3. Update behavior in app
