@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: ''
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Resolve version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_NOTES_PATH=docs/release/${VERSION}.md" >> "$GITHUB_ENV"
+
+      - name: Sync package versions from tag
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const pkgPath='package.json'; const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8')); pkg.version=version; fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');"
+          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const cargoPath='src-tauri/Cargo.toml'; const cargo=fs.readFileSync(cargoPath,'utf8').replace(/version = \"[^\"]+\"/, `version = \"${version}\"`); fs.writeFileSync(cargoPath, cargo);"
+
+      - name: Verify release notes file exists
+        shell: bash
+        run: |
+          if [ ! -f "${RELEASE_NOTES_PATH}" ]; then
+            echo "Missing release notes file: ${RELEASE_NOTES_PATH}"
+            exit 1
+          fi
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and publish Tauri release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ApiFuck v${{ env.RELEASE_VERSION }}
+          releaseBody: ${{ env.RELEASE_NOTES_PATH }}
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  bump-version:
+    needs: publish-tauri
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_NOTES_PATH=docs/release/${VERSION}.md" >> "$GITHUB_ENV"
+
+      - name: Sync version files on main
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const pkgPath='package.json'; const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8')); pkg.version=version; fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');"
+          node -e "const fs=require('fs'); const version=process.env.RELEASE_VERSION; const cargoPath='src-tauri/Cargo.toml'; const cargo=fs.readFileSync(cargoPath,'utf8').replace(/version = \"[^\"]+\"/, `version = \"${version}\"`); fs.writeFileSync(cargoPath, cargo);"
+
+      - name: Commit and push version bump
+        shell: bash
+        run: |
+          if git diff --quiet -- package.json src-tauri/Cargo.toml "${RELEASE_NOTES_PATH}"; then
+            echo "No version bump needed"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/Cargo.toml "${RELEASE_NOTES_PATH}"
+          git commit -m "chore: bump version to ${RELEASE_VERSION}"
+          git push origin HEAD:main
