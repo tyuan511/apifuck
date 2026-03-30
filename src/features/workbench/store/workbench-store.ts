@@ -25,6 +25,7 @@ import type {
   KeyValue,
   ProjectSnapshot,
   RequestScopeConfig,
+  SendRequestStreamEvent,
 } from '@/lib/project'
 import type { RequestConfig, ResponseData } from '@/lib/script-runner'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -32,28 +33,7 @@ import { startTransition } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import { readAppConfig, updateAppConfig, updateTabState } from '@/lib/app-config'
-import {
-  bootstrapProject,
-  createApi,
-  createCollection,
-  createDefaultDocumentation,
-  createDefaultMock,
-  createDefaultRequest,
-  createDefaultRequestScopeConfig,
-  createEnvironment,
-  deleteEnvironment,
-  deleteNode,
-  deleteProjectFiles,
-  moveNode,
-  openProject,
-  readApi,
-  sendRequest,
-  setActiveEnvironment,
-  updateApi,
-  updateCollection,
-  updateEnvironment,
-  updateProject,
-} from '@/lib/project'
+import { bootstrapProject, createApi, createCollection, createDefaultDocumentation, createDefaultMock, createDefaultRequest, createDefaultRequestScopeConfig, createEnvironment, deleteEnvironment, deleteNode, deleteProjectFiles, moveNode, openProject, readApi, sendRequest, setActiveEnvironment, updateApi, updateCollection, updateEnvironment, updateProject } from '@/lib/project'
 import {
   createPostRequestContext,
   createPreRequestContext,
@@ -361,10 +341,15 @@ function getRequestScopeChain(
 ) {
   const projectConfig = cloneRequestScopeConfig(project?.metadata.requestConfig ?? createDefaultRequestScopeConfig())
   const collectionConfigs = getCollectionRequestConfig(project, parentCollectionId)
+  const resolvedBaseUrl = [
+    projectConfig.baseUrl,
+    ...collectionConfigs.map(config => config.baseUrl),
+  ].find(baseUrl => baseUrl.trim()) ?? ''
 
   return {
     projectConfig,
     collectionConfigs,
+    resolvedBaseUrl,
     mergedHeaders: mergeKeyValueEntries(
       projectConfig.headers,
       ...collectionConfigs.map(config => config.headers),
@@ -467,6 +452,97 @@ function isTabRemoved(
   }
 
   return false
+}
+
+function findResponseEntityIdByRequestId(
+  requestResponses: Record<string, ResponseState>,
+  requestId: string,
+) {
+  return Object.entries(requestResponses).find(([, response]) => response.requestId === requestId)?.[0] ?? null
+}
+
+function applySendRequestStreamEvent(
+  set: WorkbenchSetState,
+  get: () => WorkbenchStore,
+  event: SendRequestStreamEvent,
+) {
+  logSseDebug(event.requestId, `channel:received kind=${event.kind}`)
+  const entityId = findResponseEntityIdByRequestId(get().requestResponses, event.requestId)
+  if (!entityId) {
+    logSseDebug(event.requestId, 'channel:dropped missing-entity')
+    return
+  }
+
+  set((state) => {
+    const current = state.requestResponses[entityId]
+    if (!current || current.requestId !== event.requestId) {
+      logSseDebug(event.requestId, 'store:dropped stale-request')
+      return {}
+    }
+
+    if (event.kind === 'started') {
+      logSseDebug(event.requestId, 'store:apply started')
+      return {
+        requestResponses: {
+          ...state.requestResponses,
+          [entityId]: {
+            ...current,
+            status: event.status,
+            headers: event.headers,
+            contentType: event.contentType,
+            responseType: 'eventstream',
+            body: '',
+            durationMs: 0,
+            sizeBytes: 0,
+            error: null,
+            isLoading: true,
+          },
+        },
+      }
+    }
+
+    if (event.kind === 'chunk') {
+      logSseDebug(
+        event.requestId,
+        `store:apply chunk chunkLen=${event.chunk.length} nextBodyLen=${current.body.length + event.chunk.length}`,
+      )
+      return {
+        requestResponses: {
+          ...state.requestResponses,
+          [entityId]: {
+            ...current,
+            body: `${current.body}${event.chunk}`,
+            sizeBytes: event.receivedBytes,
+            responseType: 'eventstream',
+            isLoading: true,
+          },
+        },
+      }
+    }
+
+    logSseDebug(event.requestId, 'store:apply finished')
+    return {
+      requestResponses: {
+        ...state.requestResponses,
+        [entityId]: {
+          ...current,
+          durationMs: event.durationMs,
+          sizeBytes: event.sizeBytes,
+          responseType: event.responseType,
+          body: event.body,
+          isLoading: true,
+        },
+      },
+    }
+  })
+}
+
+function logSseDebug(requestId: string, message: string) {
+  if (!import.meta.env.DEV || !requestId.trim()) {
+    return
+  }
+
+  console.warn(`[sse-debug][${Date.now()}][${requestId}] ${message}`)
 }
 
 const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
@@ -1398,11 +1474,21 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     const activeProjectId = project?.metadata.id ?? null
     const activeEnv = activeEnvironmentId ? environments.find(e => e.id === activeEnvironmentId) ?? null : null
 
+    const requestId = generateId()
+
     set(state => ({
       requestResponses: {
         ...state.requestResponses,
         [entityId]: {
           ...(state.requestResponses[entityId] ?? createEmptyResponseState()),
+          requestId,
+          status: null,
+          headers: [],
+          durationMs: 0,
+          sizeBytes: 0,
+          contentType: '',
+          responseType: null,
+          body: '',
           isLoading: true,
           error: null,
         },
@@ -1448,7 +1534,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const variables = activeEnv?.variables ?? []
 
       // Resolve URL with baseURL joining (use config modified by pre-script)
-      const resolvedUrl = resolveUrl(mutableConfig.url, activeEnv?.baseUrl)
+      const scopeBaseUrl = requestScopeChain.resolvedBaseUrl || activeEnv?.baseUrl
+      const resolvedUrl = resolveUrl(mutableConfig.url, scopeBaseUrl)
 
       // Resolve variables in headers
       const resolvedHeaders = mutableConfig.headers.map(h => ({
@@ -1497,22 +1584,26 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         },
       }
 
-      const response = await sendRequest({
-        method: mutableConfig.method,
-        url: finalUrl,
-        request: {
-          headers: resolvedHeaders,
-          query: resolvedQuery,
-          pathParams: draft.request.pathParams,
-          cookies: draft.request.cookies,
-          auth: resolvedAuth,
-          body: {
-            ...resolvedBody,
-            binary: draft.request.body.binary,
-            mode: resolvedBody.mode as 'none' | 'raw' | 'json' | 'form-data' | 'x-www-form-urlencoded' | 'binary',
+      const response = await sendRequest(
+        {
+          requestId,
+          method: mutableConfig.method,
+          url: finalUrl,
+          request: {
+            headers: resolvedHeaders,
+            query: resolvedQuery,
+            pathParams: draft.request.pathParams,
+            cookies: draft.request.cookies,
+            auth: resolvedAuth,
+            body: {
+              ...resolvedBody,
+              binary: draft.request.body.binary,
+              mode: resolvedBody.mode as 'none' | 'raw' | 'json' | 'form-data' | 'x-www-form-urlencoded' | 'binary',
+            },
           },
         },
-      })
+        event => applySendRequestStreamEvent(set, get, event),
+      )
 
       // Build response data for post-script
       const responseData: ResponseData = {
@@ -1570,12 +1661,13 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         requestResponses: {
           ...state.requestResponses,
           [entityId]: {
+            requestId,
             status: finalResponse.status,
             headers: Object.entries(finalResponse.headers).map(([name, value]) => ({ name, value, description: '' })),
             durationMs: finalResponse.time,
             sizeBytes: new Blob([finalResponse.body]).size,
             contentType: finalResponse.headers['content-type'] ?? '',
-            responseType: finalResponse.body ? 'json' as const : null,
+            responseType: response.responseType,
             body: finalResponse.body,
             isLoading: false,
             error: null,
@@ -1589,6 +1681,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           ...state.requestResponses,
           [entityId]: {
             ...(state.requestResponses[entityId] ?? createEmptyResponseState()),
+            requestId,
             isLoading: false,
             error: error instanceof Error ? error.message : String(error),
           },

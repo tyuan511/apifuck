@@ -16,7 +16,7 @@ import {
   PointerSensor,
   useDraggable,
 } from '@dnd-kit/react'
-import { BracesIcon, CompassIcon, EllipsisIcon, Loader2Icon, PlusIcon, SaveIcon, SendHorizonalIcon, XIcon } from 'lucide-react'
+import { BracesIcon, CompassIcon, EllipsisIcon, PlusIcon, SaveIcon, SendHorizonalIcon, XIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import * as React from 'react'
 import { toast } from 'sonner'
@@ -31,6 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -70,7 +71,7 @@ import {
   startWindowDragging,
 } from '../utils'
 import { EnvironmentVariableInput } from './environment-variable-input'
-import { MethodBadge } from './shared'
+import { MethodBadge, Spinner } from './shared'
 
 interface RequestPaneProps {
   activeDraft: RequestEditorDraft | null
@@ -214,7 +215,7 @@ export function RequestPane(props: RequestPaneProps) {
         ? (
             <div className="grid flex-1 place-items-center">
               <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                <Loader2Icon className="size-4 animate-spin" />
+                <Spinner />
                 正在读取请求详情...
               </div>
             </div>
@@ -1545,6 +1546,14 @@ function ResponsePane(props: { response: ResponseState | null }) {
 }
 
 function ResponseInfoView(props: { response: ResponseState }) {
+  const responseViewLabel = props.response.responseType === 'json'
+    ? 'JSON'
+    : props.response.responseType === 'eventstream'
+      ? '事件流'
+      : props.response.responseType === 'text'
+        ? '文本'
+        : '未知'
+
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       <ResponseInfoCard label="状态" value={props.response.status !== null ? String(props.response.status) : '等待中'} />
@@ -1552,8 +1561,8 @@ function ResponseInfoView(props: { response: ResponseState }) {
       <ResponseInfoCard label="大小" value={formatBytes(props.response.sizeBytes)} />
       <ResponseInfoCard label="内容类型" value={props.response.contentType || '未知'} />
       <ResponseInfoCard label="响应头数量" value={String(props.response.headers.length)} />
-      <ResponseInfoCard label="视图" value={props.response.responseType ? (props.response.responseType === 'json' ? 'JSON' : '文本') : '未知'} />
-      <ResponseInfoCard label="请求状态" value={props.response.isLoading ? '请求发送中' : props.response.error ? '请求失败' : '请求完成'} />
+      <ResponseInfoCard label="视图" value={responseViewLabel} />
+      <ResponseInfoCard label="请求状态" value={props.response.isLoading ? (props.response.responseType === 'eventstream' ? '流式接收中' : '请求发送中') : props.response.error ? '请求失败' : '请求完成'} />
       {props.response.error && (
         <div className="sm:col-span-2 xl:col-span-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
           {props.response.error}
@@ -1573,11 +1582,15 @@ function ResponseInfoCard(props: { label: string, value: string }) {
 }
 
 function ResponseBodyView(props: { response: ResponseState }) {
+  if (props.response.responseType === 'eventstream') {
+    return <EventStreamResponseView body={props.response.body} isLoading={props.response.isLoading} />
+  }
+
   if (props.response.isLoading) {
     return (
       <div className="grid h-full w-full place-items-center">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
-          <Loader2Icon className="size-4 animate-spin" />
+          <Spinner />
           请求发送中...
         </div>
       </div>
@@ -1598,7 +1611,7 @@ function ResponseBodyView(props: { response: ResponseState }) {
 }
 
 function ResponseHeadersView(props: { response: ResponseState }) {
-  if (props.response.isLoading) {
+  if (props.response.isLoading && props.response.headers.length === 0) {
     return (
       <div className="grid h-full place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
         请求发送中...
@@ -1671,6 +1684,122 @@ function TextResponseView(props: { body: string, contentType: string }) {
       wordWrap="on"
     />
   )
+}
+
+interface EventStreamLine {
+  key: string
+  label: string
+  value: string
+  tone: 'comment' | 'event' | 'data' | 'id' | 'retry' | 'field'
+}
+
+function EventStreamResponseView(props: { body: string, isLoading: boolean }) {
+  const items = React.useMemo(() => parseEventStreamDataItems(props.body), [props.body])
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
+
+  React.useEffect(() => {
+    if (!props.isLoading || !containerRef.current) {
+      return
+    }
+
+    containerRef.current.scrollTop = containerRef.current.scrollHeight
+  }, [items, props.isLoading])
+
+  if (!props.body) {
+    return (
+      <div className="grid h-full place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
+        {props.isLoading ? '等待事件流数据...' : '没有响应体'}
+      </div>
+    )
+  }
+
+  return (
+    <div ref={containerRef} className="h-full min-w-0 space-y-3 overflow-x-hidden overflow-y-auto">
+      <div className="sticky top-0 z-10 flex items-center justify-between rounded-xl border border-border/70 bg-background/90 px-3 py-2 backdrop-blur">
+        <div className="text-sm font-medium">Event Stream</div>
+        <Badge variant={props.isLoading ? 'default' : 'secondary'}>
+          {props.isLoading ? 'Streaming' : 'Completed'}
+        </Badge>
+      </div>
+
+      <div className="min-w-0 space-y-1">
+        {items.map(item => (
+          <div
+            key={item.key}
+            className="min-w-0 rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-muted/70"
+          >
+            <div
+              className="min-w-0 max-w-full whitespace-pre-wrap break-words font-mono text-[12.5px] leading-5 text-foreground"
+            >
+              {item.value || '(empty)'}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function parseEventStreamItems(body: string): EventStreamLine[] {
+  const normalized = body.replace(/\r\n/g, '\n')
+  const lines = normalized
+    .split('\n')
+    .map(line => line.replace(/\r/g, ''))
+    .filter(line => line.trim() !== '')
+
+  if (lines.length === 0) {
+    return []
+  }
+
+  return lines.map((line, index) => parseEventStreamLine(line, 0, index))
+}
+
+function parseEventStreamLine(line: string, blockIndex: number, lineIndex: number): EventStreamLine {
+  if (line.startsWith(':')) {
+    return {
+      key: `${blockIndex}-${lineIndex}`,
+      label: 'comment',
+      value: line.slice(1).trim(),
+      tone: 'comment',
+    }
+  }
+
+  const separatorIndex = line.indexOf(':')
+  if (separatorIndex === -1) {
+    return {
+      key: `${blockIndex}-${lineIndex}`,
+      label: 'field',
+      value: line,
+      tone: 'field',
+    }
+  }
+
+  const field = line.slice(0, separatorIndex).trim()
+  const value = line.slice(separatorIndex + 1).trimStart()
+
+  if (field === 'event') {
+    return { key: `${blockIndex}-${lineIndex}`, label: 'event', value, tone: 'event' }
+  }
+  if (field === 'data') {
+    return { key: `${blockIndex}-${lineIndex}`, label: 'data', value, tone: 'data' }
+  }
+  if (field === 'id') {
+    return { key: `${blockIndex}-${lineIndex}`, label: 'id', value, tone: 'id' }
+  }
+  if (field === 'retry') {
+    return { key: `${blockIndex}-${lineIndex}`, label: 'retry', value, tone: 'retry' }
+  }
+
+  return {
+    key: `${blockIndex}-${lineIndex}`,
+    label: field || 'field',
+    value,
+    tone: 'field',
+  }
+}
+
+function parseEventStreamDataItems(body: string): EventStreamLine[] {
+  return parseEventStreamItems(body).filter(item => item.tone === 'data')
 }
 
 export interface KeyValueTableProps {
@@ -2004,6 +2133,68 @@ export function RequestScopeConfigEditor(props: {
   )
 }
 
+function ScopeBaseUrlField(props: {
+  label: string
+  description: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const environments = useWorkbenchStore(state => state.environments)
+  const activeEnvironmentId = useWorkbenchStore(state => state.activeEnvironmentId)
+
+  const activeEnv = React.useMemo(() => {
+    if (!activeEnvironmentId)
+      return null
+    return environments.find(environment => environment.id === activeEnvironmentId) ?? null
+  }, [activeEnvironmentId, environments])
+
+  const envVariables = React.useMemo(() => {
+    if (!activeEnv)
+      return []
+    return activeEnv.variables.filter(variable => variable.enabled).map(variable => ({
+      key: variable.key,
+      value: variable.value,
+      description: variable.description,
+    }))
+  }, [activeEnv])
+
+  return (
+    <div className="space-y-1">
+      <Label>{props.label}</Label>
+      <EnvironmentVariableInput
+        value={props.value}
+        onChange={props.onChange}
+        variables={envVariables}
+        environmentName={activeEnv?.name ?? 'default'}
+        placeholder="https://api.example.com"
+      />
+      <p className="text-xs leading-5 text-muted-foreground">{props.description}</p>
+    </div>
+  )
+}
+
+function CollectionBaseUrlField(props: { value: string, onChange: (value: string) => void }) {
+  return (
+    <ScopeBaseUrlField
+      label="目录 Base URL"
+      description="当前目录下的请求会优先基于这里的 Base URL 解析相对地址。可使用环境变量。"
+      value={props.value}
+      onChange={props.onChange}
+    />
+  )
+}
+
+function ProjectBaseUrlField(props: { value: string, onChange: (value: string) => void }) {
+  return (
+    <ScopeBaseUrlField
+      label="项目 Base URL"
+      description="会作为整个项目的默认 Base URL，被目录和请求继续继承。可使用环境变量。"
+      value={props.value}
+      onChange={props.onChange}
+    />
+  )
+}
+
 function CollectionSettingsPane(props: {
   activeTab: SettingsPanelTab
   draft: CollectionEditorDraft
@@ -2041,6 +2232,16 @@ function CollectionSettingsPane(props: {
                 <Label>描述</Label>
                 <Textarea value={props.draft.description} onChange={event => props.onChangeDraft(draft => ({ ...draft, description: event.target.value }))} />
               </div>
+              <CollectionBaseUrlField
+                value={props.draft.requestConfig.baseUrl}
+                onChange={value => props.onChangeDraft(draft => ({
+                  ...draft,
+                  requestConfig: {
+                    ...draft.requestConfig,
+                    baseUrl: value,
+                  },
+                }))}
+              />
             </div>
           </div>
         </TabsContent>
@@ -2098,6 +2299,16 @@ function ProjectSettingsPane(props: {
                 <Label>描述</Label>
                 <Textarea value={props.draft.description} onChange={event => props.onChangeDraft(draft => ({ ...draft, description: event.target.value }))} />
               </div>
+              <ProjectBaseUrlField
+                value={props.draft.requestConfig.baseUrl}
+                onChange={value => props.onChangeDraft(draft => ({
+                  ...draft,
+                  requestConfig: {
+                    ...draft.requestConfig,
+                    baseUrl: value,
+                  },
+                }))}
+              />
             </div>
           </div>
         </TabsContent>

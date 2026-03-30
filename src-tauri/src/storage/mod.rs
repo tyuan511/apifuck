@@ -147,6 +147,8 @@ impl Default for AuthConfig {
 #[serde(rename_all = "camelCase")]
 pub struct RequestScopeConfig {
     #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
     pub headers: Vec<KeyValue>,
     #[serde(default)]
     pub auth: AuthConfig,
@@ -1586,6 +1588,7 @@ fn normalized_method(method: &str) -> String {
 }
 
 fn normalize_request_scope_config(mut config: RequestScopeConfig) -> RequestScopeConfig {
+    config.base_url = config.base_url.trim().to_string();
     for item in config.headers.iter_mut() {
         if item.id.is_empty() {
             item.id = new_id();
@@ -2041,6 +2044,7 @@ mod tests {
                 docs: snapshot.metadata.docs.clone(),
                 mock: snapshot.metadata.mock.clone(),
                 request_config: RequestScopeConfig {
+                    base_url: "https://project.example.com".to_string(),
                     headers: vec![KeyValue {
                         id: String::new(),
                         key: "X-Project".to_string(),
@@ -2081,6 +2085,7 @@ mod tests {
                 name: collection.name.clone(),
                 description: collection.description.clone(),
                 request_config: RequestScopeConfig {
+                    base_url: "https://collection.example.com".to_string(),
                     headers: vec![KeyValue {
                         id: String::new(),
                         key: "X-Collection".to_string(),

@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { Spinner } from '@/features/workbench/components/shared'
 import { primaryColorOptions } from '@/lib/appearance'
 import { manuallyCheckForAppUpdates } from '@/lib/updater'
 import { cn } from '@/lib/utils'
@@ -437,7 +438,9 @@ export function SettingsDialog(props: SettingsDialogProps) {
                             </div>
                           </div>
                           <Button onClick={() => { void handleCheckUpdates() }} disabled={isCheckingUpdates}>
-                            <RefreshCcwIcon data-icon="inline-start" className={cn(isCheckingUpdates && 'animate-spin')} />
+                            {isCheckingUpdates
+                              ? <Spinner className="mr-1" />
+                              : <RefreshCcwIcon data-icon="inline-start" />}
                             {isCheckingUpdates ? '检查中...' : '检查更新'}
                           </Button>
                         </div>

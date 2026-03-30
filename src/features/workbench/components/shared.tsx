@@ -53,10 +53,21 @@ export function WorkbenchLoadingScreen() {
     <main className="relative h-screen overflow-hidden bg-background text-foreground">
       <div className="grid h-full place-items-center">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
-          <span className="size-4 animate-spin rounded-full border-2 border-border border-t-primary" />
+          <Spinner />
           正在加载工作台...
         </div>
       </div>
     </main>
+  )
+}
+
+export function Spinner(props: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-block size-4 animate-spin rounded-full border-2 border-current/20 border-t-current',
+        props.className,
+      )}
+    />
   )
 }

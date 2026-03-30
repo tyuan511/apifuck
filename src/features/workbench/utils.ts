@@ -323,6 +323,7 @@ export function getBaseUrl(url: string): string {
 
 export function createEmptyResponseState(): ResponseState {
   return {
+    requestId: null,
     status: null,
     headers: [],
     durationMs: 0,
@@ -337,6 +338,7 @@ export function createEmptyResponseState(): ResponseState {
 
 export function mapSendResponseToState(response: SendRequestResponse): ResponseState {
   return {
+    requestId: null,
     status: response.status,
     headers: response.headers,
     durationMs: response.durationMs,

@@ -1,10 +1,11 @@
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::{
-    header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE},
-    Method, Url,
+    header::{HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_TYPE},
+    Method, Url, Version,
 };
 use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
 
 use crate::{
     error::{AppError, AppResult},
@@ -16,11 +17,14 @@ use crate::{
 pub enum ResponseType {
     Json,
     Text,
+    EventStream,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendRequestInput {
+    #[serde(default)]
+    pub request_id: String,
     pub method: String,
     pub url: String,
     #[serde(default)]
@@ -47,25 +51,67 @@ pub struct SendRequestResponse {
     pub body: String,
 }
 
-pub async fn send_request(input: SendRequestInput) -> AppResult<SendRequestResponse> {
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SendRequestStreamEvent {
+    Started {
+        request_id: String,
+        status: u16,
+        #[serde(default)]
+        headers: Vec<ResponseHeader>,
+        content_type: String,
+    },
+    Chunk {
+        request_id: String,
+        chunk: String,
+        received_bytes: u64,
+    },
+    Finished {
+        request_id: String,
+        duration_ms: u64,
+        size_bytes: u64,
+        response_type: ResponseType,
+        body: String,
+    },
+}
+
+pub async fn send_request(
+    input: SendRequestInput,
+    on_event: Channel<SendRequestStreamEvent>,
+) -> AppResult<SendRequestResponse> {
+    log_sse_debug(&input.request_id, "send_request:start");
     let method = parse_method(&input.method)?;
     let mut url = parse_url(&input.url)?;
     append_enabled_query_pairs(&mut url, &input.request.query);
     append_api_key_query(&mut url, &input.request)?;
 
+    let expects_event_stream = input
+        .request
+        .headers
+        .iter()
+        .find(|header| {
+            header.enabled
+                && header.key.trim().eq_ignore_ascii_case("accept")
+                && !header.value.trim().is_empty()
+        })
+        .map(|header| is_event_stream_content_type(&header.value))
+        .unwrap_or(false);
+
     let (headers, has_content_type) = build_headers(&input.request.headers)?;
-    let client = reqwest::Client::new();
+    let client = build_http_client(expects_event_stream)?;
     let mut request_builder = client.request(method, url).headers(headers);
     request_builder = apply_auth(request_builder, &input.request);
     request_builder = apply_body(request_builder, &input.request, has_content_type)?;
+    if expects_event_stream {
+        request_builder = apply_event_stream_headers(request_builder);
+        request_builder = request_builder.version(Version::HTTP_11);
+    }
 
     let started_at = Instant::now();
-    let response = request_builder
+    let mut response = request_builder
         .send()
         .await
         .map_err(|error| AppError::Request(error.to_string()))?;
-    let duration_ms = started_at.elapsed().as_millis() as u64;
-
     let status = response.status().as_u16();
     let headers = response
         .headers()
@@ -81,14 +127,77 @@ pub async fn send_request(input: SendRequestInput) -> AppResult<SendRequestRespo
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
         .to_string();
+    let is_event_stream = is_event_stream_content_type(&content_type);
+    if is_event_stream {
+        log_sse_debug(
+            &input.request_id,
+            &format!("response:headers status={status} content_type={content_type}"),
+        );
+    }
 
-    let bytes = response
-        .bytes()
+    emit_stream_event(
+        &on_event,
+        &input.request_id,
+        is_event_stream,
+        SendRequestStreamEvent::Started {
+            request_id: input.request_id.clone(),
+            status,
+            headers: headers.clone(),
+            content_type: content_type.clone(),
+        },
+    )?;
+
+    let mut body_bytes = Vec::new();
+    let mut streamed_bytes = 0_u64;
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|error| AppError::Request(error.to_string()))?;
-    let size_bytes = bytes.len() as u64;
-    let text = String::from_utf8_lossy(&bytes).to_string();
+        .map_err(|error| AppError::Request(error.to_string()))?
+    {
+        streamed_bytes += chunk.len() as u64;
+        body_bytes.extend_from_slice(&chunk);
+        if is_event_stream {
+            log_sse_debug(
+                &input.request_id,
+                &format!("response:chunk len={} received={streamed_bytes}", chunk.len()),
+            );
+        }
+
+        emit_stream_event(
+            &on_event,
+            &input.request_id,
+            is_event_stream,
+            SendRequestStreamEvent::Chunk {
+                request_id: input.request_id.clone(),
+                chunk: String::from_utf8_lossy(&chunk).to_string(),
+                received_bytes: streamed_bytes,
+            },
+        )?;
+    }
+
+    let size_bytes = body_bytes.len() as u64;
+    let duration_ms = started_at.elapsed().as_millis() as u64;
+    let text = String::from_utf8_lossy(&body_bytes).to_string();
     let (response_type, body) = classify_response_body(&content_type, &text);
+    if is_event_stream {
+        log_sse_debug(
+            &input.request_id,
+            &format!("response:finished size={size_bytes} duration_ms={duration_ms}"),
+        );
+    }
+
+    emit_stream_event(
+        &on_event,
+        &input.request_id,
+        is_event_stream,
+        SendRequestStreamEvent::Finished {
+            request_id: input.request_id.clone(),
+            duration_ms,
+            size_bytes,
+            response_type: response_type.clone(),
+            body: body.clone(),
+        },
+    )?;
 
     Ok(SendRequestResponse {
         status,
@@ -213,7 +322,36 @@ fn apply_body(
     }
 }
 
+fn apply_event_stream_headers(
+    request_builder: reqwest::RequestBuilder,
+) -> reqwest::RequestBuilder {
+    request_builder
+        .header(ACCEPT_ENCODING, HeaderValue::from_static("identity"))
+        .header(CACHE_CONTROL, HeaderValue::from_static("no-cache"))
+        .header("connection", HeaderValue::from_static("keep-alive"))
+}
+
+fn build_http_client(expects_event_stream: bool) -> AppResult<reqwest::Client> {
+    let mut builder = reqwest::Client::builder().tcp_nodelay(true);
+
+    if expects_event_stream {
+        builder = builder
+            .http1_only()
+            .no_gzip()
+            .no_brotli()
+            .no_deflate();
+    }
+
+    builder
+        .build()
+        .map_err(|error| AppError::Request(error.to_string()))
+}
+
 fn classify_response_body(content_type: &str, text: &str) -> (ResponseType, String) {
+    if is_event_stream_content_type(content_type) {
+        return (ResponseType::EventStream, text.to_string());
+    }
+
     if looks_like_json(content_type, text) {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
             if let Ok(pretty) = serde_json::to_string_pretty(&parsed) {
@@ -225,7 +363,58 @@ fn classify_response_body(content_type: &str, text: &str) -> (ResponseType, Stri
     (ResponseType::Text, text.to_string())
 }
 
+fn is_event_stream_content_type(content_type: &str) -> bool {
+    content_type
+        .split(';')
+        .next()
+        .map(|value| value.trim().eq_ignore_ascii_case("text/event-stream"))
+        .unwrap_or(false)
+}
+
+fn emit_stream_event(
+    on_event: &Channel<SendRequestStreamEvent>,
+    request_id: &str,
+    is_event_stream: bool,
+    event: SendRequestStreamEvent,
+) -> AppResult<()> {
+    if !is_event_stream {
+        return Ok(());
+    }
+
+    log_sse_debug(request_id, &format!("channel:send {:?}", event_kind(&event)));
+    on_event
+        .send(event)
+        .map_err(|error| AppError::Request(error.to_string()))
+}
+
+fn event_kind(event: &SendRequestStreamEvent) -> &'static str {
+    match event {
+        SendRequestStreamEvent::Started { .. } => "started",
+        SendRequestStreamEvent::Chunk { .. } => "chunk",
+        SendRequestStreamEvent::Finished { .. } => "finished",
+    }
+}
+
+fn log_sse_debug(request_id: &str, message: &str) {
+    #[cfg(debug_assertions)]
+    {
+        if request_id.trim().is_empty() {
+            return;
+        }
+
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or_default();
+        eprintln!("[sse-debug][{timestamp_ms}][{request_id}] {message}");
+    }
+}
+
 fn looks_like_json(content_type: &str, text: &str) -> bool {
+    if is_event_stream_content_type(content_type) {
+        return false;
+    }
+
     let normalized = content_type.to_ascii_lowercase();
     if normalized.contains("application/json") || normalized.contains("+json") {
         return true;
@@ -251,5 +440,13 @@ mod tests {
 
         assert_eq!(response_type, ResponseType::Text);
         assert_eq!(body, "hello");
+    }
+
+    #[test]
+    fn classifies_event_stream_response_body() {
+        let (response_type, body) = classify_response_body("text/event-stream", "data: hello\n\n");
+
+        assert_eq!(response_type, ResponseType::EventStream);
+        assert_eq!(body, "data: hello\n\n");
     }
 }

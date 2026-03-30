@@ -56,6 +56,7 @@ export interface PendingEnvironmentDeletion {
 }
 
 export interface ResponseState {
+  requestId: string | null
   status: number | null
   headers: ResponseHeader[]
   durationMs: number
