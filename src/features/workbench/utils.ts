@@ -1,11 +1,13 @@
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
 import type { CollectionSubtree, ResponseState } from './types'
 import type {
   ApiDefinition,
   ApiSummary,
+  AuthConfig,
   CollectionTreeNode,
   KeyValue,
   ProjectSnapshot,
+  RequestScopeConfig,
   SendRequestResponse,
   TreeNode,
 } from '@/lib/project'
@@ -71,6 +73,38 @@ export function findCollectionName(nodes: TreeNode[], collectionId: string): str
   return ''
 }
 
+export function findCollectionById(nodes: TreeNode[], collectionId: string): CollectionTreeNode | null {
+  for (const node of nodes) {
+    if (node.entityType !== 'collection') {
+      continue
+    }
+    if (node.id === collectionId) {
+      return node
+    }
+    const nested = findCollectionById(node.children, collectionId)
+    if (nested) {
+      return nested
+    }
+  }
+  return null
+}
+
+export function findCollectionPath(nodes: TreeNode[], collectionId: string): CollectionTreeNode[] {
+  for (const node of nodes) {
+    if (node.entityType !== 'collection') {
+      continue
+    }
+    if (node.id === collectionId) {
+      return [node]
+    }
+    const nested = findCollectionPath(node.children, collectionId)
+    if (nested.length > 0) {
+      return [node, ...nested]
+    }
+  }
+  return []
+}
+
 export function describeCollectionParent(parentCollectionId: string | null, collectionNames: Map<string, string>) {
   if (!parentCollectionId) {
     return '项目根目录'
@@ -82,7 +116,15 @@ export function cloneApiDefinition(api: ApiDefinition): ApiDefinition {
   return JSON.parse(JSON.stringify(api)) as ApiDefinition
 }
 
+export function cloneRequestScopeConfig(config: RequestScopeConfig): RequestScopeConfig {
+  return JSON.parse(JSON.stringify(config)) as RequestScopeConfig
+}
+
 export function areApiDefinitionsEqual(left: ApiDefinition, right: ApiDefinition) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+export function areRequestScopeConfigsEqual(left: RequestScopeConfig, right: RequestScopeConfig) {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
@@ -94,6 +136,42 @@ export function createKeyValueDraft(): KeyValue {
     enabled: true,
     description: '',
   }
+}
+
+export function mergeKeyValueEntries(...entryGroups: KeyValue[][]): KeyValue[] {
+  const merged = new Map<string, KeyValue>()
+
+  for (const entries of entryGroups) {
+    for (const entry of entries) {
+      const key = entry.key.trim().toLowerCase()
+      if (!key) {
+        continue
+      }
+      merged.set(key, { ...entry })
+    }
+  }
+
+  return [...merged.values()]
+}
+
+export function resolveInheritedAuth(...authChain: AuthConfig[]): AuthConfig {
+  let resolved = authChain[0]
+
+  for (const auth of authChain.slice(1)) {
+    if (!auth.inherit) {
+      resolved = auth
+      continue
+    }
+
+    if (auth.authType !== 'none') {
+      resolved = {
+        ...auth,
+        inherit: true,
+      }
+    }
+  }
+
+  return JSON.parse(JSON.stringify(resolved)) as AuthConfig
 }
 
 /**
@@ -306,6 +384,29 @@ export function getProjectMonogram(value: string) {
 
   const compact = normalized.replace(projectMonogramSeparatorPattern, '')
   return compact.slice(0, 2).toUpperCase()
+}
+
+function hashString(value: string) {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0
+  }
+  return Math.abs(hash)
+}
+
+export function getProjectAvatarStyle(seed: string): CSSProperties {
+  const hash = hashString(seed)
+  const hue = hash % 360
+  const saturation = 48 + (hash % 10)
+  const lightness = 90 - (hash % 5)
+  const borderAlpha = 0.22 + ((hash % 8) * 0.02)
+  const textLightness = 24 + (hash % 8)
+
+  return {
+    background: `hsl(${hue} ${saturation}% ${lightness}%)`,
+    border: `1px solid hsl(${hue} ${Math.max(34, saturation - 12)}% ${Math.max(72, lightness - 10)}% / ${borderAlpha})`,
+    color: `hsl(${hue} ${Math.max(34, saturation - 18)}% ${textLightness}%)`,
+  }
 }
 
 export function getProjectDisplayName(project: ProjectSnapshot | null | undefined) {

@@ -1,15 +1,19 @@
 import type { StateCreator } from 'zustand'
 import type {
+  CollectionEditorDraft,
   EditorPanelTab,
   OpenRequestTab,
   PendingCollectionDeletion,
   PendingEnvironmentDeletion,
   PendingRecentProjectRemoval,
   PendingRequestDeletion,
+  ProjectEditorDraft,
   RequestEditorDraft,
   ResponseState,
+  SettingsPanelTab,
   TreeSelection,
   WorkbenchBootPayload,
+  WorkbenchPanelTab,
 } from '../types'
 import type { AppPrimaryColor, AppTheme } from '@/lib/app-config'
 import type {
@@ -20,6 +24,7 @@ import type {
   Environment,
   KeyValue,
   ProjectSnapshot,
+  RequestScopeConfig,
 } from '@/lib/project'
 import type { RequestConfig, ResponseData } from '@/lib/script-runner'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -34,6 +39,7 @@ import {
   createDefaultDocumentation,
   createDefaultMock,
   createDefaultRequest,
+  createDefaultRequestScopeConfig,
   createEnvironment,
   deleteEnvironment,
   deleteNode,
@@ -46,6 +52,7 @@ import {
   updateApi,
   updateCollection,
   updateEnvironment,
+  updateProject,
 } from '@/lib/project'
 import {
   createPostRequestContext,
@@ -55,12 +62,17 @@ import {
 import {
   areApiDefinitionsEqual,
   cloneApiDefinition,
+  cloneRequestScopeConfig,
   collectCollectionIds,
   collectCollectionSubtree,
   createEmptyResponseState,
   findApiLocation,
   findApiLocationInProject,
+  findCollectionById,
   findCollectionName,
+  findCollectionPath,
+  mergeKeyValueEntries,
+  resolveInheritedAuth,
 } from '../utils'
 
 function generateId(): string {
@@ -80,16 +92,22 @@ interface WorkbenchState {
   openRequestTabs: OpenRequestTab[]
   activeRequestId: string | null
   requestDrafts: Record<string, RequestEditorDraft>
+  collectionDrafts: Record<string, CollectionEditorDraft>
+  projectDrafts: Record<string, ProjectEditorDraft>
   savedRequests: Record<string, ApiDefinition>
+  savedCollections: Record<string, CollectionEditorDraft>
+  savedProjects: Record<string, ProjectEditorDraft>
   dirtyRequestIds: Set<string>
   loadingRequestIds: string[]
   requestResponses: Record<string, ResponseState>
-  activeEditorTab: EditorPanelTab
+  activeEditorTab: WorkbenchPanelTab
   splitRatio: number
   settingsDialogOpen: boolean
   projectDialogOpen: boolean
+  projectDialogMode: 'create' | 'edit'
   projectNameDraft: string
   projectDescriptionDraft: string
+  projectRequestConfigDraft: RequestScopeConfig
   collectionDialogOpen: boolean
   collectionDialogParentCollectionId: string | null
   collectionNameDraft: string
@@ -97,6 +115,7 @@ interface WorkbenchState {
   editingCollectionId: string | null
   editCollectionNameDraft: string
   editCollectionDescriptionDraft: string
+  editCollectionRequestConfigDraft: RequestScopeConfig
   requestDialogOpen: boolean
   requestDialogParentCollectionId: string | null
   requestNameDraft: string
@@ -124,7 +143,7 @@ interface WorkbenchActions {
   hydrateTabState: (tabs: OpenRequestTab[], activeRequestId: string | null) => void
   setIsBooting: (value: boolean) => void
   setSplitRatio: (value: number) => void
-  setActiveEditorTab: (value: EditorPanelTab) => void
+  setActiveEditorTab: (value: WorkbenchPanelTab) => void
   ensureTreeSelection: () => void
   toggleCollection: (collectionId: string) => void
   setNodeSelection: (selection: TreeSelection | null) => void
@@ -134,9 +153,11 @@ interface WorkbenchActions {
   closeSettingsDialog: () => void
   setSettingsDialogOpen: (open: boolean) => void
   openCreateProjectDialog: () => void
+  openEditProjectDialog: () => void
   closeCreateProjectDialog: () => void
   setProjectNameDraft: (value: string) => void
   setProjectDescriptionDraft: (value: string) => void
+  setProjectRequestConfigDraft: (value: RequestScopeConfig) => void
   setRecentProjectPaths: (paths: string[]) => void
   setAppTheme: (theme: AppTheme) => void
   setAppPrimaryColor: (color: AppPrimaryColor) => void
@@ -151,11 +172,17 @@ interface WorkbenchActions {
   closeCreateCollectionDialog: () => void
   setCollectionNameDraft: (value: string) => void
   handleCreateCollection: () => Promise<void>
+  openCollectionTab: (node: CollectionTreeNode, parentCollectionId: string | null) => void
   openEditCollectionDialog: (node: CollectionTreeNode) => void
   closeEditCollectionDialog: () => void
   setEditCollectionNameDraft: (value: string) => void
   setEditCollectionDescriptionDraft: (value: string) => void
+  setEditCollectionRequestConfigDraft: (value: RequestScopeConfig) => void
+  updateCollectionTabDraft: (updater: (draft: CollectionEditorDraft) => CollectionEditorDraft) => void
   handleEditCollection: () => Promise<void>
+  handleEditProject: () => Promise<void>
+  openProjectTab: () => void
+  updateProjectTabDraft: (updater: (draft: ProjectEditorDraft) => ProjectEditorDraft) => void
   openCreateRequestDialog: (parentCollectionId: string | null) => void
   closeCreateRequestDialog: () => void
   setRequestNameDraft: (value: string) => void
@@ -222,7 +249,11 @@ const initialState: WorkbenchState = {
   openRequestTabs: [],
   activeRequestId: null,
   requestDrafts: {},
+  collectionDrafts: {},
+  projectDrafts: {},
   savedRequests: {},
+  savedCollections: {},
+  savedProjects: {},
   dirtyRequestIds: new Set(),
   loadingRequestIds: [],
   requestResponses: {},
@@ -230,8 +261,10 @@ const initialState: WorkbenchState = {
   splitRatio: 0.55,
   settingsDialogOpen: false,
   projectDialogOpen: false,
+  projectDialogMode: 'create',
   projectNameDraft: '',
   projectDescriptionDraft: '',
+  projectRequestConfigDraft: createDefaultRequestScopeConfig(),
   collectionDialogOpen: false,
   collectionDialogParentCollectionId: null,
   collectionNameDraft: '',
@@ -239,6 +272,7 @@ const initialState: WorkbenchState = {
   editingCollectionId: null,
   editCollectionNameDraft: '',
   editCollectionDescriptionDraft: '',
+  editCollectionRequestConfigDraft: createDefaultRequestScopeConfig(),
   requestDialogOpen: false,
   requestDialogParentCollectionId: null,
   requestNameDraft: '',
@@ -308,6 +342,133 @@ async function openProjectInStore(
   }, successMessage)
 }
 
+function getCollectionRequestConfig(
+  project: ProjectSnapshot | null,
+  collectionId: string | null,
+): RequestScopeConfig[] {
+  if (!project || !collectionId) {
+    return []
+  }
+
+  return findCollectionPath(project.children, collectionId)
+    .map(collection => cloneRequestScopeConfig(collection.requestConfig ?? createDefaultRequestScopeConfig()))
+}
+
+function getRequestScopeChain(
+  project: ProjectSnapshot | null,
+  parentCollectionId: string | null,
+  request: ApiDefinition,
+) {
+  const projectConfig = cloneRequestScopeConfig(project?.metadata.requestConfig ?? createDefaultRequestScopeConfig())
+  const collectionConfigs = getCollectionRequestConfig(project, parentCollectionId)
+
+  return {
+    projectConfig,
+    collectionConfigs,
+    mergedHeaders: mergeKeyValueEntries(
+      projectConfig.headers,
+      ...collectionConfigs.map(config => config.headers),
+      request.request.headers,
+    ),
+    mergedAuth: resolveInheritedAuth(
+      projectConfig.auth,
+      ...collectionConfigs.map(config => config.auth),
+      request.request.auth,
+    ),
+    preRequestScripts: [
+      projectConfig.preRequestScript,
+      ...collectionConfigs.map(config => config.preRequestScript),
+      request.preRequestScript,
+    ].filter(script => script.trim()),
+    postRequestScripts: [
+      projectConfig.postRequestScript,
+      ...collectionConfigs.map(config => config.postRequestScript),
+      request.postRequestScript,
+    ].filter(script => script.trim()),
+  }
+}
+
+function createProjectEditorDraft(project: ProjectSnapshot): ProjectEditorDraft {
+  return JSON.parse(JSON.stringify(project.metadata)) as ProjectEditorDraft
+}
+
+function createCollectionEditorDraft(collection: CollectionTreeNode): CollectionEditorDraft {
+  return JSON.parse(JSON.stringify({
+    schemaVersion: 1,
+    entityType: 'collection',
+    id: collection.id,
+    createdAt: collection.createdAt,
+    updatedAt: collection.updatedAt,
+    slug: collection.slug,
+    name: collection.name,
+    description: collection.description,
+    order: collection.children.map(child => child.id),
+    requestConfig: collection.requestConfig,
+  })) as CollectionEditorDraft
+}
+
+function getActiveRequestEntityId(state: Pick<WorkbenchStore, 'activeRequestId' | 'openRequestTabs'>): string | null {
+  if (!state.activeRequestId) {
+    return null
+  }
+  const tab = state.openRequestTabs.find(item => item.requestId === state.activeRequestId)
+  return tab?.entityType === 'request' ? tab.entityId : null
+}
+
+function getDefaultTabEditorTab(entityType: OpenRequestTab['entityType']): WorkbenchPanelTab {
+  return entityType === 'request' ? 'query' : 'info'
+}
+
+function buildTreeSelectionForTab(project: ProjectSnapshot | null, tab: OpenRequestTab | null): TreeSelection | null {
+  if (!project || !tab) {
+    return null
+  }
+
+  if (tab.entityType === 'request') {
+    const location = findApiLocation(project, tab.entityId)
+    if (!location) {
+      return null
+    }
+
+    return {
+      type: 'api',
+      id: tab.entityId,
+      parentCollectionId: location.parentCollectionId,
+    }
+  }
+
+  if (tab.entityType === 'collection') {
+    const path = findCollectionPath(project.children, tab.entityId)
+    if (path.length === 0) {
+      return null
+    }
+
+    return {
+      type: 'collection',
+      id: tab.entityId,
+      parentCollectionId: path.length > 1 ? path.at(-2)?.id ?? null : null,
+    }
+  }
+
+  return null
+}
+
+function isTabRemoved(
+  tab: OpenRequestTab,
+  removedRequestIds: Set<string>,
+  removedCollectionIds: Set<string>,
+) {
+  if (tab.entityType === 'request') {
+    return removedRequestIds.has(tab.entityId)
+  }
+
+  if (tab.entityType === 'collection') {
+    return removedCollectionIds.has(tab.entityId)
+  }
+
+  return false
+}
+
 const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   ...initialState,
 
@@ -324,14 +485,20 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         activeRequestId: null,
         activeEditorTab: 'query',
         requestDrafts: {},
+        collectionDrafts: {},
+        projectDrafts: {},
         savedRequests: {},
+        savedCollections: {},
+        savedProjects: {},
         dirtyRequestIds: new Set(),
         requestResponses: {},
         loadingRequestIds: [],
         settingsDialogOpen: false,
         projectDialogOpen: false,
+        projectDialogMode: 'create',
         projectNameDraft: '',
         projectDescriptionDraft: '',
+        projectRequestConfigDraft: cloneRequestScopeConfig(payload.projectSnapshot.metadata.requestConfig ?? createDefaultRequestScopeConfig()),
         collectionDialogOpen: false,
         collectionDialogParentCollectionId: null,
         collectionNameDraft: '',
@@ -339,6 +506,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         editingCollectionId: null,
         editCollectionNameDraft: '',
         editCollectionDescriptionDraft: '',
+        editCollectionRequestConfigDraft: createDefaultRequestScopeConfig(),
         requestDialogOpen: false,
         requestDialogParentCollectionId: null,
         requestNameDraft: '',
@@ -359,11 +527,41 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   hydrateTabState(tabs, activeRequestId) {
-    const activeTab = tabs.find(tab => tab.requestId === activeRequestId)?.editorTab ?? 'query'
+    const project = get().project
+    const collectionDrafts: Record<string, CollectionEditorDraft> = {}
+    const savedCollections: Record<string, CollectionEditorDraft> = {}
+    const projectDrafts: Record<string, ProjectEditorDraft> = {}
+    const savedProjects: Record<string, ProjectEditorDraft> = {}
+
+    for (const tab of tabs) {
+      if (tab.entityType === 'project' && project?.metadata.id === tab.entityId) {
+        const draft = createProjectEditorDraft(project)
+        projectDrafts[tab.entityId] = draft
+        savedProjects[tab.entityId] = draft
+      }
+
+      if (tab.entityType === 'collection' && project) {
+        const collection = findCollectionById(project.children, tab.entityId)
+        if (!collection) {
+          continue
+        }
+
+        const draft = createCollectionEditorDraft(collection)
+        collectionDrafts[tab.entityId] = draft
+        savedCollections[tab.entityId] = draft
+      }
+    }
+
+    const activeRecord = tabs.find(tab => tab.requestId === activeRequestId) ?? null
+    const activeTab = activeRecord?.editorTab ?? getDefaultTabEditorTab(activeRecord?.entityType ?? 'request')
     set({
       openRequestTabs: tabs,
       activeRequestId,
       activeEditorTab: activeTab,
+      collectionDrafts,
+      savedCollections,
+      projectDrafts,
+      savedProjects,
     })
   },
 
@@ -430,7 +628,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   focusRequestTab(requestId) {
     set((state) => {
-      const nextActiveTab = state.openRequestTabs.find(tab => tab.requestId === requestId)?.editorTab ?? 'query'
+      const activeRecord = state.openRequestTabs.find(tab => tab.requestId === requestId) ?? null
+      const nextActiveTab = activeRecord?.editorTab ?? getDefaultTabEditorTab(activeRecord?.entityType ?? 'request')
       return {
         openRequestTabs: state.openRequestTabs.map(tab =>
           tab.requestId === requestId ? { ...tab, lastFocusedAt: Date.now() } : tab,
@@ -440,15 +639,11 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       }
     })
 
-    const location = get().project ? findApiLocation(get().project!, requestId) : null
-    if (location) {
-      set({
-        selectedTreeNode: {
-          type: 'api',
-          id: requestId,
-          parentCollectionId: location.parentCollectionId,
-        },
-      })
+    const state = get()
+    const activeTab = state.openRequestTabs.find(tab => tab.requestId === requestId) ?? null
+    const nextSelection = buildTreeSelectionForTab(state.project, activeTab)
+    if (nextSelection || activeTab?.entityType === 'project') {
+      set({ selectedTreeNode: nextSelection })
     }
 
     get().syncTabState()
@@ -459,7 +654,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const nextActiveRequestId = tabs.some(tab => tab.requestId === state.activeRequestId)
         ? state.activeRequestId
         : tabs.at(0)?.requestId ?? null
-      const nextActiveTab = tabs.find(tab => tab.requestId === nextActiveRequestId)?.editorTab ?? 'query'
+      const activeRecord = tabs.find(tab => tab.requestId === nextActiveRequestId) ?? null
+      const nextActiveTab = activeRecord?.editorTab ?? getDefaultTabEditorTab(activeRecord?.entityType ?? 'request')
 
       return {
         activeRequestId: nextActiveRequestId,
@@ -486,16 +682,24 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   openCreateProjectDialog() {
     set({
       projectDialogOpen: true,
+      projectDialogMode: 'create',
       projectNameDraft: '',
       projectDescriptionDraft: '',
+      projectRequestConfigDraft: createDefaultRequestScopeConfig(),
     })
+  },
+
+  openEditProjectDialog() {
+    get().openProjectTab()
   },
 
   closeCreateProjectDialog() {
     set({
       projectDialogOpen: false,
+      projectDialogMode: 'create',
       projectNameDraft: '',
       projectDescriptionDraft: '',
+      projectRequestConfigDraft: createDefaultRequestScopeConfig(),
     })
   },
 
@@ -505,6 +709,10 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   setProjectDescriptionDraft(value) {
     set({ projectDescriptionDraft: value })
+  },
+
+  setProjectRequestConfigDraft(value) {
+    set({ projectRequestConfigDraft: value })
   },
 
   setRecentProjectPaths(paths) {
@@ -517,6 +725,44 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   setAppPrimaryColor(color) {
     set({ appPrimaryColor: color })
+  },
+
+  openProjectTab() {
+    const { project } = get()
+    if (!project) {
+      toast.error('请先选择项目')
+      return
+    }
+
+    const entityId = project.metadata.id
+    const requestId = `project:${entityId}`
+    const draft = createProjectEditorDraft(project)
+
+    set((state) => {
+      const existing = state.openRequestTabs.find(tab => tab.requestId === requestId)
+      const nextTab: OpenRequestTab = {
+        entityType: 'project',
+        requestId,
+        entityId,
+        title: `${project.metadata.name} 设置`,
+        method: 'PROJ',
+        dirty: false,
+        lastFocusedAt: Date.now(),
+        editorTab: existing?.editorTab as SettingsPanelTab ?? 'info',
+      }
+
+      return {
+        projectDrafts: { ...state.projectDrafts, [entityId]: draft },
+        savedProjects: { ...state.savedProjects, [entityId]: createProjectEditorDraft(project) },
+        openRequestTabs: existing
+          ? state.openRequestTabs.map(tab => tab.requestId === requestId ? nextTab : tab)
+          : [...state.openRequestTabs, nextTab],
+        activeRequestId: requestId,
+        activeEditorTab: nextTab.editorTab,
+      }
+    })
+
+    get().syncTabState()
   },
 
   async handleCreateProject() {
@@ -558,6 +804,46 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     }
+  },
+
+  async handleEditProject() {
+    const { project, activeRequestId, openRequestTabs, projectDrafts } = get()
+    const activeTab = activeRequestId ? openRequestTabs.find(tab => tab.requestId === activeRequestId) : null
+    const entityId = activeTab?.entityType === 'project' ? activeTab.entityId : null
+    const draft = entityId ? projectDrafts[entityId] : null
+    const name = draft?.name.trim() ?? ''
+    if (!project || !draft || !name) {
+      toast.error('项目名称不能为空')
+      return
+    }
+
+    await runTask(set, async () => {
+      await updateProject({
+        id: project.metadata.id,
+        name,
+        description: draft.description.trim(),
+        docs: project.metadata.docs,
+        mock: project.metadata.mock,
+        requestConfig: cloneRequestScopeConfig(draft.requestConfig),
+      })
+      set((state) => {
+        if (!entityId) {
+          return {}
+        }
+
+        const nextDirtyIds = new Set(state.dirtyRequestIds)
+        nextDirtyIds.delete(entityId)
+        return {
+          dirtyRequestIds: nextDirtyIds,
+          openRequestTabs: state.openRequestTabs.map(tab =>
+            tab.entityType === 'project' && tab.entityId === entityId
+              ? { ...tab, dirty: false }
+              : tab,
+          ),
+        }
+      })
+      await get().refreshProjectInternal()
+    }, '项目已更新')
   },
 
   async handleOpenExistingProject() {
@@ -693,13 +979,43 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }, '集合已创建')
   },
 
-  openEditCollectionDialog(node) {
-    set({
-      editCollectionDialogOpen: true,
-      editingCollectionId: node.id,
-      editCollectionNameDraft: node.name,
-      editCollectionDescriptionDraft: node.description,
+  openCollectionTab(node, parentCollectionId) {
+    const entityId = node.id
+    const requestId = `collection:${entityId}`
+    const draft = createCollectionEditorDraft(node)
+
+    set((state) => {
+      const existing = state.openRequestTabs.find(tab => tab.requestId === requestId)
+      const nextTab: OpenRequestTab = {
+        entityType: 'collection',
+        requestId,
+        entityId,
+        title: `${node.name} 设置`,
+        method: 'DIR',
+        dirty: false,
+        lastFocusedAt: Date.now(),
+        editorTab: existing?.editorTab as SettingsPanelTab ?? 'info',
+      }
+
+      return {
+        collectionDrafts: { ...state.collectionDrafts, [entityId]: draft },
+        savedCollections: { ...state.savedCollections, [entityId]: createCollectionEditorDraft(node) },
+        openRequestTabs: existing
+          ? state.openRequestTabs.map(tab => tab.requestId === requestId ? nextTab : tab)
+          : [...state.openRequestTabs, nextTab],
+        activeRequestId: requestId,
+        activeEditorTab: nextTab.editorTab,
+        selectedTreeNode: { type: 'collection', id: entityId, parentCollectionId },
+      }
     })
+
+    get().syncTabState()
+  },
+
+  openEditCollectionDialog(node) {
+    const location = get().project ? findCollectionPath(get().project!.children, node.id) : []
+    const parentCollectionId = location.length > 1 ? location.at(-2)?.id ?? null : null
+    get().openCollectionTab(node, parentCollectionId)
   },
 
   closeEditCollectionDialog() {
@@ -708,6 +1024,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       editingCollectionId: null,
       editCollectionNameDraft: '',
       editCollectionDescriptionDraft: '',
+      editCollectionRequestConfigDraft: createDefaultRequestScopeConfig(),
     })
   },
 
@@ -719,26 +1036,109 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     set({ editCollectionDescriptionDraft: value })
   },
 
+  setEditCollectionRequestConfigDraft(value) {
+    set({ editCollectionRequestConfigDraft: value })
+  },
+
+  updateCollectionTabDraft(updater) {
+    const { activeRequestId, openRequestTabs, collectionDrafts, savedCollections } = get() as WorkbenchStore & {
+      updateCollectionTabDraft?: unknown
+    }
+    const activeTab = activeRequestId ? openRequestTabs.find(tab => tab.requestId === activeRequestId) : null
+    const entityId = activeTab?.entityType === 'collection' ? activeTab.entityId : null
+    if (!entityId || !collectionDrafts[entityId]) {
+      return
+    }
+
+    const nextDraft = updater(JSON.parse(JSON.stringify(collectionDrafts[entityId])) as CollectionEditorDraft)
+    const dirty = JSON.stringify(savedCollections[entityId]) !== JSON.stringify(nextDraft)
+    set((state) => {
+      const nextDirtyIds = new Set(state.dirtyRequestIds)
+      if (dirty) {
+        nextDirtyIds.add(entityId)
+      }
+      else {
+        nextDirtyIds.delete(entityId)
+      }
+      return {
+        collectionDrafts: { ...state.collectionDrafts, [entityId]: nextDraft },
+        dirtyRequestIds: nextDirtyIds,
+        openRequestTabs: state.openRequestTabs.map(tab =>
+          tab.entityType === 'collection' && tab.entityId === entityId
+            ? { ...tab, title: `${nextDraft.name} 设置`, dirty }
+            : tab,
+        ),
+      }
+    })
+  },
+
+  updateProjectTabDraft(updater) {
+    const { activeRequestId, openRequestTabs, projectDrafts, savedProjects } = get() as WorkbenchStore & {
+      updateProjectTabDraft?: unknown
+    }
+    const activeTab = activeRequestId ? openRequestTabs.find(tab => tab.requestId === activeRequestId) : null
+    const entityId = activeTab?.entityType === 'project' ? activeTab.entityId : null
+    if (!entityId || !projectDrafts[entityId]) {
+      return
+    }
+
+    const nextDraft = updater(JSON.parse(JSON.stringify(projectDrafts[entityId])) as ProjectEditorDraft)
+    const dirty = JSON.stringify(savedProjects[entityId]) !== JSON.stringify(nextDraft)
+    set((state) => {
+      const nextDirtyIds = new Set(state.dirtyRequestIds)
+      if (dirty) {
+        nextDirtyIds.add(entityId)
+      }
+      else {
+        nextDirtyIds.delete(entityId)
+      }
+      return {
+        projectDrafts: { ...state.projectDrafts, [entityId]: nextDraft },
+        dirtyRequestIds: nextDirtyIds,
+        openRequestTabs: state.openRequestTabs.map(tab =>
+          tab.entityType === 'project' && tab.entityId === entityId
+            ? { ...tab, title: `${nextDraft.name} 设置`, dirty }
+            : tab,
+        ),
+      }
+    })
+  },
+
   async handleEditCollection() {
-    const {
-      editCollectionDescriptionDraft,
-      editCollectionNameDraft,
-      editingCollectionId,
-    } = get()
-    const name = editCollectionNameDraft.trim()
-    if (!editingCollectionId || !name) {
+    const { activeRequestId, openRequestTabs, collectionDrafts } = get()
+    const activeTab = activeRequestId ? openRequestTabs.find(tab => tab.requestId === activeRequestId) : null
+    const entityId = activeTab?.entityType === 'collection' ? activeTab.entityId : null
+    const draft = entityId ? collectionDrafts[entityId] : null
+    const name = draft?.name.trim() ?? ''
+    if (!entityId || !draft || !name) {
       toast.error('请填写目录名称')
       return
     }
 
     await runTask(set, async () => {
       await updateCollection({
-        id: editingCollectionId,
+        id: entityId,
         name,
-        description: editCollectionDescriptionDraft.trim(),
+        description: draft.description.trim(),
+        requestConfig: cloneRequestScopeConfig(draft.requestConfig),
+      })
+      set((state) => {
+        if (!entityId) {
+          return {}
+        }
+
+        const nextDirtyIds = new Set(state.dirtyRequestIds)
+        nextDirtyIds.delete(entityId)
+        return {
+          dirtyRequestIds: nextDirtyIds,
+          openRequestTabs: state.openRequestTabs.map(tab =>
+            tab.entityType === 'collection' && tab.entityId === entityId
+              ? { ...tab, dirty: false }
+              : tab,
+          ),
+        }
       })
       await get().refreshProjectInternal()
-      get().closeEditCollectionDialog()
     }, '目录已更新')
   },
 
@@ -884,13 +1284,14 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   async openRequestFromSummary(summary, parentCollectionId) {
     const { requestDrafts } = get()
+    const requestTabId = `request:${summary.id}`
 
     set({
       selectedTreeNode: { type: 'api', id: summary.id, parentCollectionId },
     })
 
     if (requestDrafts[summary.id]) {
-      get().focusRequestTab(summary.id)
+      get().focusRequestTab(requestTabId)
       return
     }
 
@@ -915,34 +1316,35 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   updateRequestDraft(updater) {
-    const { activeRequestId, requestDrafts, savedRequests } = get()
-    if (!activeRequestId) {
+    const state = get()
+    const entityId = getActiveRequestEntityId(state)
+    if (!entityId) {
       return
     }
 
-    const currentDraft = requestDrafts[activeRequestId]
+    const currentDraft = state.requestDrafts[entityId]
     if (!currentDraft) {
       return
     }
 
     const nextDraft = updater(cloneApiDefinition(currentDraft))
-    const saved = savedRequests[activeRequestId]
+    const saved = state.savedRequests[entityId]
     const dirty = saved ? !areApiDefinitionsEqual(saved, nextDraft) : true
 
-    set((state) => {
-      const nextDirtyIds = new Set(state.dirtyRequestIds)
+    set((currentState) => {
+      const nextDirtyIds = new Set(currentState.dirtyRequestIds)
       if (dirty) {
-        nextDirtyIds.add(activeRequestId)
+        nextDirtyIds.add(entityId)
       }
       else {
-        nextDirtyIds.delete(activeRequestId)
+        nextDirtyIds.delete(entityId)
       }
 
       return {
-        requestDrafts: { ...state.requestDrafts, [activeRequestId]: nextDraft },
+        requestDrafts: { ...currentState.requestDrafts, [entityId]: nextDraft },
         dirtyRequestIds: nextDirtyIds,
-        openRequestTabs: state.openRequestTabs.map(tab =>
-          tab.requestId === activeRequestId
+        openRequestTabs: currentState.openRequestTabs.map(tab =>
+          tab.entityType === 'request' && tab.entityId === entityId
             ? {
                 ...tab,
                 title: nextDraft.name,
@@ -956,12 +1358,13 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   async handleSaveRequest() {
-    const { activeRequestId, requestDrafts } = get()
-    if (!activeRequestId || !requestDrafts[activeRequestId]) {
+    const state = get()
+    const entityId = getActiveRequestEntityId(state)
+    if (!entityId || !state.requestDrafts[entityId]) {
       return
     }
 
-    const draft = cloneApiDefinition(requestDrafts[activeRequestId])
+    const draft = cloneApiDefinition(state.requestDrafts[entityId])
     await runTask(set, async () => {
       const saved = await updateApi({
         id: draft.id,
@@ -982,20 +1385,24 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   async handleSendRequest() {
-    const { activeRequestId, requestDrafts, project, environments, activeEnvironmentId, resolveUrl, resolveEnvironmentVariables } = get()
-    if (!activeRequestId || !requestDrafts[activeRequestId]) {
+    const state = get()
+    const { project, environments, activeEnvironmentId, resolveUrl, resolveEnvironmentVariables } = state
+    const entityId = getActiveRequestEntityId(state)
+    if (!entityId || !state.requestDrafts[entityId]) {
       return
     }
 
-    const draft = cloneApiDefinition(requestDrafts[activeRequestId])
+    const draft = cloneApiDefinition(state.requestDrafts[entityId])
+    const parentCollectionId = findApiLocation(project!, draft.id)?.parentCollectionId ?? null
+    const requestScopeChain = getRequestScopeChain(project, parentCollectionId, draft)
     const activeProjectId = project?.metadata.id ?? null
     const activeEnv = activeEnvironmentId ? environments.find(e => e.id === activeEnvironmentId) ?? null : null
 
     set(state => ({
       requestResponses: {
         ...state.requestResponses,
-        [activeRequestId]: {
-          ...(state.requestResponses[activeRequestId] ?? createEmptyResponseState()),
+        [entityId]: {
+          ...(state.requestResponses[entityId] ?? createEmptyResponseState()),
           isLoading: true,
           error: null,
         },
@@ -1013,7 +1420,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const mutableConfig: RequestConfig = {
         method: draft.method,
         url: draft.url,
-        headers: draft.request.headers.map(h => ({ ...h })),
+        headers: requestScopeChain.mergedHeaders.map(h => ({ ...h })),
         query: draft.request.query.map(q => ({ ...q })),
         body: {
           mode: draft.request.body.mode,
@@ -1024,8 +1431,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         },
       }
 
-      // Run pre-request script
-      if (draft.preRequestScript.trim()) {
+      for (const script of requestScopeChain.preRequestScripts) {
         const ctx = createPreRequestContext(
           mutableConfig,
           key => envMutations.get(key) ?? activeEnv?.variables.find(v => v.key === key && v.enabled)?.value,
@@ -1033,7 +1439,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           key => scriptVars.get(key),
           (key, value) => { scriptVars.set(key, value) },
         )
-        const result = runScript(draft.preRequestScript, ctx)
+        const result = runScript(script, ctx)
         if (result.error) {
           throw new Error(`Pre-request script error: ${result.error}`)
         }
@@ -1078,16 +1484,16 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       }
 
       const resolvedAuth = {
-        ...draft.request.auth,
+        ...requestScopeChain.mergedAuth,
         basic: {
-          username: resolveEnvironmentVariables(draft.request.auth.basic.username, variables),
-          password: resolveEnvironmentVariables(draft.request.auth.basic.password, variables),
+          username: resolveEnvironmentVariables(requestScopeChain.mergedAuth.basic.username, variables),
+          password: resolveEnvironmentVariables(requestScopeChain.mergedAuth.basic.password, variables),
         },
-        bearerToken: resolveEnvironmentVariables(draft.request.auth.bearerToken, variables),
+        bearerToken: resolveEnvironmentVariables(requestScopeChain.mergedAuth.bearerToken, variables),
         apiKey: {
-          ...draft.request.auth.apiKey,
-          key: resolveEnvironmentVariables(draft.request.auth.apiKey.key, variables),
-          value: resolveEnvironmentVariables(draft.request.auth.apiKey.value, variables),
+          ...requestScopeChain.mergedAuth.apiKey,
+          key: resolveEnvironmentVariables(requestScopeChain.mergedAuth.apiKey.key, variables),
+          value: resolveEnvironmentVariables(requestScopeChain.mergedAuth.apiKey.value, variables),
         },
       }
 
@@ -1118,7 +1524,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
       // Run post-request script
       let finalResponse = responseData
-      if (draft.postRequestScript.trim()) {
+      for (const script of requestScopeChain.postRequestScripts) {
         const postCtx = createPostRequestContext(
           mutableConfig,
           responseData,
@@ -1127,7 +1533,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           key => scriptVars.get(key),
           (key, value) => { scriptVars.set(key, value) },
         )
-        const postResult = runScript(draft.postRequestScript, postCtx)
+        const postResult = runScript(script, postCtx)
         if (postResult.error) {
           throw new Error(`Post-request script error: ${postResult.error}`)
         }
@@ -1163,7 +1569,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       set(state => ({
         requestResponses: {
           ...state.requestResponses,
-          [activeRequestId]: {
+          [entityId]: {
             status: finalResponse.status,
             headers: Object.entries(finalResponse.headers).map(([name, value]) => ({ name, value, description: '' })),
             durationMs: finalResponse.time,
@@ -1181,8 +1587,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       set(state => ({
         requestResponses: {
           ...state.requestResponses,
-          [activeRequestId]: {
-            ...(state.requestResponses[activeRequestId] ?? createEmptyResponseState()),
+          [entityId]: {
+            ...(state.requestResponses[entityId] ?? createEmptyResponseState()),
             isLoading: false,
             error: error instanceof Error ? error.message : String(error),
           },
@@ -1193,7 +1599,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   requestCloseRequestTab(requestId) {
-    if (get().dirtyRequestIds.has(requestId)) {
+    const tab = get().openRequestTabs.find(item => item.requestId === requestId)
+    if (tab && get().dirtyRequestIds.has(tab.entityId)) {
       set({ pendingCloseRequestId: requestId })
       return
     }
@@ -1207,34 +1614,48 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     set((state) => {
       const remaining = state.openRequestTabs.filter(tab => tab.requestId !== requestId)
       const nextActive = remaining.slice().sort((left, right) => right.lastFocusedAt - left.lastFocusedAt)[0]
+      const closingTab = state.openRequestTabs.find(tab => tab.requestId === requestId) ?? null
 
       const nextState: Partial<WorkbenchStore> = {
         openRequestTabs: remaining,
         activeRequestId: nextActive?.requestId ?? null,
-        activeEditorTab: nextActive?.editorTab ?? 'query',
+        activeEditorTab: nextActive?.editorTab ?? getDefaultTabEditorTab(nextActive?.entityType ?? 'request'),
         requestDrafts: Object.fromEntries(
-          Object.entries(state.requestDrafts).filter(([id]) => id !== requestId),
+          Object.entries(state.requestDrafts).filter(([id]) => id !== closingTab?.entityId),
         ),
         savedRequests: Object.fromEntries(
-          Object.entries(state.savedRequests).filter(([id]) => id !== requestId),
+          Object.entries(state.savedRequests).filter(([id]) => id !== closingTab?.entityId),
+        ),
+        collectionDrafts: Object.fromEntries(
+          Object.entries(state.collectionDrafts).filter(([id]) => id !== closingTab?.entityId),
+        ),
+        savedCollections: Object.fromEntries(
+          Object.entries(state.savedCollections).filter(([id]) => id !== closingTab?.entityId),
+        ),
+        projectDrafts: Object.fromEntries(
+          Object.entries(state.projectDrafts).filter(([id]) => id !== closingTab?.entityId),
+        ),
+        savedProjects: Object.fromEntries(
+          Object.entries(state.savedProjects).filter(([id]) => id !== closingTab?.entityId),
         ),
         requestResponses: Object.fromEntries(
-          Object.entries(state.requestResponses).filter(([id]) => id !== requestId),
+          Object.entries(state.requestResponses).filter(([id]) => id !== closingTab?.entityId),
         ),
-        dirtyRequestIds: new Set([...state.dirtyRequestIds].filter(id => id !== requestId)),
+        dirtyRequestIds: new Set([...state.dirtyRequestIds].filter(id => id !== closingTab?.entityId)),
       }
 
       if (nextActive && project) {
-        const location = findApiLocation(project, nextActive.requestId)
-        if (location) {
-          nextState.selectedTreeNode = {
-            type: 'api',
-            id: nextActive.requestId,
-            parentCollectionId: location.parentCollectionId,
-          }
-        }
+        nextState.selectedTreeNode = buildTreeSelectionForTab(project, nextActive)
       }
-      else if (!nextActive && selectedTreeNode?.type === 'api' && selectedTreeNode.id === requestId) {
+      else if (
+        !nextActive
+        && closingTab
+        && selectedTreeNode
+        && (
+          (selectedTreeNode.type === 'api' && closingTab.entityType === 'request' && selectedTreeNode.id === closingTab.entityId)
+          || (selectedTreeNode.type === 'collection' && closingTab.entityType === 'collection' && selectedTreeNode.id === closingTab.entityId)
+        )
+      ) {
         nextState.selectedTreeNode = null
       }
 
@@ -1350,34 +1771,88 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   async refreshProjectInternal() {
-    const { projectPath } = get()
+    const { projectPath, openRequestTabs } = get()
     if (!projectPath) {
       return null
     }
 
     const snapshot = await openProject(projectPath)
-    set({
-      project: snapshot,
-      environments: snapshot.environments,
-      activeEnvironmentId: snapshot.metadata.activeEnvironmentId ?? null,
+    set((state) => {
+      const nextCollectionDrafts = { ...state.collectionDrafts }
+      const nextSavedCollections = { ...state.savedCollections }
+      const nextProjectDrafts = { ...state.projectDrafts }
+      const nextSavedProjects = { ...state.savedProjects }
+      const nextDirtyIds = new Set(state.dirtyRequestIds)
+      const nextTabs = state.openRequestTabs.map((tab) => {
+        if (tab.entityType === 'project' && tab.entityId === snapshot.metadata.id) {
+          const saved = createProjectEditorDraft(snapshot)
+          const currentDraft = state.projectDrafts[tab.entityId]
+          const dirty = nextDirtyIds.has(tab.entityId)
+          nextSavedProjects[tab.entityId] = saved
+          nextProjectDrafts[tab.entityId] = dirty && currentDraft ? currentDraft : saved
+          return {
+            ...tab,
+            title: `${(dirty && currentDraft ? currentDraft.name : saved.name) || saved.name} 设置`,
+            dirty,
+          }
+        }
+
+        if (tab.entityType === 'collection') {
+          const collection = findCollectionById(snapshot.children, tab.entityId)
+          if (!collection) {
+            return tab
+          }
+
+          const saved = createCollectionEditorDraft(collection)
+          const currentDraft = state.collectionDrafts[tab.entityId]
+          const dirty = nextDirtyIds.has(tab.entityId)
+          nextSavedCollections[tab.entityId] = saved
+          nextCollectionDrafts[tab.entityId] = dirty && currentDraft ? currentDraft : saved
+          return {
+            ...tab,
+            title: `${(dirty && currentDraft ? currentDraft.name : saved.name) || saved.name} 设置`,
+            dirty,
+          }
+        }
+
+        return tab
+      })
+
+      return {
+        project: snapshot,
+        environments: snapshot.environments,
+        activeEnvironmentId: snapshot.metadata.activeEnvironmentId ?? null,
+        openRequestTabs: nextTabs,
+        collectionDrafts: nextCollectionDrafts,
+        savedCollections: nextSavedCollections,
+        projectDrafts: nextProjectDrafts,
+        savedProjects: nextSavedProjects,
+      }
     })
+
+    const activeTab = openRequestTabs.find(tab => tab.requestId === get().activeRequestId) ?? null
+    const nextSelection = buildTreeSelectionForTab(snapshot, activeTab)
+    set({ selectedTreeNode: nextSelection })
     return snapshot
   },
 
   setRequestLoaded(definition, setActiveTab = true) {
     const draft = cloneApiDefinition(definition)
     const saved = cloneApiDefinition(definition)
+    const requestId = `request:${definition.id}`
 
     set((state) => {
       const nextTab: OpenRequestTab = {
-        requestId: definition.id,
+        entityType: 'request',
+        requestId,
+        entityId: definition.id,
         title: definition.name,
         method: definition.method,
         dirty: false,
         lastFocusedAt: Date.now(),
-        editorTab: state.openRequestTabs.find(tab => tab.requestId === definition.id)?.editorTab ?? 'query',
+        editorTab: (state.openRequestTabs.find(tab => tab.requestId === requestId)?.editorTab as EditorPanelTab | undefined) ?? 'query',
       }
-      const existing = state.openRequestTabs.some(tab => tab.requestId === definition.id)
+      const existing = state.openRequestTabs.some(tab => tab.requestId === requestId)
       const nextDirtyIds = new Set(state.dirtyRequestIds)
       nextDirtyIds.delete(definition.id)
 
@@ -1389,9 +1864,9 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
           : { ...state.requestResponses, [definition.id]: createEmptyResponseState() },
         dirtyRequestIds: nextDirtyIds,
         openRequestTabs: existing
-          ? state.openRequestTabs.map(tab => (tab.requestId === definition.id ? nextTab : tab))
+          ? state.openRequestTabs.map(tab => (tab.requestId === requestId ? nextTab : tab))
           : [...state.openRequestTabs, nextTab],
-        activeRequestId: setActiveTab ? definition.id : state.activeRequestId,
+        activeRequestId: setActiveTab ? requestId : state.activeRequestId,
         activeEditorTab: setActiveTab ? nextTab.editorTab : state.activeEditorTab,
       }
     })
@@ -1414,7 +1889,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         savedRequests: { ...state.savedRequests, [definition.id]: saved },
         dirtyRequestIds: nextDirtyIds,
         openRequestTabs: state.openRequestTabs.map(tab =>
-          tab.requestId === definition.id
+          tab.entityType === 'request' && tab.entityId === definition.id
             ? {
                 ...tab,
                 title: definition.name,
@@ -1433,27 +1908,39 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     const { activeRequestId, editingRequestId, selectedTreeNode } = get()
 
     set((state) => {
-      const remaining = state.openRequestTabs.filter(tab => !removedRequestIds.has(tab.requestId))
-      const activeRemoved = activeRequestId ? removedRequestIds.has(activeRequestId) : false
+      const remaining = state.openRequestTabs.filter(tab => !isTabRemoved(tab, removedRequestIds, removedCollectionIds))
+      const activeRemoved = activeRequestId
+        ? Boolean(state.openRequestTabs.find(tab => tab.requestId === activeRequestId && isTabRemoved(tab, removedRequestIds, removedCollectionIds)))
+        : false
       const nextActive = activeRemoved
         ? remaining.slice().sort((left, right) => right.lastFocusedAt - left.lastFocusedAt)[0]
         : remaining.find(tab => tab.requestId === activeRequestId) ?? null
 
       const nextState: Partial<WorkbenchStore> = {
         openRequestTabs: remaining,
-        activeEditorTab: nextActive?.editorTab ?? 'query',
+        activeEditorTab: nextActive?.editorTab ?? getDefaultTabEditorTab(nextActive?.entityType ?? 'request'),
         requestDrafts: Object.fromEntries(
           Object.entries(state.requestDrafts).filter(([id]) => !removedRequestIds.has(id)),
         ),
         savedRequests: Object.fromEntries(
           Object.entries(state.savedRequests).filter(([id]) => !removedRequestIds.has(id)),
         ),
+        collectionDrafts: Object.fromEntries(
+          Object.entries(state.collectionDrafts).filter(([id]) => !removedCollectionIds.has(id)),
+        ),
+        savedCollections: Object.fromEntries(
+          Object.entries(state.savedCollections).filter(([id]) => !removedCollectionIds.has(id)),
+        ),
+        projectDrafts: state.projectDrafts,
+        savedProjects: state.savedProjects,
         requestResponses: Object.fromEntries(
           Object.entries(state.requestResponses).filter(([id]) => !removedRequestIds.has(id)),
         ),
         loadingRequestIds: state.loadingRequestIds.filter(requestId => !removedRequestIds.has(requestId)),
-        dirtyRequestIds: new Set([...state.dirtyRequestIds].filter(id => !removedRequestIds.has(id))),
-        pendingCloseRequestId: state.pendingCloseRequestId && removedRequestIds.has(state.pendingCloseRequestId)
+        dirtyRequestIds: new Set(
+          [...state.dirtyRequestIds].filter(id => !removedRequestIds.has(id) && !removedCollectionIds.has(id)),
+        ),
+        pendingCloseRequestId: state.pendingCloseRequestId && remaining.every(tab => tab.requestId !== state.pendingCloseRequestId)
           ? null
           : state.pendingCloseRequestId,
         pendingRequestDeletion: state.pendingRequestDeletion && removedRequestIds.has(state.pendingRequestDeletion.id)
@@ -1480,14 +1967,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       }
 
       if (nextActive && activeRemoved && nextProject) {
-        const location = findApiLocation(nextProject, nextActive.requestId)
-        if (location) {
-          nextState.selectedTreeNode = {
-            type: 'api',
-            id: nextActive.requestId,
-            parentCollectionId: location.parentCollectionId,
-          }
-        }
+        nextState.selectedTreeNode = buildTreeSelectionForTab(nextProject, nextActive)
       }
       else if (
         selectedTreeNode

@@ -59,6 +59,8 @@ pub struct ProjectMetadata {
     #[serde(default)]
     pub mock: ProjectMockConfig,
     #[serde(default)]
+    pub request_config: RequestScopeConfig,
+    #[serde(default)]
     pub active_environment_id: Option<String>,
 }
 
@@ -75,6 +77,8 @@ pub struct CollectionMetadata {
     pub description: String,
     #[serde(default)]
     pub order: Vec<String>,
+    #[serde(default)]
+    pub request_config: RequestScopeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -112,13 +116,44 @@ pub struct ApiKeyAuthConfig {
     pub add_to: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfig {
+    #[serde(default = "default_true")]
+    pub inherit: bool,
     pub auth_type: AuthType,
     pub basic: BasicAuthConfig,
     pub bearer_token: String,
     pub api_key: ApiKeyAuthConfig,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            inherit: true,
+            auth_type: AuthType::None,
+            basic: BasicAuthConfig::default(),
+            bearer_token: String::new(),
+            api_key: ApiKeyAuthConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestScopeConfig {
+    #[serde(default)]
+    pub headers: Vec<KeyValue>,
+    #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
+    pub pre_request_script: String,
+    #[serde(default)]
+    pub post_request_script: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -273,6 +308,8 @@ pub struct CollectionTreeNode {
     pub created_at: String,
     pub updated_at: String,
     #[serde(default)]
+    pub request_config: RequestScopeConfig,
+    #[serde(default)]
     pub children: Vec<TreeNode>,
 }
 
@@ -322,6 +359,8 @@ pub struct UpdateProjectInput {
     pub docs: ProjectDocsConfig,
     #[serde(default)]
     pub mock: ProjectMockConfig,
+    #[serde(default)]
+    pub request_config: RequestScopeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -342,6 +381,8 @@ pub struct UpdateCollectionInput {
     pub name: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub request_config: RequestScopeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -646,6 +687,7 @@ pub fn update_project(
     metadata.description = input.description;
     metadata.docs = input.docs;
     metadata.mock = input.mock;
+    metadata.request_config = normalize_request_scope_config(input.request_config);
     metadata.updated_at = now_iso_string();
     write_json_file(&project.dir.join(METADATA_FILE), &metadata)?;
 
@@ -687,6 +729,7 @@ pub fn create_collection(
         name,
         description: input.description,
         order: vec![],
+        request_config: RequestScopeConfig::default(),
     };
     write_json_file(&collection_dir.join(METADATA_FILE), &metadata)?;
     append_child_order(&index, &parent, &id)?;
@@ -707,6 +750,7 @@ pub fn update_collection(
     let mut metadata = entry.metadata.clone();
     metadata.name = required_name(&input.name, "collection")?;
     metadata.description = input.description;
+    metadata.request_config = normalize_request_scope_config(input.request_config);
     metadata.updated_at = now_iso_string();
     write_json_file(&entry.metadata_path, &metadata)?;
 
@@ -1066,6 +1110,7 @@ fn initialize_project(root: &Path, input: Option<CreateProjectInput>) -> AppResu
         root_order: vec![],
         docs: ProjectDocsConfig::default(),
         mock: ProjectMockConfig::default(),
+        request_config: RequestScopeConfig::default(),
         active_environment_id: None,
     };
     write_json_file(&root.join(METADATA_FILE), &metadata)?;
@@ -1134,6 +1179,7 @@ fn scan_children(
                 description: metadata.description.clone(),
                 created_at: metadata.created_at.clone(),
                 updated_at: metadata.updated_at.clone(),
+                request_config: metadata.request_config.clone(),
                 children: children_nodes,
             }));
             continue;
@@ -1537,6 +1583,15 @@ fn normalized_method(method: &str) -> String {
     } else {
         trimmed.to_ascii_uppercase()
     }
+}
+
+fn normalize_request_scope_config(mut config: RequestScopeConfig) -> RequestScopeConfig {
+    for item in config.headers.iter_mut() {
+        if item.id.is_empty() {
+            item.id = new_id();
+        }
+    }
+    config
 }
 
 fn normalize_request(mut request: RequestDefinition) -> RequestDefinition {
@@ -1969,6 +2024,103 @@ mod tests {
 
         let refreshed = open_project(temp_dir.path()).expect("open project");
         assert_eq!(refreshed.metadata.active_environment_id, Some(environment.id));
+    }
+
+    #[test]
+    fn project_and_collection_request_config_round_trip() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+        let project_id = snapshot.metadata.id.clone();
+
+        update_project(
+            temp_dir.path(),
+            UpdateProjectInput {
+                id: project_id.clone(),
+                name: snapshot.metadata.name.clone(),
+                description: snapshot.metadata.description.clone(),
+                docs: snapshot.metadata.docs.clone(),
+                mock: snapshot.metadata.mock.clone(),
+                request_config: RequestScopeConfig {
+                    headers: vec![KeyValue {
+                        id: String::new(),
+                        key: "X-Project".to_string(),
+                        value: "project".to_string(),
+                        enabled: true,
+                        description: String::new(),
+                    }],
+                    auth: AuthConfig {
+                        inherit: true,
+                        auth_type: AuthType::Bearer,
+                        basic: BasicAuthConfig::default(),
+                        bearer_token: "project-token".to_string(),
+                        api_key: ApiKeyAuthConfig::default(),
+                    },
+                    pre_request_script: "fuck.vars.set('project', true)".to_string(),
+                    post_request_script: "fuck.vars.set('projectPost', true)".to_string(),
+                },
+            },
+        )
+        .expect("update project");
+
+        let collection = create_collection(
+            temp_dir.path(),
+            CreateCollectionInput {
+                project_id: project_id.clone(),
+                parent_collection_id: None,
+                name: "Auth".to_string(),
+                description: String::new(),
+                slug: None,
+            },
+        )
+        .expect("create collection");
+
+        update_collection(
+            temp_dir.path(),
+            UpdateCollectionInput {
+                id: collection.id.clone(),
+                name: collection.name.clone(),
+                description: collection.description.clone(),
+                request_config: RequestScopeConfig {
+                    headers: vec![KeyValue {
+                        id: String::new(),
+                        key: "X-Collection".to_string(),
+                        value: "collection".to_string(),
+                        enabled: true,
+                        description: String::new(),
+                    }],
+                    auth: AuthConfig {
+                        inherit: false,
+                        auth_type: AuthType::ApiKey,
+                        basic: BasicAuthConfig::default(),
+                        bearer_token: String::new(),
+                        api_key: ApiKeyAuthConfig {
+                            key: "token".to_string(),
+                            value: "collection-token".to_string(),
+                            add_to: "header".to_string(),
+                        },
+                    },
+                    pre_request_script: "fuck.vars.set('collection', true)".to_string(),
+                    post_request_script: "fuck.vars.set('collectionPost', true)".to_string(),
+                },
+            },
+        )
+        .expect("update collection");
+
+        let refreshed = open_project(temp_dir.path()).expect("open project");
+        assert_eq!(refreshed.metadata.request_config.headers.len(), 1);
+        assert_eq!(refreshed.metadata.request_config.auth.bearer_token, "project-token");
+
+        let collection_node = refreshed
+            .children
+            .iter()
+            .find_map(|node| match node {
+                TreeNode::Collection(collection) => Some(collection),
+                TreeNode::Api(_) => None,
+            })
+            .expect("collection node");
+        assert_eq!(collection_node.request_config.headers.len(), 1);
+        assert_eq!(collection_node.request_config.auth.auth_type, AuthType::ApiKey);
+        assert_eq!(collection_node.request_config.pre_request_script, "fuck.vars.set('collection', true)");
     }
 
     #[cfg(unix)]

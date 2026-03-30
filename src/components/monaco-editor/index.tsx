@@ -5,8 +5,8 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-const lightThemeName = 'github-light-default'
-const darkThemeName = 'github-dark-default'
+const lightThemeName = 'github-light'
+const darkThemeName = 'github-dark'
 const requestBodyModelUri = 'file:///request-body.json'
 
 const FUCK_GLOBAL_DTS_URI = 'file:///fuck-global.d.ts'
@@ -570,11 +570,14 @@ function MonacoCodeEditor(props: {
   return (
     <div
       className={cn(
-        'relative flex min-h-[220px] min-w-0 flex-1 overflow-hidden',
+        'relative flex h-full min-h-[220px] min-w-0 flex-1 overflow-hidden',
         props.className,
       )}
     >
-      <div ref={containerRef} className="h-full min-h-0 w-full overflow-hidden rounded-xl border border-input" />
+      <div
+        ref={containerRef}
+        className="monaco-theme-surface h-full min-h-0 w-full overflow-hidden rounded-xl border border-input bg-background"
+      />
     </div>
   )
 }

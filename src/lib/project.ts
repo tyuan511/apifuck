@@ -11,33 +11,6 @@ export interface ProjectMockConfig {
   baseUrl: string
 }
 
-export interface ProjectMetadata {
-  schemaVersion: number
-  entityType: 'project'
-  id: string
-  createdAt: string
-  updatedAt: string
-  slug: string
-  name: string
-  description: string
-  rootOrder: string[]
-  docs: ProjectDocsConfig
-  mock: ProjectMockConfig
-  activeEnvironmentId?: string
-}
-
-export interface CollectionMetadata {
-  schemaVersion: number
-  entityType: 'collection'
-  id: string
-  createdAt: string
-  updatedAt: string
-  slug: string
-  name: string
-  description: string
-  order: string[]
-}
-
 export interface KeyValue {
   id: string
   key: string
@@ -56,6 +29,7 @@ export interface Environment {
 export type AuthType = 'none' | 'basic' | 'bearer' | 'api-key'
 
 export interface AuthConfig {
+  inherit: boolean
   authType: AuthType
   basic: {
     username: string
@@ -67,6 +41,42 @@ export interface AuthConfig {
     value: string
     addTo: string
   }
+}
+
+export interface RequestScopeConfig {
+  headers: KeyValue[]
+  auth: AuthConfig
+  preRequestScript: string
+  postRequestScript: string
+}
+
+export interface ProjectMetadata {
+  schemaVersion: number
+  entityType: 'project'
+  id: string
+  createdAt: string
+  updatedAt: string
+  slug: string
+  name: string
+  description: string
+  rootOrder: string[]
+  docs: ProjectDocsConfig
+  mock: ProjectMockConfig
+  requestConfig: RequestScopeConfig
+  activeEnvironmentId?: string
+}
+
+export interface CollectionMetadata {
+  schemaVersion: number
+  entityType: 'collection'
+  id: string
+  createdAt: string
+  updatedAt: string
+  slug: string
+  name: string
+  description: string
+  order: string[]
+  requestConfig: RequestScopeConfig
 }
 
 export type BodyMode = 'none' | 'raw' | 'json' | 'form-data' | 'x-www-form-urlencoded' | 'binary'
@@ -148,6 +158,7 @@ export interface CollectionTreeNode {
   description: string
   createdAt: string
   updatedAt: string
+  requestConfig: RequestScopeConfig
   children: TreeNode[]
 }
 
@@ -176,6 +187,7 @@ export interface UpdateProjectInput {
   description: string
   docs: ProjectDocsConfig
   mock: ProjectMockConfig
+  requestConfig: RequestScopeConfig
 }
 
 export interface CreateCollectionInput {
@@ -190,6 +202,7 @@ export interface UpdateCollectionInput {
   id: string
   name: string
   description: string
+  requestConfig: RequestScopeConfig
 }
 
 export interface CreateApiInput {
@@ -265,6 +278,7 @@ export function createDefaultRequest(): RequestDefinition {
     pathParams: [],
     cookies: [],
     auth: {
+      inherit: true,
       authType: 'none',
       basic: { username: '', password: '' },
       bearerToken: '',
@@ -278,6 +292,21 @@ export function createDefaultRequest(): RequestDefinition {
       urlEncoded: [],
       binary: {},
     },
+  }
+}
+
+export function createDefaultRequestScopeConfig(): RequestScopeConfig {
+  return {
+    headers: [],
+    auth: {
+      inherit: true,
+      authType: 'none',
+      basic: { username: '', password: '' },
+      bearerToken: '',
+      apiKey: { key: '', value: '', addTo: 'header' },
+    },
+    preRequestScript: '',
+    postRequestScript: '',
   }
 }
 

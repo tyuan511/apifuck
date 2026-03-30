@@ -38,7 +38,7 @@ pub enum AppPrimaryColor {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub enum EditorPanelTab {
+pub enum WorkbenchPanelTab {
     #[default]
     Query,
     Headers,
@@ -46,18 +46,32 @@ pub enum EditorPanelTab {
     Body,
     PreRequestScript,
     PostRequestScript,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenTabEntityType {
+    #[default]
+    Request,
+    Collection,
+    Project,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenRequestTab {
+    #[serde(default)]
+    pub entity_type: OpenTabEntityType,
     pub request_id: String,
+    #[serde(default)]
+    pub entity_id: String,
     pub title: String,
     pub method: String,
     pub dirty: bool,
     pub last_focused_at: i64,
     #[serde(default)]
-    pub editor_tab: EditorPanelTab,
+    pub editor_tab: WorkbenchPanelTab,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

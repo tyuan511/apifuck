@@ -37,7 +37,7 @@ import {
 import { readProjectSummary } from '@/lib/project'
 import { cn } from '@/lib/utils'
 import { macOSWindowChromeHeightClassName } from '../types'
-import { countApis, getProjectDisplayName, getProjectDisplayNameFromPath, getProjectMonogram, isDefaultProjectPath, startWindowDragging } from '../utils'
+import { countApis, getProjectAvatarStyle, getProjectDisplayName, getProjectDisplayNameFromPath, getProjectMonogram, startWindowDragging } from '../utils'
 import { MethodBadge, SidebarEmptyState } from './shared'
 
 interface ProjectSidebarProps {
@@ -53,6 +53,7 @@ interface ProjectSidebarProps {
   onCreateCollection: (parentCollectionId: string | null) => void
   onCreateEnvironment: () => void
   onCreateProject: () => void
+  onEditProject: () => void
   onCreateRequest: (parentCollectionId: string | null) => void
   onDeleteCollection: (node: CollectionTreeNode) => void
   onDeleteEnvironment: (environmentId: string) => void
@@ -713,6 +714,7 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
   const activeProject = props.project
   const activeProjectApiCount = activeProject ? countApis(activeProject.children) : 0
   const activeProjectName = getProjectDisplayName(activeProject)
+  const activeProjectAvatarSeed = activeProject ? props.projectPath : activeProjectName
   const projectPaths = React.useMemo(() => {
     const deduped = new Set<string>()
     const paths = [props.projectPath, ...props.recentProjectPaths]
@@ -1043,7 +1045,10 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
             )}
           >
             <span className="flex min-w-0 flex-1 items-center gap-2.5">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-foreground/4 text-sm font-semibold text-foreground/80">
+              <span
+                className="flex size-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold"
+                style={getProjectAvatarStyle(activeProjectAvatarSeed)}
+              >
                 {getProjectMonogram(activeProject ? activeProjectName : '项目')}
               </span>
               <span className="min-w-0 flex-1 text-left">
@@ -1086,12 +1091,15 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
             <DropdownMenuSeparator className="my-1" />
             {projectPaths.length > 0
               ? projectPaths.map((path) => {
-                  const canRemove = path !== props.projectPath && !isDefaultProjectPath(path)
+                  const canRemove = path !== props.projectPath
                   const projectName = projectNamesByPath[path] ?? getProjectDisplayNameFromPath(path, activeProject, props.projectPath)
                   return (
                     <DropdownMenuItem key={path} onClick={() => props.onSelectProject(path)} className="group rounded-lg p-1.5">
                       <span className="flex min-w-0 flex-1 items-center gap-2">
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-foreground/4 text-xs font-semibold text-foreground/80">
+                        <span
+                          className="flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold"
+                          style={getProjectAvatarStyle(path)}
+                        >
                           {getProjectMonogram(projectName)}
                         </span>
                         <span className="min-w-0 flex-1">
@@ -1102,27 +1110,43 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
                             {path}
                           </span>
                         </span>
-                        {path === props.projectPath
-                          ? (
-                              <CheckIcon className="size-4 shrink-0 text-primary" />
-                            )
-                          : canRemove
-                            ? (
-                                <button
-                                  type="button"
-                                  className="invisible flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition group-hover:visible group-hover:opacity-100 hover:bg-accent hover:text-destructive"
-                                  aria-label="删除项目"
-                                  title="删除项目"
-                                  onClick={(event) => {
-                                    event.preventDefault()
-                                    event.stopPropagation()
-                                    void props.onRemoveRecentProject(path, projectName)
-                                  }}
-                                >
-                                  <Trash2Icon className="size-3.5" />
-                                </button>
-                              )
-                            : <span className="size-6 shrink-0" />}
+                        <div className="relative flex size-12 shrink-0 items-center justify-end">
+                          {path === props.projectPath && (
+                            <CheckIcon className="size-4 shrink-0 text-primary transition group-hover:opacity-0" />
+                          )}
+                          <div className="invisible absolute right-0 flex items-center gap-1 opacity-0 transition group-hover:visible group-hover:opacity-100">
+                            {path === props.projectPath && (
+                              <button
+                                type="button"
+                                className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                                aria-label="编辑项目"
+                                title="编辑项目"
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  props.onEditProject()
+                                }}
+                              >
+                                <PencilLineIcon className="size-3.5" />
+                              </button>
+                            )}
+                            {canRemove && (
+                              <button
+                                type="button"
+                                className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive"
+                                aria-label="删除项目"
+                                title="删除项目"
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  void props.onRemoveRecentProject(path, projectName)
+                                }}
+                              >
+                                <Trash2Icon className="size-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </span>
                     </DropdownMenuItem>
                   )
@@ -1417,15 +1441,23 @@ function CollectionTreeRow(props: {
   interactive?: boolean
   isCollapsed: boolean
   name: string
+  onChevronClick?: () => void
   onClick?: () => void
   rowRef?: ((element: HTMLDivElement | null) => void) | React.RefObject<HTMLDivElement | null>
   visualState: TreeRowVisualState
 }) {
   const content = (
     <>
-      <span className="flex size-4 items-center justify-center rounded-md text-muted-foreground hover:text-foreground">
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          props.onChevronClick?.()
+        }}
+        className="flex size-4 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+      >
         {props.isCollapsed ? <ChevronRightIcon className="size-4" /> : <ChevronDownIcon className="size-4" />}
-      </span>
+      </button>
       {props.isCollapsed ? <FolderIcon className="size-4 text-muted-foreground" /> : <FolderOpenIcon className="size-4 text-muted-foreground" />}
       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{props.name}</span>
     </>
@@ -1523,8 +1555,9 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
     onToggleCollection,
     onTreeSelectionChange,
   } = props
+  const requestTabId = node.entityType === 'api' ? `request:${node.id}` : null
   const isOpen = node.entityType === 'api'
-    ? openRequestTabs.some(tab => tab.requestId === node.id)
+    ? openRequestTabs.some(tab => tab.requestId === requestTabId)
     : false
   const isCollapsed = node.entityType === 'collection'
     ? collapsedCollectionIds.includes(node.id)
@@ -1594,9 +1627,10 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
             interactive
             isCollapsed={isCollapsed}
             name={node.name}
+            onChevronClick={() => onToggleCollection(node.id)}
             onClick={() => {
               onTreeSelectionChange({ type: 'collection', id: node.id, parentCollectionId })
-              onToggleCollection(node.id)
+              onEditCollection(node)
             }}
             rowRef={rowRef}
             visualState={visualState}
