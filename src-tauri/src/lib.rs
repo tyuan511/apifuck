@@ -219,8 +219,11 @@ fn set_active_environment(
 }
 
 #[tauri::command]
-async fn send_request(input: SendRequestInput) -> AppResult<SendRequestResponse> {
-    send_request_http(input).await
+async fn send_request(
+    input: SendRequestInput,
+    on_event: tauri::ipc::Channel<http::SendRequestStreamEvent>,
+) -> AppResult<SendRequestResponse> {
+    send_request_http(input, on_event).await
 }
 
 fn current_project_root(state: &tauri::State<'_, ProjectState>) -> AppResult<PathBuf> {

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { Channel, invoke } from '@tauri-apps/api/core'
 
 export interface ProjectDocsConfig {
   enabled: boolean
@@ -44,6 +44,7 @@ export interface AuthConfig {
 }
 
 export interface RequestScopeConfig {
+  baseUrl: string
   headers: KeyValue[]
   auth: AuthConfig
   preRequestScript: string
@@ -248,9 +249,10 @@ export interface ReorderChildrenInput {
   orderedIds: string[]
 }
 
-export type ResponseType = 'json' | 'text'
+export type ResponseType = 'json' | 'text' | 'eventstream'
 
 export interface SendRequestInput {
+  requestId?: string
   method: string
   url: string
   request: RequestDefinition
@@ -269,6 +271,55 @@ export interface SendRequestResponse {
   contentType: string
   responseType: ResponseType
   body: string
+}
+
+export interface SendRequestStreamStartedEvent {
+  kind: 'started'
+  requestId: string
+  status: number
+  headers: ResponseHeader[]
+  contentType: string
+}
+
+export interface SendRequestStreamChunkEvent {
+  kind: 'chunk'
+  requestId: string
+  chunk: string
+  receivedBytes: number
+}
+
+export interface SendRequestStreamFinishedEvent {
+  kind: 'finished'
+  requestId: string
+  durationMs: number
+  sizeBytes: number
+  responseType: ResponseType
+  body: string
+}
+
+export type SendRequestStreamEvent
+  = | SendRequestStreamStartedEvent
+    | SendRequestStreamChunkEvent
+    | SendRequestStreamFinishedEvent
+
+interface SendRequestStreamEventWire {
+  kind?: string
+  requestId?: string
+  request_id?: string
+  status?: number
+  headers?: ResponseHeader[]
+  contentType?: string
+  content_type?: string
+  chunk?: string
+  receivedBytes?: number
+  received_bytes?: number
+  durationMs?: number
+  duration_ms?: number
+  sizeBytes?: number
+  size_bytes?: number
+  responseType?: ResponseType
+  response_type?: ResponseType
+  body?: string
 }
 
 export function createDefaultRequest(): RequestDefinition {
@@ -297,6 +348,7 @@ export function createDefaultRequest(): RequestDefinition {
 
 export function createDefaultRequestScopeConfig(): RequestScopeConfig {
   return {
+    baseUrl: '',
     headers: [],
     auth: {
       inherit: true,
@@ -383,8 +435,51 @@ export function readApi(id: string) {
   return invoke<ApiDefinition>('read_api', { id })
 }
 
-export function sendRequest(input: SendRequestInput) {
-  return invoke<SendRequestResponse>('send_request', { input })
+export function sendRequest(
+  input: SendRequestInput,
+  onStreamEvent?: (event: SendRequestStreamEvent) => void,
+) {
+  const onEvent = new Channel<SendRequestStreamEvent>()
+  if (onStreamEvent) {
+    onEvent.onmessage = (event) => {
+      onStreamEvent(normalizeSendRequestStreamEvent(event as SendRequestStreamEventWire))
+    }
+  }
+
+  return invoke<SendRequestResponse>('send_request', { input, onEvent })
+}
+
+function normalizeSendRequestStreamEvent(event: SendRequestStreamEventWire): SendRequestStreamEvent {
+  const kind = event.kind
+  const requestId = event.requestId ?? event.request_id ?? ''
+
+  if (kind === 'started') {
+    return {
+      kind,
+      requestId,
+      status: event.status ?? 0,
+      headers: event.headers ?? [],
+      contentType: event.contentType ?? event.content_type ?? '',
+    }
+  }
+
+  if (kind === 'chunk') {
+    return {
+      kind,
+      requestId,
+      chunk: event.chunk ?? '',
+      receivedBytes: event.receivedBytes ?? event.received_bytes ?? 0,
+    }
+  }
+
+  return {
+    kind: 'finished',
+    requestId,
+    durationMs: event.durationMs ?? event.duration_ms ?? 0,
+    sizeBytes: event.sizeBytes ?? event.size_bytes ?? 0,
+    responseType: event.responseType ?? event.response_type ?? 'text',
+    body: event.body ?? '',
+  }
 }
 
 export interface CreateEnvironmentInput {

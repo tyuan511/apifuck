@@ -1379,10 +1379,6 @@ function CollectionTreeActions(props: {
             <FolderPlusIcon />
             新建目录
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => props.onEditCollection(props.node)}>
-            <PencilLineIcon />
-            编辑目录
-          </DropdownMenuItem>
           <DropdownMenuItem variant="destructive" onClick={() => props.onDeleteCollection(props.node)}>
             <Trash2Icon />
             删除目录
@@ -1467,13 +1463,20 @@ function CollectionTreeRow(props: {
     <TreeRowShell interactive={props.interactive} rowRef={props.rowRef} visualState={props.visualState}>
       {props.interactive && props.onClick
         ? (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               onClick={props.onClick}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  props.onClick?.()
+                }
+              }}
               className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1.5 text-left"
             >
               {content}
-            </button>
+            </div>
           )
         : (
             <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1.5">
@@ -1514,13 +1517,20 @@ function ApiTreeRow(props: {
     >
       {props.interactive && props.onClick
         ? (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={0}
               onClick={props.onClick}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  props.onClick?.()
+                }
+              }}
               className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1.5 text-left"
             >
               {content}
-            </button>
+            </div>
           )
         : (
             <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1.5">
