@@ -1,26 +1,44 @@
-# ApiFuck
+<p align="center">
+  <img src="https://github.com/tyuan511/apifuck/raw/main/src-tauri/icons/128x128@2x.png" width="96" height="96" alt="ApiFuck Logo" />
+</p>
+
+<h1 align="center">ApiFuck</h1>
 
 <p align="center">
-  <img src="https://github.com/tyuan511/apifuck/raw/main/src-tauri/icons/128x128@2x.png" width="80" alt="ApiFuck Logo" />
+  <strong>轻量、极速、本地优先的桌面 API 调试工具。</strong>
 </p>
 
 <p align="center">
-  <strong>ApiFuck</strong> · 轻量、极速、本地优先的 API 调试工具
+  不用登录，不依赖云端，不把接口数据锁进黑盒。
 </p>
 
 <p align="center">
-  <a href="https://github.com/tyuan511/apifuck/releases/latest">
-    <img src="https://img.shields.io/github/v/release/tyuan511/apifuck?label=%E4%B8%8B%E8%BD%BD" alt="Download" />
-  </a>
-  <a href="https://github.com/tyuan511/apifuck/releases/latest">
-    <img src="https://img.shields.io/github/downloads/tyuan511/apifuck/total?label=%E4%B8%8B%E8%BD%BD%E6%AC%A1%E6%95%B0" alt="Downloads" />
-  </a>
-  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License" />
+  基于 Tauri v2、React 与 Rust 构建，适合希望把接口调试、项目管理和 Git 工作流放在同一条线上完成的团队。
+</p>
+
+<p align="center">
+  <a href="https://github.com/tyuan511/apifuck/releases/latest"><img src="https://img.shields.io/github/v/release/tyuan511/apifuck?style=flat-square&label=Release" alt="Latest Release" /></a>
+  <a href="https://github.com/tyuan511/apifuck/releases/latest"><img src="https://img.shields.io/github/downloads/tyuan511/apifuck/total?style=flat-square&label=Downloads" alt="Downloads" /></a>
+  <a href="https://github.com/tyuan511/apifuck/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/tyuan511/apifuck/release.yml?style=flat-square&label=Release" alt="Release Workflow" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="MIT License" /></a>
+</p>
+
+<p align="center">
+  <a href="#下载">下载</a> &bull;
+  <a href="#为什么是-apifuck">为什么是 ApiFuck</a> &bull;
+  <a href="#功能亮点">功能亮点</a> &bull;
+  <a href="#技术栈">技术栈</a> &bull;
+  <a href="#本地开发">本地开发</a> &bull;
+  <a href="#如何贡献">如何贡献</a>
+</p>
+
+<p align="center">
+  <a href="./README_en.md">English</a>
 </p>
 
 ---
 
-## 下载地址
+## 下载
 
 [![GitHub Release](https://img.shields.io/github/v/release/tyuan511/apifuck?include_prereleases&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/tyuan511/apifuck/releases/latest)
 
@@ -34,28 +52,65 @@
 
 > 桌面端内置自动更新机制，发布新版本后会主动提示升级。
 
----
+<details>
+<summary><strong>从源码构建</strong></summary>
 
-## 功能特色
+```bash
+bun install
+bun run tauri build
+```
 
-### 核心功能
+</details>
 
-- **项目化管理** — 支持项目、集合、请求三级结构，按业务模块组织接口
-- **多标签页编辑** — 同时打开多个请求，支持切换、重排、关闭，自动恢复上次工作状态
-- **完整请求构建** — 支持 HTTP 方法、URL、Query、Headers、Auth、Body
-- **认证方式** — None / Basic / Bearer / API Key
-- **响应查看** — 状态码、耗时、大小、响应头、JSON 格式化与语法高亮
-- **环境变量** — 多环境配置、快速切换、按环境变量替换请求内容
-- **请求脚本** — Pre-request Script / Post-request Script，支持读写环境变量和脚本变量
+## 为什么是 ApiFuck
 
-### 差异化特点
+| 维度 | 常见云端/重量级 API 工具 | **ApiFuck** |
+|---|---|---|
+| 数据归属 | 数据常被绑定到账号、工作区或私有格式 | **本地优先，基于文件夹和 JSON 存储** |
+| 启动与体积 | 常见 Electron 方案更重 | **Tauri v2 + Rust，启动快、占用低** |
+| Git 协作 | 导出、同步、比对不够直接 | **内容可读，可备份，可直接纳入 Git** |
+| 桌面体验 | 跨平台一致，但系统融合感一般 | **原生窗口体验，更贴近系统桌面** |
+| 扩展请求配置 | 多层继承通常不够直观 | **项目、目录、请求三级配置链路清晰** |
 
-- **本地优先** — 基于文件夹 + JSON 存储，无需数据库，内容可读、可备份、可 Git 管理
-- **极速响应** — Tauri v2 + Rust 后端，启动快、体积小、资源占用低
-- **原生体验** — 适配 macOS 窗口拖拽区域与交通灯按钮，融入系统桌面
-- **自动更新** — 通过 GitHub Releases 自动分发新版本
+## 功能亮点
 
----
+**项目化管理**  
+支持项目、集合、请求三级结构，适合按业务域、服务边界和接口模块组织请求。
+
+**多标签页工作台**  
+多个请求可以同时打开、切换、重排与恢复，适合并行调试、响应对照和参数试验。
+
+**完整请求构建能力**  
+覆盖 HTTP 方法、URL、Query、Headers、Auth、Body，满足日常 REST API 调试所需。
+
+**环境变量与 Base URL 继承**  
+支持多环境切换，并在项目、目录、请求三层之间解析 Base URL 与变量替换。
+
+**响应查看体验**  
+可查看状态码、耗时、大小、响应头与响应体，支持 JSON 格式化与语法高亮。
+
+**流式响应支持**  
+支持 `text/event-stream`，适合调试大模型输出、日志流和增量事件。
+
+**请求脚本**  
+支持 Pre-request Script 和 Post-request Script，可读写环境变量与脚本变量。
+
+**请求导出**  
+支持将当前请求复制为 `cURL`、`JavaScript`、`Python`、`Go` 代码，方便分享和复现。
+
+**自动更新**  
+通过 GitHub Releases 分发新版本，桌面端可感知更新并提示升级。
+
+## 核心能力
+
+| 分类 | 能力 |
+|---|---|
+| 请求编辑 | HTTP 方法、URL、Query、Headers、Auth、Body |
+| 认证方式 | `None` / `Basic` / `Bearer` / `API Key` |
+| 响应查看 | 状态码、耗时、大小、响应头、JSON 高亮 |
+| 环境管理 | 多环境配置、变量替换、快速切换 |
+| 工作流 | 多标签页、自动恢复、项目化结构 |
+| 扩展能力 | 请求脚本、请求导出、自动更新 |
 
 ## 技术栈
 
@@ -71,7 +126,7 @@
 
 ### 项目结构
 
-```
+```text
 apifuck/
 ├── src/                      # React 前端
 │   ├── app.tsx               # 主应用入口
@@ -87,8 +142,6 @@ apifuck/
 ├── scripts/                  # 发布辅助脚本
 └── AGENTS.md                 # 协作约定
 ```
-
----
 
 ## 本地开发
 
@@ -107,7 +160,7 @@ bun install
 # 启动前端开发模式
 bun run dev
 
-# 启动桌面开发模式（新窗口）
+# 启动桌面开发模式
 bun run tauri dev
 ```
 
@@ -131,33 +184,27 @@ bun run tauri build
 | `bun run tauri build` | 构建桌面应用 |
 | `cd src-tauri && cargo test` | 运行 Rust 测试 |
 
----
-
 ## 如何贡献
 
 欢迎提交 Issue 或 Pull Request。
-
-### 协作约定
 
 在开始贡献前，建议先阅读：
 
 - [AGENTS.md](./AGENTS.md) — 团队协作约定
 - [docs/auto-update.md](./docs/auto-update.md) — 自动更新机制说明
 
-### 提交流程
-
-提交前请确保执行以下检查：
+提交前建议至少执行：
 
 ```bash
-# 前端代码检查
 bun run lint
 bun run build
-
-# Rust 代码测试（如有涉及）
-cd src-tauri && cargo test
 ```
 
----
+如果涉及 Rust 逻辑，再执行：
+
+```bash
+cd src-tauri && cargo test
+```
 
 ## 许可证
 
