@@ -414,6 +414,7 @@ function MonacoCodeEditor(props: {
           tabSize: 2,
           automaticLayout: true,
           contextmenu: false,
+          links: false,
           fixedOverflowWidgets: true,
           glyphMargin: false,
           lineDecorationsWidth: 0,
