@@ -24,8 +24,12 @@ A desktop API client built with Tauri v2, React, and TypeScript for local debugg
 
 ### Download
 
-- Latest release: [GitHub Releases](https://github.com/tyuan511/apifuck/releases/latest)
-- Current version: [`v0.0.1`](https://github.com/tyuan511/apifuck/releases/tag/v0.0.1)
+<!-- release-downloads-en:start -->
+- Latest release: [v0.0.5](https://github.com/tyuan511/apifuck/releases/tag/v0.0.5)
+- macOS: [ApiFuck_0.0.5_aarch64.dmg](https://github.com/tyuan511/apifuck/releases/download/v0.0.5/ApiFuck_0.0.5_aarch64.dmg)
+- Windows: [ApiFuck_0.0.5_x64-setup.exe](https://github.com/tyuan511/apifuck/releases/download/v0.0.5/ApiFuck_0.0.5_x64-setup.exe)
+- Linux: [ApiFuck_0.0.5_amd64.AppImage](https://github.com/tyuan511/apifuck/releases/download/v0.0.5/ApiFuck_0.0.5_amd64.AppImage)
+<!-- release-downloads-en:end -->
 
 ### Requirements
 
