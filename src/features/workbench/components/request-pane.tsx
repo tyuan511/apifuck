@@ -1,6 +1,7 @@
 import type {
   CollectionEditorDraft,
   EditorPanelTab,
+  EnvironmentEditorDraft,
   OpenRequestTab,
   ProjectEditorDraft,
   RequestEditorDraft,
@@ -8,7 +9,7 @@ import type {
   SettingsPanelTab,
   WorkbenchPanelTab,
 } from '../types'
-import type { AuthType, KeyValue, RequestScopeConfig } from '@/lib/project'
+import type { AuthType, Environment, KeyValue, RequestScopeConfig } from '@/lib/project'
 import { PointerActivationConstraints } from '@dnd-kit/dom'
 import {
   DragDropProvider,
@@ -52,6 +53,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -73,11 +75,13 @@ import {
   startWindowDragging,
 } from '../utils'
 import { EnvironmentVariableInput } from './environment-variable-input'
-import { MethodBadge, Spinner } from './shared'
+import { MethodBadge, ResponseMetaBadge, Spinner } from './shared'
 
 interface RequestPaneProps {
   activeDraft: RequestEditorDraft | null
   activeCollectionDraft: CollectionEditorDraft | null
+  activeEnvironmentDraft: EnvironmentEditorDraft | null
+  activeEnvironmentId: string | null
   activeProjectDraft: ProjectEditorDraft | null
   activeTabRecord: OpenRequestTab | null
   activeEditorTab: WorkbenchPanelTab
@@ -85,6 +89,8 @@ interface RequestPaneProps {
   activeRequestIsLoading: boolean
   activeResponse: ResponseState | null
   dirtyRequestIds: Set<string>
+  environmentDrafts: Record<string, EnvironmentEditorDraft>
+  environments: Environment[]
   isBusy: boolean
   isMacOSDesktop: boolean
   openRequestTabs: OpenRequestTab[]
@@ -93,6 +99,7 @@ interface RequestPaneProps {
   onActiveEditorTabChange: (tab: WorkbenchPanelTab) => void
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
   onChangeCollectionDraft: (updater: (draft: CollectionEditorDraft) => CollectionEditorDraft) => void
+  onChangeEnvironmentDraft: (updater: (draft: EnvironmentEditorDraft) => EnvironmentEditorDraft) => void
   onChangeProjectDraft: (updater: (draft: ProjectEditorDraft) => ProjectEditorDraft) => void
   onCloseRequestDialogChange: (requestId: string | null) => void
   onCloseRequestTab: (requestId: string) => void
@@ -101,8 +108,13 @@ interface RequestPaneProps {
   onReorderRequestTabs: (tabs: OpenRequestTab[]) => void
   onSaveRequest: () => void
   onSaveCollection: () => void
+  onSaveEnvironment: () => void
   onSaveProject: () => void
   onSendRequest: () => void
+  onDeleteEnvironment: (environmentId: string) => void
+  onSetActiveEnvironment: (environmentId: string | null) => void
+  onSelectEnvironmentForTab: (environmentId: string | null) => void
+  onStartCreateEnvironment: () => void
   onSplitRatioChange: (value: number) => void
 }
 
@@ -121,6 +133,11 @@ export function RequestPane(props: RequestPaneProps) {
 
     if (props.activeTabRecord.entityType === 'collection') {
       props.onSaveCollection()
+      return
+    }
+
+    if (props.activeTabRecord.entityType === 'environment') {
+      props.onSaveEnvironment()
       return
     }
 
@@ -300,39 +317,58 @@ export function RequestPane(props: RequestPaneProps) {
                   onSave={props.onSaveCollection}
                 />
               )
-            : props.activeTabRecord?.entityType === 'project' && props.activeProjectDraft
+            : props.activeTabRecord?.entityType === 'environment' && props.activeEnvironmentDraft
               ? (
-                  <ProjectSettingsPane
+                  <EnvironmentSettingsPane
                     activeTab={props.activeEditorTab as SettingsPanelTab}
-                    draft={props.activeProjectDraft}
+                    activeEnvironmentId={props.activeEnvironmentId}
+                    environmentDrafts={props.environmentDrafts}
+                    environments={props.environments}
+                    draft={props.activeEnvironmentDraft}
                     hasUnsavedChanges={hasUnsavedChanges}
                     isBusy={props.isBusy}
-                    onChangeDraft={props.onChangeProjectDraft}
                     onActiveTabChange={props.onActiveEditorTabChange}
-                    onSave={props.onSaveProject}
+                    onChangeDraft={props.onChangeEnvironmentDraft}
+                    onDeleteEnvironment={props.onDeleteEnvironment}
+                    onSave={props.onSaveEnvironment}
+                    onSelectEnvironment={props.onSelectEnvironmentForTab}
+                    onSetActiveEnvironment={props.onSetActiveEnvironment}
+                    onStartCreateEnvironment={props.onStartCreateEnvironment}
                   />
                 )
-              : (
-                  <div className="grid flex-1 place-items-center">
-                    <Empty className="max-w-lg border border-dashed border-border/70 bg-muted/20">
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <CompassIcon />
-                        </EmptyMedia>
-                        <EmptyTitle>还没打开任何请求</EmptyTitle>
-                        <EmptyDescription>
-                          左侧随便点一个请求，我们就开工。
-                          草稿会先稳稳留在本地，放心改，不会一眨眼跑掉。
-                        </EmptyDescription>
-                      </EmptyHeader>
-                      <EmptyContent className="gap-2 text-xs text-muted-foreground">
-                        <div className="rounded-full border border-border/70 bg-background/80 px-3 py-1.5">
-                          小提示：双击左侧多开几个请求，对照调试更顺手。
-                        </div>
-                      </EmptyContent>
-                    </Empty>
-                  </div>
-                )}
+              : props.activeTabRecord?.entityType === 'project' && props.activeProjectDraft
+                ? (
+                    <ProjectSettingsPane
+                      activeTab={props.activeEditorTab as SettingsPanelTab}
+                      draft={props.activeProjectDraft}
+                      hasUnsavedChanges={hasUnsavedChanges}
+                      isBusy={props.isBusy}
+                      onChangeDraft={props.onChangeProjectDraft}
+                      onActiveTabChange={props.onActiveEditorTabChange}
+                      onSave={props.onSaveProject}
+                    />
+                  )
+                : (
+                    <div className="grid flex-1 place-items-center">
+                      <Empty className="max-w-lg border border-dashed border-border/70 bg-muted/20">
+                        <EmptyHeader>
+                          <EmptyMedia variant="icon">
+                            <CompassIcon />
+                          </EmptyMedia>
+                          <EmptyTitle>还没打开任何请求</EmptyTitle>
+                          <EmptyDescription>
+                            左侧随便点一个请求，我们就开工。
+                            草稿会先稳稳留在本地，放心改，不会一眨眼跑掉。
+                          </EmptyDescription>
+                        </EmptyHeader>
+                        <EmptyContent className="gap-2 text-xs text-muted-foreground">
+                          <div className="rounded-full border border-border/70 bg-background/80 px-3 py-1.5">
+                            小提示：双击左侧多开几个请求，对照调试更顺手。
+                          </div>
+                        </EmptyContent>
+                      </Empty>
+                    </div>
+                  )}
 
       <AlertDialog open={Boolean(props.pendingCloseRequestId)} onOpenChange={open => !open && props.onCloseRequestDialogChange(null)}>
         <AlertDialogContent>
@@ -1530,41 +1566,7 @@ function ResponsePane(props: { response: ResponseState | null }) {
     )
   }
 
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <Tabs defaultValue="body" className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="border-b border-border/70 px-3 py-2">
-          <TabsList>
-            <TabsTrigger value="info" className="px-1.5 py-0.5 text-[13px]">
-              基本信息
-            </TabsTrigger>
-            <TabsTrigger value="headers" className="px-1.5 py-0.5 text-[13px]">
-              响应头
-            </TabsTrigger>
-            <TabsTrigger value="body" className="px-1.5 py-0.5 text-[13px]">
-              响应体
-            </TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="info" className="min-h-0 flex-1 overflow-auto px-3 py-3">
-          <ResponseInfoView response={props.response} />
-        </TabsContent>
-
-        <TabsContent value="headers" className="min-h-0 flex-1 overflow-auto px-3 py-3">
-          <ResponseHeadersView response={props.response} />
-        </TabsContent>
-
-        <TabsContent value="body" className="min-h-0 flex-1 overflow-hidden px-3 py-3">
-          <ResponseBodyView response={props.response} />
-        </TabsContent>
-      </Tabs>
-    </div>
-  )
-}
-
-function ResponseInfoView(props: { response: ResponseState }) {
-  const responseViewLabel = props.response.responseType === 'json'
+  const responseTypeLabel = props.response.responseType === 'json'
     ? 'JSON'
     : props.response.responseType === 'eventstream'
       ? '事件流'
@@ -1572,29 +1574,42 @@ function ResponseInfoView(props: { response: ResponseState }) {
         ? '文本'
         : '未知'
 
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      <ResponseInfoCard label="状态" value={props.response.status !== null ? String(props.response.status) : '等待中'} />
-      <ResponseInfoCard label="耗时" value={`${props.response.durationMs} 毫秒`} />
-      <ResponseInfoCard label="大小" value={formatBytes(props.response.sizeBytes)} />
-      <ResponseInfoCard label="内容类型" value={props.response.contentType || '未知'} />
-      <ResponseInfoCard label="响应头数量" value={String(props.response.headers.length)} />
-      <ResponseInfoCard label="视图" value={responseViewLabel} />
-      <ResponseInfoCard label="请求状态" value={props.response.isLoading ? (props.response.responseType === 'eventstream' ? '流式接收中' : '请求发送中') : props.response.error ? '请求失败' : '请求完成'} />
-      {props.response.error && (
-        <div className="sm:col-span-2 xl:col-span-3 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive">
-          {props.response.error}
-        </div>
-      )}
-    </div>
-  )
-}
+  const responseStatusLabel = props.response.status !== null
+    ? String(props.response.status)
+    : props.response.isLoading
+      ? (props.response.responseType === 'eventstream' ? '流式接收中' : '请求中')
+      : props.response.error
+        ? '失败'
+        : '等待中'
 
-function ResponseInfoCard(props: { label: string, value: string }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-muted/25 p-3">
-      <div className="text-xs text-muted-foreground">{props.label}</div>
-      <div className="mt-1 text-sm font-medium break-all">{props.value}</div>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <Tabs defaultValue="body" className="flex h-full min-h-0 flex-col overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-border/70 px-3 py-2">
+          <TabsList>
+            <TabsTrigger value="body" className="px-1.5 py-0.5 text-[13px]">
+              响应体
+            </TabsTrigger>
+            <TabsTrigger value="headers" className="px-1.5 py-0.5 text-[13px]">
+              响应头
+            </TabsTrigger>
+          </TabsList>
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 text-xs">
+            <ResponseMetaBadge label="状态" value={responseStatusLabel} />
+            <ResponseMetaBadge label="耗时" value={`${props.response.durationMs} ms`} />
+            <ResponseMetaBadge label="类型" value={responseTypeLabel} />
+            <ResponseMetaBadge label="大小" value={formatBytes(props.response.sizeBytes)} />
+          </div>
+        </div>
+
+        <TabsContent value="body" className="min-h-0 flex-1 overflow-hidden px-3 py-3">
+          <ResponseBodyView response={props.response} />
+        </TabsContent>
+
+        <TabsContent value="headers" className="min-h-0 flex-1 overflow-auto px-3 py-3">
+          <ResponseHeadersView response={props.response} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
@@ -1646,16 +1661,21 @@ function ResponseHeadersView(props: { response: ResponseState }) {
   }
 
   return (
-    <div className="space-y-1.5">
-      {props.response.headers.map(header => (
-        <div
-          key={`${header.name}:${header.value}`}
-          className="grid grid-cols-[minmax(0,_220px)_minmax(0,_1fr)] gap-2 rounded-xl border border-border/70 bg-muted/25 p-2.5"
-        >
-          <div className="text-sm font-medium break-all">{header.name}</div>
-          <div className="text-sm text-muted-foreground break-all">{header.value}</div>
-        </div>
-      ))}
+    <div className="overflow-hidden rounded-xl border border-border/70 bg-background">
+      <Table>
+        <TableBody>
+          {props.response.headers.map(header => (
+            <TableRow key={`${header.name}:${header.value}`}>
+              <TableCell className="px-3 py-2.5 align-top text-muted-foreground break-all whitespace-normal">
+                {header.name}
+              </TableCell>
+              <TableCell className="px-3 py-2.5 font-medium text-foreground break-all whitespace-normal">
+                {header.value}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   )
 }
@@ -2343,6 +2363,240 @@ function ProjectSettingsPane(props: {
           <RequestScopeConfigEditor activeTab="postRequestScript" config={props.draft.requestConfig} onChange={requestConfig => props.onChangeDraft(draft => ({ ...draft, requestConfig }))} title="项目默认响应脚本" description="会在项目内所有请求的响应脚本之前执行。" />
         </TabsContent>
       </Tabs>
+    </div>
+  )
+}
+
+function EnvironmentSettingsPane(props: {
+  activeTab: SettingsPanelTab
+  activeEnvironmentId: string | null
+  environmentDrafts: Record<string, EnvironmentEditorDraft>
+  environments: Environment[]
+  draft: EnvironmentEditorDraft
+  hasUnsavedChanges: boolean
+  isBusy: boolean
+  onActiveTabChange: (tab: WorkbenchPanelTab) => void
+  onChangeDraft: (updater: (draft: EnvironmentEditorDraft) => EnvironmentEditorDraft) => void
+  onDeleteEnvironment: (environmentId: string) => void
+  onSave: () => void
+  onSelectEnvironment: (environmentId: string | null) => void
+  onSetActiveEnvironment: (environmentId: string | null) => void
+  onStartCreateEnvironment: () => void
+}) {
+  const environmentTabs = React.useMemo(() => {
+    const items = props.environments.map(environment => ({
+      id: environment.id,
+      label: props.environmentDrafts[environment.id]?.name || environment.name || '未命名环境',
+    }))
+
+    if (props.draft.id === '__new__') {
+      items.push({
+        id: '__new__',
+        label: props.draft.name.trim() || '新的环境',
+      })
+    }
+
+    return items
+  }, [props.draft.id, props.draft.name, props.environmentDrafts, props.environments])
+
+  const canDeleteCurrent = props.draft.id !== '__new__'
+  const isCurrentActive = props.draft.id !== '__new__' && props.activeEnvironmentId === props.draft.id
+  const hasEnvironments = environmentTabs.length > 0
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden border-b border-border/70 px-3 py-3">
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {environmentTabs.map(environment => (
+              <button
+                key={environment.id}
+                type="button"
+                onClick={() => props.onSelectEnvironment(environment.id === '__new__' ? null : environment.id)}
+                className={cn(
+                  'shrink-0 rounded-lg border px-3 py-1.5 text-sm transition',
+                  environment.id === props.draft.id
+                    ? 'border-border bg-accent text-foreground'
+                    : 'border-transparent bg-muted/40 text-muted-foreground hover:bg-accent hover:text-foreground',
+                )}
+              >
+                {environment.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Button size="sm" variant="outline" onClick={props.onStartCreateEnvironment}>
+          <PlusIcon />
+          新建环境
+        </Button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        {!hasEnvironments && (
+          <div className="grid h-full place-items-center">
+            <Empty className="max-w-lg border border-dashed border-border/70 bg-muted/20">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <CompassIcon />
+                </EmptyMedia>
+                <EmptyTitle>还没有环境</EmptyTitle>
+                <EmptyDescription>
+                  新建一个环境后，就可以在这里集中管理 Base URL 和环境变量。
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button variant="outline" onClick={props.onStartCreateEnvironment}>
+                  <PlusIcon />
+                  新建环境
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </div>
+        )}
+
+        {hasEnvironments && (
+          <div className="space-y-4 rounded-xl border border-border/70 bg-muted/20 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-medium text-foreground">
+                  {props.draft.name.trim() || (props.draft.id === '__new__' ? '新的环境' : '未命名环境')}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  在这里管理当前环境的 Base URL 和环境变量。
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {isCurrentActive && (
+                  <span className="rounded bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                    当前激活
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={!canDeleteCurrent}
+                  onClick={() => {
+                    if (canDeleteCurrent) {
+                      props.onDeleteEnvironment(props.draft.id)
+                    }
+                  }}
+                >
+                  <XIcon />
+                  删除环境
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={props.draft.id === '__new__'}
+                  onClick={() => props.onSetActiveEnvironment(isCurrentActive ? null : props.draft.id)}
+                >
+                  {isCurrentActive ? '取消激活' : '激活环境'}
+                </Button>
+                <Button size="sm" disabled={props.isBusy || !props.hasUnsavedChanges} variant="outline" onClick={props.onSave}>
+                  <SaveIcon />
+                  保存
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              <div className="space-y-1">
+                <Label>环境名称</Label>
+                <Input
+                  value={props.draft.name}
+                  onChange={event => props.onChangeDraft(draft => ({ ...draft, name: event.target.value }))}
+                  placeholder="新的环境"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Base URL</Label>
+                <Input
+                  value={props.draft.baseUrl}
+                  onChange={event => props.onChangeDraft(draft => ({ ...draft, baseUrl: event.target.value }))}
+                  placeholder="https://api.example.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>环境变量</Label>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => props.onChangeDraft(draft => ({
+                      ...draft,
+                      variables: [
+                        ...draft.variables,
+                        {
+                          id: crypto.randomUUID(),
+                          key: '',
+                          value: '',
+                          enabled: true,
+                          description: '',
+                        },
+                      ],
+                    }))}
+                  >
+                    <PlusIcon className="size-4" />
+                    添加变量
+                  </Button>
+                </div>
+                <div className="space-y-2">
+                  {props.draft.variables.map((variable, index) => (
+                    <div key={variable.id} className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/80 p-2">
+                      <Checkbox
+                        checked={variable.enabled}
+                        onCheckedChange={checked => props.onChangeDraft(draft => ({
+                          ...draft,
+                          variables: draft.variables.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, enabled: checked === true } : item,
+                          ),
+                        }))}
+                      />
+                      <Input
+                        value={variable.key}
+                        onChange={event => props.onChangeDraft(draft => ({
+                          ...draft,
+                          variables: draft.variables.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, key: event.target.value } : item,
+                          ),
+                        }))}
+                        placeholder="变量名"
+                        className="w-40"
+                      />
+                      <Input
+                        value={variable.value}
+                        onChange={event => props.onChangeDraft(draft => ({
+                          ...draft,
+                          variables: draft.variables.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, value: event.target.value } : item,
+                          ),
+                        }))}
+                        placeholder="变量值"
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => props.onChangeDraft(draft => ({
+                          ...draft,
+                          variables: draft.variables.filter((_, itemIndex) => itemIndex !== index),
+                        }))}
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                  ))}
+                  {props.draft.variables.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-border/70 px-3 py-6 text-center text-sm text-muted-foreground">
+                      还没有环境变量，添加后可在请求里使用环境变量占位符。
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

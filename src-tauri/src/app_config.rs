@@ -56,6 +56,7 @@ pub enum OpenTabEntityType {
     Request,
     Collection,
     Project,
+    Environment,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

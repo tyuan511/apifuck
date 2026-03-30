@@ -124,7 +124,7 @@ declare global {
 }`
 
 type Monaco = typeof monacoNS
-export type MonacoLanguage = 'html' | 'json' | 'plaintext' | 'javascript' | 'typescript'
+export type MonacoLanguage = 'html' | 'json' | 'plaintext' | 'javascript' | 'typescript' | 'shellscript' | 'python' | 'go'
 
 export interface EnvironmentVariable {
   key: string
@@ -143,6 +143,7 @@ const ENV_VARIABLE_PATTERN = /\$\{(\w+)\}/g
 
 let monacoInstance: Monaco | null = null
 let monacoSetupPromise: Promise<Monaco> | null = null
+let navigationOpenerRegistered = false
 
 function registerEnvironmentVariableProviders(
   monaco: Monaco,
@@ -309,7 +310,7 @@ export async function preloadMonaco() {
     monacoSetupPromise = init({
       defaultTheme: lightThemeName,
       themes: [lightThemeName, darkThemeName],
-      langs: ['html', 'json', 'javascript', 'typescript'],
+      langs: ['html', 'json', 'javascript', 'typescript', 'shellscript', 'python', 'go'],
       lsp: {
         formatting: {
           tabSize: 2,
@@ -342,6 +343,15 @@ export async function preloadMonaco() {
       const dtsUri = instance.Uri.parse(FUCK_GLOBAL_DTS_URI)
       if (!instance.editor.getModel(dtsUri)) {
         instance.editor.createModel(FUCK_GLOBAL_DTS_CONTENT, 'typescript', dtsUri)
+      }
+      if (!navigationOpenerRegistered) {
+        instance.editor.registerEditorOpener({
+          openCodeEditor() {
+            // Block Monaco code navigation from replacing the current editor model.
+            return true
+          },
+        })
+        navigationOpenerRegistered = true
       }
       monacoInstance = instance
       return instance
@@ -420,8 +430,26 @@ function MonacoCodeEditor(props: {
           lineDecorationsWidth: 0,
           readOnly: props.readOnly,
           renderValidationDecorations: props.readOnly ? 'off' : 'on',
+          definitionLinkOpensInPeek: false,
+          gotoLocation: {
+            multiple: 'goto',
+            multipleDeclarations: 'goto',
+            multipleDefinitions: 'goto',
+            multipleImplementations: 'goto',
+            multipleReferences: 'goto',
+            multipleTests: 'goto',
+            multipleTypeDefinitions: 'goto',
+            alternativeDeclarationCommand: '',
+            alternativeDefinitionCommand: '',
+            alternativeImplementationCommand: '',
+            alternativeReferenceCommand: '',
+            alternativeTestsCommand: '',
+            alternativeTypeDefinitionCommand: '',
+          },
           lineNumbers: props.lineNumbers ?? 'on',
           lineNumbersMinChars: 2,
+          mouseMiddleClickAction: 'default',
+          multiCursorModifier: 'alt',
           scrollBeyondLastLine: false,
           wordWrap: props.wordWrap ?? 'off',
           placeholder: props.placeholder,
@@ -446,6 +474,20 @@ function MonacoCodeEditor(props: {
           lastEditorValueRef.current = nextValue
           onChangeRef.current?.(nextValue)
         })
+
+        const preventModifierClickNavigation = (event: monacoNS.editor.IEditorMouseEvent) => {
+          if (!event.event.leftButton) {
+            return
+          }
+          if (!event.event.metaKey && !event.event.ctrlKey) {
+            return
+          }
+          event.event.preventDefault()
+          event.event.stopPropagation()
+        }
+
+        const mouseDownDisposable = editor.onMouseDown(preventModifierClickNavigation)
+        const mouseUpDisposable = editor.onMouseUp(preventModifierClickNavigation)
 
         let layoutFrameId = 0
         let trailingLayoutFrameId = 0
@@ -480,6 +522,8 @@ function MonacoCodeEditor(props: {
 
         cleanup = () => {
           valueDisposable.dispose()
+          mouseDownDisposable.dispose()
+          mouseUpDisposable.dispose()
           envProviderCleanup?.()
           resizeObserver.disconnect()
           window.cancelAnimationFrame(layoutFrameId)

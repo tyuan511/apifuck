@@ -13,12 +13,12 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  CircleIcon,
-  EllipsisIcon,
+  CopyIcon,
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
   GlobeIcon,
+  ListTreeIcon,
   PencilLineIcon,
   PlusIcon,
   Settings2Icon,
@@ -28,12 +28,19 @@ import { AnimatePresence, motion } from 'motion/react'
 import * as React from 'react'
 import { Button } from '@/components/ui/button'
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { readProjectSummary } from '@/lib/project'
 import { cn } from '@/lib/utils'
 import { macOSWindowChromeHeightClassName } from '../types'
@@ -58,16 +65,16 @@ interface ProjectSidebarProps {
   onDeleteCollection: (node: CollectionTreeNode) => void
   onDeleteEnvironment: (environmentId: string) => void
   onDeleteRequest: (summary: ApiSummary) => void
+  onCopyRequest: (requestId: string) => void
   onEditCollection: (node: CollectionTreeNode) => void
-  onEditEnvironment: (environment: Environment) => void
   onEditRequest: (summary: ApiSummary) => void
   onMoveTreeNode: (nodeId: string, targetParentCollectionId: string | null, position: number) => void | Promise<void>
   onOpenExistingProject: () => void | Promise<void>
+  onOpenEnvironmentTab: () => void
   onRemoveRecentProject: (path: string, name: string) => void | Promise<void>
   onOpenSettings: () => void
   onSelectProject: (path: string) => void | Promise<void>
   onOpenRequest: (summary: ApiSummary, parentCollectionId: string | null) => void
-  onSetActiveEnvironment: (environmentId: string | null) => void
   onToggleCollection: (collectionId: string) => void
   onTreeSelectionChange: (selection: TreeSelection | null) => void
 }
@@ -1040,19 +1047,19 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
             render={(
               <Button
                 variant="ghost"
-                className="h-auto w-full justify-start rounded-xl border border-transparent bg-muted px-2.5 py-2.5 hover:bg-accent/80 data-[state=open]:border-border/70 data-[state=open]:bg-accent"
+                className="h-auto w-full justify-start rounded-xl border border-transparent bg-muted px-2 py-2 hover:bg-accent/80 data-[state=open]:border-border/70 data-[state=open]:bg-accent"
               />
             )}
           >
-            <span className="flex min-w-0 flex-1 items-center gap-2.5">
+            <span className="flex min-w-0 flex-1 items-center gap-2">
               <span
-                className="flex size-9 shrink-0 items-center justify-center rounded-lg text-sm font-semibold"
+                className="flex size-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold"
                 style={getProjectAvatarStyle(activeProjectAvatarSeed)}
               >
                 {getProjectMonogram(activeProject ? activeProjectName : '项目')}
               </span>
               <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-[14px] font-semibold tracking-tight text-foreground">
+                <span className="block truncate text-[13px] font-semibold tracking-tight text-foreground">
                   {activeProjectName}
                 </span>
                 <span className="block truncate text-[11px] text-muted-foreground">
@@ -1062,30 +1069,42 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
               <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
             </span>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={6} className="w-76 rounded-xl">
+          <DropdownMenuContent align="start" sideOffset={6} className="w-64 rounded-xl">
             <div className="flex items-center justify-between px-2 py-1">
               <div className="text-[11px] font-medium text-muted-foreground">
                 项目列表
               </div>
               <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={props.onOpenExistingProject}
-                  className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-                  aria-label="打开已有项目"
-                  title="打开已有项目"
-                >
-                  <FolderOpenIcon className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={props.onCreateProject}
-                  className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-                  aria-label="新建项目"
-                  title="新建项目"
-                >
-                  <PlusIcon className="size-4" />
-                </button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={(
+                      <button
+                        type="button"
+                        onClick={props.onOpenExistingProject}
+                        className="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                        aria-label="打开已有项目"
+                      />
+                    )}
+                  >
+                    <FolderOpenIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent>打开已有项目</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={(
+                      <button
+                        type="button"
+                        onClick={props.onCreateProject}
+                        className="rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                        aria-label="新建项目"
+                      />
+                    )}
+                  >
+                    <PlusIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent>新建项目</TooltipContent>
+                </Tooltip>
               </div>
             </div>
             <DropdownMenuSeparator className="my-1" />
@@ -1094,56 +1113,47 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
                   const canRemove = path !== props.projectPath
                   const projectName = projectNamesByPath[path] ?? getProjectDisplayNameFromPath(path, activeProject, props.projectPath)
                   return (
-                    <DropdownMenuItem key={path} onClick={() => props.onSelectProject(path)} className="group rounded-lg p-1.5">
-                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <DropdownMenuItem key={path} onClick={() => props.onSelectProject(path)} className="group rounded-lg px-1 py-1">
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
                         <span
-                          className="flex size-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold"
+                          className="flex size-7 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold"
                           style={getProjectAvatarStyle(path)}
                         >
                           {getProjectMonogram(projectName)}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium">
+                          <span className="block truncate text-[13px] font-medium">
                             {projectName}
                           </span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
+                          <span className="block truncate text-[10px] text-muted-foreground">
                             {path}
                           </span>
                         </span>
-                        <div className="relative flex size-12 shrink-0 items-center justify-end">
+                        <div className="relative flex size-9 shrink-0 items-center justify-end">
                           {path === props.projectPath && (
-                            <CheckIcon className="size-4 shrink-0 text-primary transition group-hover:opacity-0" />
+                            <CheckIcon className="size-3.5 shrink-0 text-primary" />
                           )}
                           <div className="invisible absolute right-0 flex items-center gap-1 opacity-0 transition group-hover:visible group-hover:opacity-100">
-                            {path === props.projectPath && (
-                              <button
-                                type="button"
-                                className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                                aria-label="编辑项目"
-                                title="编辑项目"
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  props.onEditProject()
-                                }}
-                              >
-                                <PencilLineIcon className="size-3.5" />
-                              </button>
-                            )}
                             {canRemove && (
-                              <button
-                                type="button"
-                                className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive"
-                                aria-label="删除项目"
-                                title="删除项目"
-                                onClick={(event) => {
-                                  event.preventDefault()
-                                  event.stopPropagation()
-                                  void props.onRemoveRecentProject(path, projectName)
-                                }}
-                              >
-                                <Trash2Icon className="size-3.5" />
-                              </button>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={(
+                                    <button
+                                      type="button"
+                                      className="flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-destructive"
+                                      aria-label="删除项目"
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        void props.onRemoveRecentProject(path, projectName)
+                                      }}
+                                    />
+                                  )}
+                                >
+                                  <Trash2Icon className="size-3" />
+                                </TooltipTrigger>
+                                <TooltipContent>删除项目</TooltipContent>
+                              </Tooltip>
                             )}
                           </div>
                         </div>
@@ -1164,10 +1174,7 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
         <EnvironmentSection
           environments={props.environments}
           activeEnvironmentId={props.activeEnvironmentId}
-          onCreateEnvironment={props.onCreateEnvironment}
-          onEditEnvironment={props.onEditEnvironment}
-          onDeleteEnvironment={props.onDeleteEnvironment}
-          onSetActiveEnvironment={props.onSetActiveEnvironment}
+          onOpenEnvironmentTab={props.onOpenEnvironmentTab}
         />
       )}
 
@@ -1186,66 +1193,115 @@ export function ProjectSidebar(props: ProjectSidebarProps) {
         onDragOver={handleDragOver}
         onDragStart={handleDragStart}
       >
-        <div className="min-h-0 flex flex-1 flex-col pt-3">
-          <div className="group mb-2 flex items-center justify-between px-2.5">
-            <span className="text-[11px] font-medium text-muted-foreground">
-              请求
-            </span>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={(
-                  <Button className="opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100" size="icon-xs" variant="ghost" />
-                )}
-              >
-                <EllipsisIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-36">
-                <DropdownMenuItem onClick={() => props.onCreateRequest(null)}>
-                  <PlusIcon />
-                  新建请求
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => props.onCreateCollection(null)}>
-                  <FolderPlusIcon />
-                  新建集合
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+        <div className="min-h-0 flex flex-1 flex-col">
+          <div className="px-2.5">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={props.onEditProject}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  props.onEditProject()
+                }
+              }}
+              className="mb-0.5 flex min-h-8 cursor-pointer items-center justify-between rounded-lg px-2 py-1 text-left text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            >
+              <span className="flex items-center gap-1.5">
+                <ListTreeIcon className="size-3.5" />
+                接口
+              </span>
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={(
+                      <Button
+                        data-tree-action
+                        size="icon-xs"
+                        variant="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          props.onCreateRequest(null)
+                        }}
+                      />
+                    )}
+                  >
+                    <PlusIcon />
+                  </TooltipTrigger>
+                  <TooltipContent>新建接口</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={(
+                      <Button
+                        data-tree-action
+                        size="icon-xs"
+                        variant="ghost"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          props.onCreateCollection(null)
+                        }}
+                      />
+                    )}
+                  >
+                    <FolderPlusIcon />
+                  </TooltipTrigger>
+                  <TooltipContent>新建目录</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
           </div>
-          <div ref={treeScrollRef} className="min-h-0 overflow-auto pb-2">
-            {activeProject
-              ? (
-                  <div className="space-y-1 px-2.5">
-                    {visibleNodes.length > 0
-                      ? (
-                          <TreeNodeList
-                            activeDragItem={activeDragItem}
-                            activePreview={activePreview}
-                            collapsedCollectionIds={props.collapsedCollectionIds}
-                            nodes={visibleNodes}
-                            openRequestTabs={props.openRequestTabs}
-                            selectedTreeNode={props.selectedTreeNode}
-                            setCollectionChildContainerElement={setCollectionChildContainerElement}
-                            setRowElement={setRowElement}
-                            onCreateCollection={props.onCreateCollection}
-                            onCreateRequest={props.onCreateRequest}
-                            onDeleteCollection={props.onDeleteCollection}
-                            onDeleteRequest={props.onDeleteRequest}
-                            onEditCollection={props.onEditCollection}
-                            onEditRequest={props.onEditRequest}
-                            onOpenRequest={props.onOpenRequest}
-                            onToggleCollection={props.onToggleCollection}
-                            onTreeSelectionChange={props.onTreeSelectionChange}
-                          />
-                        )
-                      : <SidebarEmptyState title="还没有请求" body="新建集合或请求" />}
-                  </div>
-                )
-              : (
-                  <div className="px-2.5">
-                    <SidebarEmptyState title="还没有项目" body="先创建一个项目，再开始使用" />
-                  </div>
-                )}
-          </div>
+          {activeProject
+            ? (
+                <ContextMenu>
+                  <ContextMenuTrigger
+                    className="min-h-0 flex-1"
+                    onContextMenu={(event) => {
+                      if (event.target === event.currentTarget) {
+                        props.onTreeSelectionChange(null)
+                      }
+                    }}
+                  >
+                    <div ref={treeScrollRef} className="min-h-0 h-full overflow-auto pb-2">
+                      <div className="space-y-1 px-2.5">
+                        {visibleNodes.length > 0
+                          ? (
+                              <TreeNodeList
+                                activeDragItem={activeDragItem}
+                                activePreview={activePreview}
+                                collapsedCollectionIds={props.collapsedCollectionIds}
+                                nodes={visibleNodes}
+                                openRequestTabs={props.openRequestTabs}
+                                selectedTreeNode={props.selectedTreeNode}
+                                setCollectionChildContainerElement={setCollectionChildContainerElement}
+                                setRowElement={setRowElement}
+                                onCreateCollection={props.onCreateCollection}
+                                onCreateRequest={props.onCreateRequest}
+                                onDeleteCollection={props.onDeleteCollection}
+                                onDeleteRequest={props.onDeleteRequest}
+                                onCopyRequest={props.onCopyRequest}
+                                onEditCollection={props.onEditCollection}
+                                onEditRequest={props.onEditRequest}
+                                onOpenRequest={props.onOpenRequest}
+                                onToggleCollection={props.onToggleCollection}
+                                onTreeSelectionChange={props.onTreeSelectionChange}
+                              />
+                            )
+                          : <SidebarEmptyState title="还没有请求" body="新建集合或请求" />}
+                      </div>
+                    </div>
+                  </ContextMenuTrigger>
+                  <TreeBlankContextMenuContent
+                    onCreateCollection={props.onCreateCollection}
+                    onCreateRequest={props.onCreateRequest}
+                  />
+                </ContextMenu>
+              )
+            : (
+                <div className="px-2.5">
+                  <SidebarEmptyState title="还没有项目" body="先创建一个项目，再开始使用" />
+                </div>
+              )}
         </div>
 
         <DragOverlay
@@ -1289,6 +1345,7 @@ interface RequestTreeNodeProps {
   onCreateRequest: (parentCollectionId: string | null) => void
   onDeleteCollection: (node: CollectionTreeNode) => void
   onDeleteRequest: (summary: ApiSummary) => void
+  onCopyRequest: (requestId: string) => void
   onEditCollection: (node: CollectionTreeNode) => void
   onEditRequest: (summary: ApiSummary) => void
   onOpenRequest: (summary: ApiSummary, parentCollectionId: string | null) => void
@@ -1346,88 +1403,89 @@ function TreeRowShell(props: {
 
 function CollectionTreeActions(props: {
   childCount: number
-  node: CollectionTreeNode
-  onCreateCollection: (parentCollectionId: string | null) => void
-  onCreateRequest: (parentCollectionId: string | null) => void
-  onDeleteCollection: (node: CollectionTreeNode) => void
-  onEditCollection: (node: CollectionTreeNode) => void
 }) {
   return (
-    <>
-      <span className="text-[11px] text-muted-foreground transition group-hover:opacity-0 group-focus-within:opacity-0">
-        {props.childCount}
-      </span>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={(
-            <Button
-              data-tree-action
-              className="absolute opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
-              size="icon-xs"
-              variant="ghost"
-            />
-          )}
-        >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-32">
-          <DropdownMenuItem onClick={() => props.onCreateRequest(props.node.id)}>
-            <PlusIcon />
-            新建请求
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => props.onCreateCollection(props.node.id)}>
-            <FolderPlusIcon />
-            新建目录
-          </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onClick={() => props.onDeleteCollection(props.node)}>
-            <Trash2Icon />
-            删除目录
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+    <span className="text-[11px] text-muted-foreground">
+      {props.childCount}
+    </span>
   )
 }
 
 function ApiTreeActions(props: {
   isOpen: boolean
-  node: ApiSummary
-  onDeleteRequest: (summary: ApiSummary) => void
-  onEditRequest: (summary: ApiSummary) => void
 }) {
   return (
     <>
       {props.isOpen && (
-        <span className="size-1 rounded-full bg-primary transition group-hover:opacity-0 group-focus-within:opacity-0" />
+        <span className="size-1 rounded-full bg-primary" />
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={(
-            <Button
-              data-tree-action
-              className={cn(
-                'absolute opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100',
-                props.isOpen && 'group-hover:opacity-100 group-focus-within:opacity-100',
-              )}
-              size="icon-xs"
-              variant="ghost"
-            />
-          )}
-        >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-32">
-          <DropdownMenuItem onClick={() => props.onEditRequest(props.node)}>
-            <PencilLineIcon />
-            编辑
-          </DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onClick={() => props.onDeleteRequest(props.node)}>
-            <Trash2Icon />
-            删除
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
     </>
+  )
+}
+
+function CollectionTreeContextMenuContent(props: {
+  node: CollectionTreeNode
+  onCreateCollection: (parentCollectionId: string | null) => void
+  onCreateRequest: (parentCollectionId: string | null) => void
+  onDeleteCollection: (node: CollectionTreeNode) => void
+}) {
+  return (
+    <ContextMenuContent className="w-32">
+      <ContextMenuItem onClick={() => props.onCreateRequest(props.node.id)}>
+        <PlusIcon />
+        新建请求
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => props.onCreateCollection(props.node.id)}>
+        <FolderPlusIcon />
+        新建目录
+      </ContextMenuItem>
+      <ContextMenuItem variant="destructive" onClick={() => props.onDeleteCollection(props.node)}>
+        <Trash2Icon />
+        删除目录
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+}
+
+function ApiTreeContextMenuContent(props: {
+  node: ApiSummary
+  onCopyRequest: (requestId: string) => void
+  onDeleteRequest: (summary: ApiSummary) => void
+  onEditRequest: (summary: ApiSummary) => void
+}) {
+  return (
+    <ContextMenuContent className="w-36">
+      <ContextMenuItem onClick={() => props.onEditRequest(props.node)}>
+        <PencilLineIcon />
+        编辑
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => props.onCopyRequest(props.node.id)}>
+        <CopyIcon />
+        复制为...
+      </ContextMenuItem>
+      <ContextMenuItem variant="destructive" onClick={() => props.onDeleteRequest(props.node)}>
+        <Trash2Icon />
+        删除
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+}
+
+function TreeBlankContextMenuContent(props: {
+  onCreateCollection: (parentCollectionId: string | null) => void
+  onCreateRequest: (parentCollectionId: string | null) => void
+}) {
+  return (
+    <ContextMenuContent className="w-32">
+      <ContextMenuItem onClick={() => props.onCreateRequest(null)}>
+        <PlusIcon />
+        新建接口
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => props.onCreateCollection(null)}>
+        <FolderPlusIcon />
+        新建目录
+      </ContextMenuItem>
+    </ContextMenuContent>
   )
 }
 
@@ -1559,6 +1617,7 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
     onCreateRequest,
     onDeleteCollection,
     onDeleteRequest,
+    onCopyRequest,
     onEditCollection,
     onEditRequest,
     onOpenRequest,
@@ -1622,29 +1681,37 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
         {!isDraggingSelf && <div ref={afterDrop.ref} className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2" />}
 
         <div className="relative">
-          <CollectionTreeRow
-            action={(
-              <CollectionTreeActions
+          <ContextMenu>
+            <ContextMenuTrigger
+              className="block"
+              onContextMenu={() => onTreeSelectionChange({ type: 'collection', id: node.id, parentCollectionId })}
+            >
+              <CollectionTreeRow
+                action={(
+                  <CollectionTreeActions
+                    childCount={node.children.length}
+                  />
+                )}
                 childCount={node.children.length}
-                node={node}
-                onCreateCollection={onCreateCollection}
-                onCreateRequest={onCreateRequest}
-                onDeleteCollection={onDeleteCollection}
-                onEditCollection={onEditCollection}
+                interactive
+                isCollapsed={isCollapsed}
+                name={node.name}
+                onChevronClick={() => onToggleCollection(node.id)}
+                onClick={() => {
+                  onTreeSelectionChange({ type: 'collection', id: node.id, parentCollectionId })
+                  onEditCollection(node)
+                }}
+                rowRef={rowRef}
+                visualState={visualState}
               />
-            )}
-            childCount={node.children.length}
-            interactive
-            isCollapsed={isCollapsed}
-            name={node.name}
-            onChevronClick={() => onToggleCollection(node.id)}
-            onClick={() => {
-              onTreeSelectionChange({ type: 'collection', id: node.id, parentCollectionId })
-              onEditCollection(node)
-            }}
-            rowRef={rowRef}
-            visualState={visualState}
-          />
+            </ContextMenuTrigger>
+            <CollectionTreeContextMenuContent
+              node={node}
+              onCreateCollection={onCreateCollection}
+              onCreateRequest={onCreateRequest}
+              onDeleteCollection={onDeleteCollection}
+            />
+          </ContextMenu>
 
           {!isCollapsed && (node.children.length > 0 || canDropIntoChildren) && (
             <div
@@ -1666,6 +1733,7 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
                   onCreateRequest={onCreateRequest}
                   onDeleteCollection={onDeleteCollection}
                   onDeleteRequest={onDeleteRequest}
+                  onCopyRequest={onCopyRequest}
                   onEditCollection={onEditCollection}
                   onEditRequest={onEditRequest}
                   onOpenRequest={onOpenRequest}
@@ -1700,27 +1768,37 @@ function RequestTreeNode(props: RequestTreeNodeProps) {
       {!isDraggingSelf && <div ref={afterDrop.ref} className="pointer-events-none absolute inset-x-0 bottom-0 h-1/2" />}
 
       <div className="relative">
-        <ApiTreeRow
-          action={(
-            <ApiTreeActions
+        <ContextMenu>
+          <ContextMenuTrigger
+            className="block"
+            onContextMenu={() => onTreeSelectionChange({ type: 'api', id: node.id, parentCollectionId })}
+          >
+            <ApiTreeRow
+              action={(
+                <ApiTreeActions
+                  isOpen={isOpen}
+                />
+              )}
+              className="mt-0.5"
+              interactive
               isOpen={isOpen}
-              node={node}
-              onDeleteRequest={onDeleteRequest}
-              onEditRequest={onEditRequest}
+              method={node.method}
+              name={node.name}
+              onClick={() => {
+                onTreeSelectionChange({ type: 'api', id: node.id, parentCollectionId })
+                onOpenRequest(node, parentCollectionId)
+              }}
+              rowRef={rowRef}
+              visualState={visualState}
             />
-          )}
-          className="mt-0.5"
-          interactive
-          isOpen={isOpen}
-          method={node.method}
-          name={node.name}
-          onClick={() => {
-            onTreeSelectionChange({ type: 'api', id: node.id, parentCollectionId })
-            onOpenRequest(node, parentCollectionId)
-          }}
-          rowRef={rowRef}
-          visualState={visualState}
-        />
+          </ContextMenuTrigger>
+          <ApiTreeContextMenuContent
+            node={node}
+            onCopyRequest={onCopyRequest}
+            onDeleteRequest={onDeleteRequest}
+            onEditRequest={onEditRequest}
+          />
+        </ContextMenu>
       </div>
     </div>
   )
@@ -1755,20 +1833,16 @@ function TreeDragOverlay(props: { item: TreeDragItem }) {
 function EnvironmentSection(props: {
   environments: Environment[]
   activeEnvironmentId: string | null
-  onCreateEnvironment: () => void
-  onEditEnvironment: (environment: Environment) => void
-  onDeleteEnvironment: (environmentId: string) => void
-  onSetActiveEnvironment: (environmentId: string | null) => void
+  onOpenEnvironmentTab: () => void
 }) {
-  const [isExpanded, setIsExpanded] = React.useState(false)
   const activeEnvironment = props.environments.find(e => e.id === props.activeEnvironmentId)
 
   return (
-    <div className="px-2.5 pb-2">
+    <div className="px-2.5">
       <button
         type="button"
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        onClick={props.onOpenEnvironmentTab}
+        className="mb-0.5 flex min-h-8 w-full items-center justify-between rounded-lg px-2 py-1 text-left text-[11px] font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground"
       >
         <span className="flex items-center gap-1.5">
           <GlobeIcon className="size-3.5" />
@@ -1780,114 +1854,9 @@ function EnvironmentSection(props: {
               {activeEnvironment.name}
             </span>
           )}
-          {isExpanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+          <ChevronRightIcon className="size-3" />
         </span>
       </button>
-
-      {isExpanded && (
-        <div className="space-y-0.5">
-          <div
-            className={cn(
-              'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition',
-              props.activeEnvironmentId === null
-                ? 'bg-accent text-foreground'
-                : 'text-foreground hover:bg-accent',
-            )}
-            onClick={() => {
-              props.onSetActiveEnvironment(null)
-            }}
-          >
-            <span className="flex size-4 items-center justify-center">
-              {props.activeEnvironmentId === null
-                ? (
-                    <CheckIcon className="size-4 text-primary" />
-                  )
-                : (
-                    <CircleIcon className="size-3 opacity-0 group-hover:opacity-50" />
-                  )}
-            </span>
-            <span className="min-w-0 flex-1 truncate">无环境</span>
-          </div>
-          {props.environments.length === 0
-            ? null
-            : (
-                props.environments.map(env => (
-                  <div
-                    key={env.id}
-                    className={cn(
-                      'group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition',
-                      env.id === props.activeEnvironmentId
-                        ? 'bg-accent text-foreground'
-                        : 'text-foreground hover:bg-accent',
-                    )}
-                    onClick={() => {
-                      if (env.id === props.activeEnvironmentId) {
-                        props.onSetActiveEnvironment(null)
-                      }
-                      else {
-                        props.onSetActiveEnvironment(env.id)
-                      }
-                    }}
-                  >
-                    <span className="flex size-4 items-center justify-center">
-                      {env.id === props.activeEnvironmentId
-                        ? (
-                            <CheckIcon className="size-4 text-primary" />
-                          )
-                        : (
-                            <CircleIcon className="size-3 opacity-0 group-hover:opacity-50" />
-                          )}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{env.name}</span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={(
-                          <Button
-                            data-tree-action
-                            className="size-5 opacity-0 transition group-hover:opacity-100"
-                            size="icon-xs"
-                            variant="ghost"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <EllipsisIcon />
-                          </Button>
-                        )}
-                      />
-                      <DropdownMenuContent align="end" className="w-28">
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            props.onEditEnvironment(env)
-                          }}
-                        >
-                          <PencilLineIcon />
-                          编辑
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            props.onDeleteEnvironment(env.id)
-                          }}
-                        >
-                          <Trash2Icon />
-                          删除
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))
-              )}
-          <button
-            type="button"
-            onClick={props.onCreateEnvironment}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
-          >
-            <PlusIcon className="size-3.5" />
-            新建环境
-          </button>
-        </div>
-      )}
     </div>
   )
 }
