@@ -1,3 +1,4 @@
+import type { AppPrimaryColor, AppTheme } from '@/lib/app-config'
 import type {
   ApiDefinition,
   CollectionTreeNode,
@@ -62,6 +63,8 @@ export interface WorkbenchBootPayload {
   projectPath: string
   projectSnapshot: ProjectSnapshot
   recentProjectPaths: string[]
+  appTheme: AppTheme
+  appPrimaryColor: AppPrimaryColor
 }
 
 export const methodOptions = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']

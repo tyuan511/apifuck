@@ -25,6 +25,18 @@ pub enum AppTheme {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AppPrimaryColor {
+    #[default]
+    Slate,
+    Blue,
+    Green,
+    Amber,
+    Rose,
+    Violet,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum EditorPanelTab {
     #[default]
@@ -59,6 +71,8 @@ pub struct AppConfig {
     pub recent_project_paths: Vec<String>,
     pub theme: AppTheme,
     #[serde(default)]
+    pub primary_color: AppPrimaryColor,
+    #[serde(default)]
     pub open_request_tabs: Vec<OpenRequestTab>,
     pub active_request_id: Option<String>,
 }
@@ -70,6 +84,7 @@ pub struct UpdateAppConfigInput {
     #[serde(default)]
     pub recent_project_paths: Option<Vec<String>>,
     pub theme: AppTheme,
+    pub primary_color: AppPrimaryColor,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +121,7 @@ pub fn update_tab_state(input: UpdateTabStateInput) -> AppResult<AppConfig> {
         last_opened_project_path: current.last_opened_project_path,
         recent_project_paths: current.recent_project_paths,
         theme: current.theme,
+        primary_color: current.primary_color,
         open_request_tabs: input.open_request_tabs,
         active_request_id: input.active_request_id,
     };
@@ -119,6 +135,7 @@ pub fn update_last_opened_project_path(path: Option<String>) -> AppResult<AppCon
         last_opened_project_path: path,
         recent_project_paths: None,
         theme: current.theme,
+        primary_color: current.primary_color,
     })
 }
 
@@ -150,6 +167,7 @@ fn update_app_config_at(path: &Path, input: UpdateAppConfigInput) -> AppResult<A
             last_opened_project_path.as_deref(),
         ),
         theme: input.theme,
+        primary_color: input.primary_color,
         open_request_tabs: current.open_request_tabs,
         active_request_id: current.active_request_id,
     };
@@ -181,6 +199,7 @@ fn default_app_config() -> AppConfig {
         last_opened_project_path: None,
         recent_project_paths: Vec::new(),
         theme: AppTheme::System,
+        primary_color: AppPrimaryColor::Slate,
         open_request_tabs: Vec::new(),
         active_request_id: None,
     }
@@ -351,11 +370,13 @@ mod tests {
                 last_opened_project_path: Some("/tmp/apifuck-project".to_string()),
                 recent_project_paths: None,
                 theme: AppTheme::Dark,
+                primary_color: AppPrimaryColor::Blue,
             },
         )
         .expect("update config");
 
         assert!(matches!(updated.theme, AppTheme::Dark));
+        assert!(matches!(updated.primary_color, AppPrimaryColor::Blue));
         assert_eq!(
             updated.last_opened_project_path.as_deref(),
             Some("/tmp/apifuck-project")
@@ -363,6 +384,7 @@ mod tests {
 
         let reloaded = read_app_config_at(&config_path).expect("reload config");
         assert!(matches!(reloaded.theme, AppTheme::Dark));
+        assert!(matches!(reloaded.primary_color, AppPrimaryColor::Blue));
     }
 
     #[test]
@@ -388,6 +410,7 @@ mod tests {
                 last_opened_project_path: Some(existing_project.display().to_string()),
                 recent_project_paths: None,
                 theme: AppTheme::System,
+                primary_color: AppPrimaryColor::Slate,
             },
         )
         .expect("update config");
@@ -414,6 +437,7 @@ mod tests {
                 ),
                 recent_project_paths: None,
                 theme: AppTheme::System,
+                primary_color: AppPrimaryColor::Slate,
             },
         )
         .expect("update config");
@@ -436,6 +460,7 @@ mod tests {
                 last_opened_project_path: Some(first_project.display().to_string()),
                 recent_project_paths: None,
                 theme: AppTheme::System,
+                primary_color: AppPrimaryColor::Slate,
             },
         )
         .expect("update first project");
@@ -446,6 +471,7 @@ mod tests {
                 last_opened_project_path: Some(second_project.display().to_string()),
                 recent_project_paths: None,
                 theme: AppTheme::System,
+                primary_color: AppPrimaryColor::Slate,
             },
         )
         .expect("update second project");
@@ -479,6 +505,7 @@ mod tests {
             &config_path,
             &AppConfig {
                 theme: AppTheme::Dark,
+                primary_color: AppPrimaryColor::Slate,
                 ..initial.clone()
             },
         );
@@ -492,5 +519,6 @@ mod tests {
         assert!(result.is_err());
         let content = fs::read_to_string(&config_path).expect("read config");
         assert!(content.contains("\"theme\": \"system\""));
+        assert!(content.contains("\"primaryColor\": \"slate\""));
     }
 }

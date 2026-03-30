@@ -50,6 +50,42 @@ export async function checkForAppUpdates() {
   }
 }
 
+export async function manuallyCheckForAppUpdates() {
+  try {
+    const update = await check()
+
+    if (!update) {
+      toast.success('当前已经是最新版本')
+      return false
+    }
+
+    toast.info(`发现新版本 v${update.version}`, {
+      description: formatReleaseNotes(update.body),
+      duration: 12000,
+      dismissible: true,
+      action: {
+        label: '立即更新',
+        onClick: () => {
+          void installAppUpdate()
+        },
+      },
+      cancel: {
+        label: '稍后',
+        onClick: () => {},
+      },
+    })
+
+    return true
+  }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    toast.error('检查更新失败', {
+      description: message,
+    })
+    throw error
+  }
+}
+
 export async function installAppUpdate() {
   if (installPromise) {
     return installPromise
