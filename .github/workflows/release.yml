@@ -79,7 +79,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: ApiFuck v${{ env.RELEASE_VERSION }}
+          releaseName: v${{ env.RELEASE_VERSION }}
           releaseBody: ${{ env.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
