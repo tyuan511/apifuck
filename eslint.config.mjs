@@ -2,7 +2,7 @@ import antfu from '@antfu/eslint-config'
 
 export default antfu({
   ignores: [
-    '.claude/**',
+    '.agents/**',
     'src-tauri/**',
   ],
   rules: {
