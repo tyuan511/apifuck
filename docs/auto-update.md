@@ -26,11 +26,13 @@ For this repository, keep the local key files under `.secrets/` so they stay ins
 1. Commit the code you want to release.
 2. Create and push a Git tag like `v0.1.1`.
 
-GitHub Actions will read the version from the pushed tag, sync it into `package.json` and `src-tauri/Cargo.toml` inside the CI workspace, then build platform installers, sign updater artifacts, and upload `latest.json` plus installers to the GitHub Release page.
+GitHub Actions will read the version from the pushed tag, sync it into `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` inside the CI workspace, then build platform installers, sign updater artifacts, and upload `latest.json` plus installers to the GitHub Release page.
 
-After the release job succeeds, CI also checks out `main`, updates `package.json` and `src-tauri/Cargo.toml` to the tagged version, and pushes a commit like `chore: bump version to 0.1.1` back to the main branch.
+After the release job succeeds, CI also checks out `main`, updates `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` to the tagged version, and pushes a commit like `chore: bump version to 0.1.1` back to the main branch.
 
 GitHub Release notes come from `docs/release/<version>.md`, for example `docs/release/0.1.1.md`. If that file does not exist when the tag is pushed, the release workflow fails on purpose.
+
+The version sync logic is centralized in `scripts/release/sync-version.mjs`, so both CI jobs use the same implementation.
 
 ## 3. Update behavior in app
 
