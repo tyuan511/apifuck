@@ -300,7 +300,7 @@ function registerEnvironmentVariableProviders(
   }
 }
 
-async function ensureMonacoConfigured() {
+export async function preloadMonaco() {
   if (monacoInstance) {
     return monacoInstance
   }
@@ -373,32 +373,10 @@ function MonacoCodeEditor(props: {
   const lastEditorValueRef = React.useRef(props.value)
   const onChangeRef = React.useRef(props.onChange)
   const { resolvedTheme } = useTheme()
-  const [isReady, setIsReady] = React.useState(Boolean(monacoInstance))
 
   React.useEffect(() => {
     onChangeRef.current = props.onChange
   }, [props.onChange])
-
-  React.useEffect(() => {
-    let cancelled = false
-
-    ensureMonacoConfigured()
-      .then((monaco) => {
-        if (cancelled) {
-          return
-        }
-
-        setIsReady(true)
-        applyMonacoTheme(monaco, resolvedTheme)
-      })
-      .catch((error) => {
-        console.error('Failed to initialize modern-monaco.', error)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [resolvedTheme])
 
   React.useEffect(() => {
     let disposed = false
@@ -406,11 +384,11 @@ function MonacoCodeEditor(props: {
     let cleanup: (() => void) | undefined
     let envProviderCleanup: (() => void) | undefined
 
-    if (!isReady || !containerRef.current) {
+    if (!containerRef.current) {
       return
     }
 
-    void ensureMonacoConfigured()
+    void preloadMonaco()
       .then((monaco) => {
         if (disposed || !containerRef.current) {
           return
@@ -519,7 +497,6 @@ function MonacoCodeEditor(props: {
       cleanup?.()
     }
   }, [
-    isReady,
     props.language,
     props.lineNumbers,
     props.modelUri,
@@ -531,12 +508,14 @@ function MonacoCodeEditor(props: {
   ])
 
   React.useEffect(() => {
-    if (!isReady || !monacoInstance) {
-      return
-    }
-
-    applyMonacoTheme(monacoInstance, resolvedTheme)
-  }, [isReady, resolvedTheme])
+    void preloadMonaco()
+      .then((monaco) => {
+        applyMonacoTheme(monaco, resolvedTheme)
+      })
+      .catch((error) => {
+        console.error('Failed to apply modern-monaco theme.', error)
+      })
+  }, [resolvedTheme])
 
   React.useEffect(() => {
     const editor = editorRef.current

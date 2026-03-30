@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { preloadMonaco } from '@/components/monaco-editor'
 import { WorkbenchLoadingScreen } from '@/features/workbench/components/shared'
 import { WorkbenchShell } from '@/features/workbench/components/workbench-shell'
 import { useTabStateSync } from '@/features/workbench/hooks/use-tab-state-sync'
@@ -13,6 +14,28 @@ export function App() {
 
   useEffect(() => {
     void checkForAppUpdates()
+  }, [])
+
+  useEffect(() => {
+    void preloadMonaco().catch((error) => {
+      console.error('Failed to preload modern-monaco.', error)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      return
+    }
+
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault()
+    }
+
+    window.addEventListener('contextmenu', handleContextMenu)
+
+    return () => {
+      window.removeEventListener('contextmenu', handleContextMenu)
+    }
   }, [])
 
   if (isBooting) {
