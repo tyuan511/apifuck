@@ -27,9 +27,9 @@
 <!-- release-downloads:start -->
 | 平台 | 下载地址 |
 |------|---------|
-| macOS | [ApiFuck_0.0.5_aarch64.dmg](https://github.com/tyuan511/apifuck/releases/download/v0.0.5/ApiFuck_0.0.5_aarch64.dmg) |
-| Windows | [ApiFuck_0.0.5_x64-setup.exe](https://github.com/tyuan511/apifuck/releases/download/v0.0.5/ApiFuck_0.0.5_x64-setup.exe) |
-| Linux | [ApiFuck_0.0.5_amd64.AppImage](https://github.com/tyuan511/apifuck/releases/download/v0.0.5/ApiFuck_0.0.5_amd64.AppImage) |
+| macOS | [ApiFuck_0.0.6_aarch64.dmg](https://github.com/tyuan511/apifuck/releases/download/v0.0.6/ApiFuck_0.0.6_aarch64.dmg) |
+| Windows | [ApiFuck_0.0.6_x64-setup.exe](https://github.com/tyuan511/apifuck/releases/download/v0.0.6/ApiFuck_0.0.6_x64-setup.exe) |
+| Linux | [ApiFuck_0.0.6_amd64.AppImage](https://github.com/tyuan511/apifuck/releases/download/v0.0.6/ApiFuck_0.0.6_amd64.AppImage) |
 <!-- release-downloads:end -->
 
 > 桌面端内置自动更新机制，发布新版本后会主动提示升级。
