@@ -21,6 +21,49 @@ import {
 // Static regex patterns for URL parsing (avoid re-compilation on each call)
 const protocolRegex = /^https?:\/\//i
 const hostnameRegex = /^[^/]+\.[^/]/
+const localhostRegex = /^localhost(?::\d+)?(?:[/?#]|$)/i
+const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#]|$)/
+const ipv6Regex = /^\[[0-9a-f:.]+\](?::\d+)?(?:[/?#]|$)/i
+
+function looksLikeAbsoluteUrlWithoutProtocol(value: string) {
+  if (!value || value.startsWith('/') || value.startsWith('?') || value.startsWith('#')) {
+    return false
+  }
+
+  return hostnameRegex.test(value) || localhostRegex.test(value) || ipv4Regex.test(value) || ipv6Regex.test(value)
+}
+
+export function normalizeRequestUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) {
+    return ''
+  }
+
+  if (!protocolRegex.test(trimmed) && looksLikeAbsoluteUrlWithoutProtocol(trimmed)) {
+    return `https://${trimmed}`
+  }
+
+  return trimmed
+}
+
+export function isValidRequestUrl(url: string): boolean {
+  const normalized = normalizeRequestUrl(url)
+  if (!normalized) {
+    return false
+  }
+
+  if (!protocolRegex.test(normalized)) {
+    return normalized.startsWith('/') || normalized.startsWith('?')
+  }
+
+  try {
+    const parsedUrl = new URL(normalized)
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
+  }
+  catch {
+    return false
+  }
+}
 
 export function collectCollectionIds(nodes: TreeNode[]): string[] {
   return nodes.flatMap((node) => {
@@ -180,30 +223,25 @@ export function resolveInheritedAuth(...authChain: AuthConfig[]): AuthConfig {
  * Preserves existing row IDs if the same key exists.
  */
 export function parseUrlQueryParams(url: string, existingParams: KeyValue[]): KeyValue[] {
-  if (!url) {
+  const normalizedUrl = normalizeRequestUrl(url)
+  if (!normalizedUrl) {
     return []
   }
 
   try {
     // Handle relative paths like /users?id=1 or just ?id=1
-    if (!protocolRegex.test(url) && !hostnameRegex.test(url)) {
+    if (!protocolRegex.test(normalizedUrl) && !looksLikeAbsoluteUrlWithoutProtocol(normalizedUrl)) {
       // This is a relative URL or just a query string
-      const queryStart = url.indexOf('?')
+      const queryStart = normalizedUrl.indexOf('?')
       if (queryStart === -1) {
         return []
       }
-      const queryString = url.slice(queryStart + 1)
+      const queryString = normalizedUrl.slice(queryStart + 1)
       const searchParams = new URLSearchParams(queryString)
       return parseSearchParams(searchParams, existingParams)
     }
 
-    // Handle URLs without protocol by prepending https://
-    let urlToParse = url
-    if (!protocolRegex.test(urlToParse) && hostnameRegex.test(urlToParse)) {
-      urlToParse = `https://${urlToParse}`
-    }
-
-    const urlObj = new URL(urlToParse)
+    const urlObj = new URL(normalizedUrl)
     return parseSearchParams(urlObj.searchParams, existingParams)
   }
   catch {
@@ -245,15 +283,16 @@ function parseSearchParams(searchParams: URLSearchParams, existingParams: KeyVal
  * Only includes enabled params.
  */
 export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
-  if (!url) {
-    return url
+  const normalizedUrl = normalizeRequestUrl(url)
+  if (!normalizedUrl) {
+    return normalizedUrl
   }
 
   try {
     // Handle relative paths like /users?id=1
-    if (!protocolRegex.test(url) && !hostnameRegex.test(url)) {
-      const queryStart = url.indexOf('?')
-      const base = queryStart >= 0 ? url.slice(0, queryStart) : url
+    if (!protocolRegex.test(normalizedUrl) && !looksLikeAbsoluteUrlWithoutProtocol(normalizedUrl)) {
+      const queryStart = normalizedUrl.indexOf('?')
+      const base = queryStart >= 0 ? normalizedUrl.slice(0, queryStart) : normalizedUrl
       // Preserve hash if present
       const hashStart = base.indexOf('#')
       const baseWithoutHash = hashStart >= 0 ? base.slice(0, hashStart) : base
@@ -270,13 +309,7 @@ export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
       return queryString ? `${baseWithoutHash}?${queryString}${hash}` : `${baseWithoutHash}${hash}`
     }
 
-    // Handle URLs without protocol
-    let urlToParse = url
-    if (!protocolRegex.test(urlToParse) && hostnameRegex.test(urlToParse)) {
-      urlToParse = `https://${urlToParse}`
-    }
-
-    const urlObj = new URL(urlToParse)
+    const urlObj = new URL(normalizedUrl)
     const searchParams = urlObj.searchParams
 
     // Clear existing query params
@@ -293,7 +326,7 @@ export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
     return urlObj.toString()
   }
   catch {
-    return url
+    return normalizedUrl
   }
 }
 
@@ -302,22 +335,17 @@ export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
  */
 export function getBaseUrl(url: string): string {
   try {
-    let urlToParse = url
-    if (urlToParse && !protocolRegex.test(urlToParse)) {
-      if (hostnameRegex.test(urlToParse)) {
-        urlToParse = `https://${urlToParse}`
-      }
-      else {
-        return url
-      }
+    const normalizedUrl = normalizeRequestUrl(url)
+    if (normalizedUrl && !protocolRegex.test(normalizedUrl)) {
+      return normalizedUrl
     }
 
-    const urlObj = new URL(urlToParse)
+    const urlObj = new URL(normalizedUrl)
     // Remove query string and hash
     return `${urlObj.origin}${urlObj.pathname}${urlObj.hash}`
   }
   catch {
-    return url
+    return normalizeRequestUrl(url)
   }
 }
 

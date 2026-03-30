@@ -67,6 +67,8 @@ import {
   createKeyValueDraft,
   formatBytes,
   hasVisibleResponse,
+  isValidRequestUrl,
+  normalizeRequestUrl,
   parseUrlQueryParams,
   startWindowDragging,
 } from '../utils'
@@ -1158,6 +1160,10 @@ interface RequestHeaderBarProps {
 }
 
 function RequestHeaderBar(props: RequestHeaderBarProps) {
+  const normalizedUrl = React.useMemo(() => normalizeRequestUrl(props.draft.url), [props.draft.url])
+  const hasUrl = normalizedUrl.length > 0
+  const hasUrlError = hasUrl && !isValidRequestUrl(normalizedUrl)
+
   return (
     <div className="border-b border-border/70 px-3 py-3">
       <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
@@ -1183,8 +1189,15 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
 
         <Input
           className="h-7 min-w-[280px] flex-1 text-sm focus-visible:border-input focus-visible:ring-0"
+          aria-invalid={hasUrlError || undefined}
           value={props.draft.url}
           onChange={event => props.onUrlChange(event.target.value)}
+          onBlur={(event) => {
+            const nextUrl = normalizeRequestUrl(event.target.value)
+            if (nextUrl !== props.draft.url) {
+              props.onUrlChange(nextUrl)
+            }
+          }}
           placeholder="请输入请求地址"
         />
 
@@ -1197,6 +1210,11 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
           保存
         </Button>
       </div>
+      {hasUrlError && (
+        <p className="mt-2 text-xs text-destructive">
+          URL 格式不正确，请输入完整地址，或使用 `/path`、`?query=1` 这类相对地址。
+        </p>
+      )}
     </div>
   )
 }

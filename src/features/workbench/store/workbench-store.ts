@@ -51,7 +51,9 @@ import {
   findCollectionById,
   findCollectionName,
   findCollectionPath,
+  isValidRequestUrl,
   mergeKeyValueEntries,
+  normalizeRequestUrl,
   resolveInheritedAuth,
 } from '../utils'
 
@@ -1441,6 +1443,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }
 
     const draft = cloneApiDefinition(state.requestDrafts[entityId])
+    draft.url = normalizeRequestUrl(draft.url)
     await runTask(set, async () => {
       const saved = await updateApi({
         id: draft.id,
@@ -1469,6 +1472,11 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }
 
     const draft = cloneApiDefinition(state.requestDrafts[entityId])
+    draft.url = normalizeRequestUrl(draft.url)
+    if (!isValidRequestUrl(draft.url)) {
+      toast.error('请求 URL 格式不正确')
+      return
+    }
     const parentCollectionId = findApiLocation(project!, draft.id)?.parentCollectionId ?? null
     const requestScopeChain = getRequestScopeChain(project, parentCollectionId, draft)
     const activeProjectId = project?.metadata.id ?? null
@@ -2270,15 +2278,16 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
   },
 
   resolveUrl(url, baseUrl) {
+    const normalizedUrl = normalizeRequestUrl(url)
     if (!baseUrl) {
-      return url
+      return normalizedUrl
     }
 
-    if (/^https?:\/\//.test(url)) {
-      return url
+    if (/^https?:\/\//.test(normalizedUrl)) {
+      return normalizedUrl
     }
     const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
-    const path = url.startsWith('/') ? url : `/${url}`
+    const path = normalizedUrl.startsWith('/') ? normalizedUrl : `/${normalizedUrl}`
     return `${base}${path}`
   },
 })
