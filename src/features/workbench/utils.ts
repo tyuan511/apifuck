@@ -19,7 +19,8 @@ import {
 } from './types'
 
 // Static regex patterns for URL parsing (avoid re-compilation on each call)
-const protocolRegex = /^https?:\/\//i
+const absoluteProtocolRegex = /^(https?|wss?):\/\//i
+const httpProtocolRegex = /^https?:\/\//i
 const hostnameRegex = /^[^/]+\.[^/]/
 const localhostRegex = /^localhost(?::\d+)?(?:[/?#]|$)/i
 const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#]|$)/
@@ -39,7 +40,7 @@ export function normalizeRequestUrl(url: string): string {
     return ''
   }
 
-  if (!protocolRegex.test(trimmed) && looksLikeAbsoluteUrlWithoutProtocol(trimmed)) {
+  if (!absoluteProtocolRegex.test(trimmed) && looksLikeAbsoluteUrlWithoutProtocol(trimmed)) {
     return `https://${trimmed}`
   }
 
@@ -52,13 +53,28 @@ export function isValidRequestUrl(url: string): boolean {
     return false
   }
 
-  if (!protocolRegex.test(normalized)) {
+  if (!httpProtocolRegex.test(normalized)) {
     return normalized.startsWith('/') || normalized.startsWith('?')
   }
 
   try {
     const parsedUrl = new URL(normalized)
     return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
+  }
+  catch {
+    return false
+  }
+}
+
+export function isValidWebSocketUrl(url: string): boolean {
+  const normalized = normalizeRequestUrl(url)
+  if (!normalized) {
+    return false
+  }
+
+  try {
+    const parsedUrl = new URL(normalized)
+    return parsedUrl.protocol === 'ws:' || parsedUrl.protocol === 'wss:'
   }
   catch {
     return false
@@ -230,7 +246,7 @@ export function parseUrlQueryParams(url: string, existingParams: KeyValue[]): Ke
 
   try {
     // Handle relative paths like /users?id=1 or just ?id=1
-    if (!protocolRegex.test(normalizedUrl) && !looksLikeAbsoluteUrlWithoutProtocol(normalizedUrl)) {
+    if (!absoluteProtocolRegex.test(normalizedUrl) && !looksLikeAbsoluteUrlWithoutProtocol(normalizedUrl)) {
       // This is a relative URL or just a query string
       const queryStart = normalizedUrl.indexOf('?')
       if (queryStart === -1) {
@@ -290,7 +306,7 @@ export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
 
   try {
     // Handle relative paths like /users?id=1
-    if (!protocolRegex.test(normalizedUrl) && !looksLikeAbsoluteUrlWithoutProtocol(normalizedUrl)) {
+    if (!absoluteProtocolRegex.test(normalizedUrl) && !looksLikeAbsoluteUrlWithoutProtocol(normalizedUrl)) {
       const queryStart = normalizedUrl.indexOf('?')
       const base = queryStart >= 0 ? normalizedUrl.slice(0, queryStart) : normalizedUrl
       // Preserve hash if present
@@ -336,7 +352,7 @@ export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
 export function getBaseUrl(url: string): string {
   try {
     const normalizedUrl = normalizeRequestUrl(url)
-    if (normalizedUrl && !protocolRegex.test(normalizedUrl)) {
+    if (normalizedUrl && !absoluteProtocolRegex.test(normalizedUrl)) {
       return normalizedUrl
     }
 

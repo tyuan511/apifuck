@@ -23,7 +23,10 @@ interface ResolvedRequestHeader {
 
 interface ResolvedRequestBody {
   binaryFilePath?: string
-  formData: Array<{ key: string, value: string }>
+  formData: Array<
+    | { type: 'text', key: string, value: string }
+    | { type: 'file', key: string, filePath: string, fileName?: string, contentType?: string }
+  >
   json: string
   mode: RequestDefinition['body']['mode']
   raw: string
@@ -122,10 +125,23 @@ function resolveRequestForExport(args: {
     binaryFilePath: request.request.body.binary.filePath,
     formData: request.request.body.formData
       .filter(item => item.enabled && item.key.trim())
-      .map(item => ({
-        key: resolveEnvironmentVariables(item.key.trim(), variables),
-        value: resolveEnvironmentVariables(item.value, variables),
-      })),
+      .map((item) => {
+        const key = resolveEnvironmentVariables(item.key.trim(), variables)
+        if ((item.entryType ?? 'text') === 'file' && item.filePath) {
+          return {
+            type: 'file' as const,
+            key,
+            filePath: resolveEnvironmentVariables(item.filePath, variables),
+            fileName: item.fileName,
+            contentType: item.contentType,
+          }
+        }
+        return {
+          type: 'text' as const,
+          key,
+          value: resolveEnvironmentVariables(item.value, variables),
+        }
+      }),
     json: resolveEnvironmentVariables(request.request.body.json, variables),
     mode: request.request.body.mode,
     raw: resolveEnvironmentVariables(request.request.body.raw, variables),
@@ -297,7 +313,12 @@ function buildCurlSnippet(request: ResolvedRequestExport) {
   }
   else if (request.body.mode === 'form-data') {
     request.body.formData.forEach((item) => {
-      lines.push(`  --form '${escapeShellSingleQuoted(`${item.key}=${item.value}`)}'`)
+      if (item.type === 'file') {
+        lines.push(`  --form '${escapeShellSingleQuoted(`${item.key}=@${item.filePath}`)}'`)
+      }
+      else {
+        lines.push(`  --form '${escapeShellSingleQuoted(`${item.key}=${item.value}`)}'`)
+      }
     })
   }
   else if (request.body.mode === 'x-www-form-urlencoded') {
@@ -351,7 +372,13 @@ function buildJavaScriptBody(request: ResolvedRequestExport) {
   if (request.body.mode === 'form-data') {
     return [
       'const body = new FormData()',
-      ...request.body.formData.map(item => `body.append(${JSON.stringify(item.key)}, ${JSON.stringify(item.value)})`),
+      'const { readFile } = await import(\'node:fs/promises\')',
+      ...request.body.formData.flatMap((item, index) => item.type === 'file'
+        ? [
+            `const file${index} = await readFile(${JSON.stringify(item.filePath)})`,
+            `body.append(${JSON.stringify(item.key)}, new Blob([file${index}], ${item.contentType ? `{ type: ${JSON.stringify(item.contentType)} }` : 'undefined'}), ${JSON.stringify(item.fileName || item.filePath.split(/[\\/]/).pop() || 'upload.bin')})`,
+          ]
+        : [`body.append(${JSON.stringify(item.key)}, ${JSON.stringify(item.value)})`]),
     ]
   }
   if (request.body.mode === 'x-www-form-urlencoded') {
@@ -384,7 +411,14 @@ function buildPythonSnippet(request: ResolvedRequestExport) {
     lines.push(`data = ${toPythonDictFromJson(request.body.json)}`)
   }
   else if (request.body.mode === 'form-data') {
-    lines.push(`files = ${toPythonMultipartList(request.body.formData)}`)
+    const textItems = request.body.formData.filter((item): item is Extract<typeof item, { type: 'text' }> => item.type === 'text')
+    const fileItems = request.body.formData.filter((item): item is Extract<typeof item, { type: 'file' }> => item.type === 'file')
+    if (textItems.length > 0) {
+      lines.push(`data = ${toPythonDict(textItems.map(item => ({ key: item.key, value: item.value })))}`)
+    }
+    if (fileItems.length > 0) {
+      lines.push(`files = ${toPythonFileDict(fileItems)}`)
+    }
   }
   else if (request.body.mode === 'x-www-form-urlencoded') {
     lines.push(`data = ${toPythonDict(request.body.urlEncoded)}`)
@@ -414,7 +448,12 @@ function buildPythonSnippet(request: ResolvedRequestExport) {
     requestArgs.push('json=data')
   }
   else if (request.body.mode === 'form-data') {
-    requestArgs.push('files=files')
+    if (request.body.formData.some(item => item.type === 'text')) {
+      requestArgs.push('data=data')
+    }
+    if (request.body.formData.some(item => item.type === 'file')) {
+      requestArgs.push('files=files')
+    }
   }
 
   lines.push(
@@ -486,12 +525,14 @@ function buildGoSnippet(request: ResolvedRequestExport) {
 }
 
 function buildGoMultipartSnippet(request: ResolvedRequestExport) {
+  const usesFile = request.body.formData.some(item => item.type === 'file')
   const lines = [
     'package main',
     '',
     'import (',
     '\t"bytes"',
     '\t"fmt"',
+    ...(usesFile ? ['\t"io"', '\t"os"', '\t"path/filepath"'] : []),
     '\t"mime/multipart"',
     '\t"net/http"',
     ')',
@@ -500,7 +541,27 @@ function buildGoMultipartSnippet(request: ResolvedRequestExport) {
     '\tvar body bytes.Buffer',
     '\twriter := multipart.NewWriter(&body)',
     '',
-    ...request.body.formData.map(item => `\t_ = writer.WriteField(${toGoString(item.key)}, ${toGoString(item.value)})`),
+    ...request.body.formData.flatMap((item) => {
+      if (item.type === 'file') {
+        const filePath = toGoString(item.filePath)
+        const fileName = toGoString(item.fileName || item.filePath.split(/[\\/]/).pop() || 'upload.bin')
+        return [
+          `\tfileBytes, err := os.ReadFile(${filePath})`,
+          '\tif err != nil {',
+          '\t\tpanic(err)',
+          '\t}',
+          `\tpart, err := writer.CreateFormFile(${toGoString(item.key)}, ${fileName})`,
+          '\tif err != nil {',
+          '\t\tpanic(err)',
+          '\t}',
+          '\tif _, err := io.Copy(part, bytes.NewReader(fileBytes)); err != nil {',
+          '\t\tpanic(err)',
+          '\t}',
+          '',
+        ]
+      }
+      return [`\t_ = writer.WriteField(${toGoString(item.key)}, ${toGoString(item.value)})`]
+    }),
     '\tif err := writer.Close(); err != nil {',
     '\t\tpanic(err)',
     '\t}',
@@ -573,12 +634,12 @@ function toPythonDict(entries: Array<{ key: string, value: string }>) {
   return `{\n${entries.map(entry => `    ${toPythonString(entry.key)}: ${toPythonString(entry.value)},`).join('\n')}\n}`
 }
 
-function toPythonMultipartList(entries: Array<{ key: string, value: string }>) {
+function toPythonFileDict(entries: Array<{ key: string, filePath: string }>) {
   if (entries.length === 0) {
-    return '[]'
+    return '{}'
   }
 
-  return `[\n${entries.map(entry => `    (${toPythonString(entry.key)}, (None, ${toPythonString(entry.value)})),`).join('\n')}\n]`
+  return `{\n${entries.map(entry => `    ${toPythonString(entry.key)}: open(${toPythonString(entry.filePath)}, 'rb'),`).join('\n')}\n}`
 }
 
 function toPythonString(value: string) {

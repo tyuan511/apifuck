@@ -38,6 +38,7 @@ export function useWorkbenchShell() {
     requestDialogParentCollectionId: store.requestDialogParentCollectionId,
     requestNameDraft: store.requestNameDraft,
     requestDescriptionDraft: store.requestDescriptionDraft,
+    requestProtocolDraft: store.requestProtocolDraft,
     editRequestDialogOpen: store.editRequestDialogOpen,
     editRequestNameDraft: store.editRequestNameDraft,
     editRequestDescriptionDraft: store.editRequestDescriptionDraft,
@@ -48,6 +49,7 @@ export function useWorkbenchShell() {
     pendingRequestDeletion: store.pendingRequestDeletion,
     environments: store.environments,
     activeEnvironmentId: store.activeEnvironmentId,
+    webSocketSessions: store.webSocketSessions,
     environmentDialogOpen: store.environmentDialogOpen,
     editingEnvironmentId: store.editingEnvironmentId,
     environmentNameDraft: store.environmentNameDraft,
@@ -85,6 +87,7 @@ export function useWorkbenchShell() {
     closeCreateRequestDialog: store.closeCreateRequestDialog,
     setRequestNameDraft: store.setRequestNameDraft,
     setRequestDescriptionDraft: store.setRequestDescriptionDraft,
+    setRequestProtocolDraft: store.setRequestProtocolDraft,
     handleCreateRequest: store.handleCreateRequest,
     openEditRequestDialog: store.openEditRequestDialog,
     closeEditRequestDialog: store.closeEditRequestDialog,
@@ -113,6 +116,11 @@ export function useWorkbenchShell() {
     updateRequestDraft: store.updateRequestDraft,
     handleSaveRequest: store.handleSaveRequest,
     handleSendRequest: store.handleSendRequest,
+    handleConnectWebSocket: store.handleConnectWebSocket,
+    handleDisconnectWebSocket: store.handleDisconnectWebSocket,
+    handleSendWebSocketMessage: store.handleSendWebSocketMessage,
+    setWebSocketDraftMessage: store.setWebSocketDraftMessage,
+    setWebSocketMessageFormat: store.setWebSocketMessageFormat,
     setSplitRatio: store.setSplitRatio,
     openCreateEnvironmentDialog: store.openCreateEnvironmentDialog,
     openEnvironmentTab: store.openEnvironmentTab,
@@ -152,6 +160,9 @@ export function useWorkbenchShell() {
   const activeResponse = activeTabRecord?.entityType === 'request'
     ? state.requestResponses[activeTabRecord.entityId] ?? null
     : null
+  const activeWebSocketSession = activeTabRecord?.entityType === 'request'
+    ? state.webSocketSessions[activeTabRecord.entityId] ?? null
+    : null
   const activeRequestIsLoading = Boolean(
     activeTabRecord?.entityType === 'request'
     && state.loadingRequestIds.includes(activeTabRecord.entityId)
@@ -182,6 +193,7 @@ export function useWorkbenchShell() {
     activeTabRecord,
     activeRequestIsLoading,
     activeResponse,
+    activeWebSocketSession,
     collectionDialogParentLabel,
     requestDialogParentLabel,
   }

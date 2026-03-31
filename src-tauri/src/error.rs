@@ -21,6 +21,8 @@ pub enum AppError {
     Conflict(String),
     #[error("request failed: {0}")]
     Request(String),
+    #[error("websocket failed: {0}")]
+    WebSocket(String),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
     #[error("json error: {0}")]

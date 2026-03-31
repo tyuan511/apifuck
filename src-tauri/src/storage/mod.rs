@@ -23,6 +23,14 @@ pub enum EntityType {
     Api,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestProtocol {
+    #[default]
+    Http,
+    Websocket,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDocsConfig {
@@ -176,6 +184,32 @@ pub struct BinaryBodySpec {
     pub file_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FormDataEntryType {
+    #[default]
+    Text,
+    File,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FormDataEntry {
+    pub id: String,
+    pub key: String,
+    pub value: String,
+    pub enabled: bool,
+    pub description: String,
+    #[serde(default)]
+    pub entry_type: FormDataEntryType,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub content_type: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BodySpec {
@@ -183,7 +217,7 @@ pub struct BodySpec {
     pub raw: String,
     pub json: String,
     #[serde(default)]
-    pub form_data: Vec<KeyValue>,
+    pub form_data: Vec<FormDataEntry>,
     #[serde(default)]
     pub url_encoded: Vec<KeyValue>,
     #[serde(default)]
@@ -248,6 +282,27 @@ impl Default for ApiMock {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSocketMessageFormat {
+    #[default]
+    Text,
+    Json,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSocketRequestConfig {
+    #[serde(default)]
+    pub default_message: String,
+    #[serde(default)]
+    pub message_format: WebSocketMessageFormat,
+    #[serde(default)]
+    pub connect_script: String,
+    #[serde(default)]
+    pub on_message_script: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiDefinition {
@@ -258,6 +313,8 @@ pub struct ApiDefinition {
     pub updated_at: String,
     pub slug: String,
     pub name: String,
+    #[serde(default)]
+    pub protocol: RequestProtocol,
     pub method: String,
     pub url: String,
     pub description: String,
@@ -273,6 +330,27 @@ pub struct ApiDefinition {
     pub pre_request_script: String,
     #[serde(default)]
     pub post_request_script: String,
+    #[serde(default)]
+    pub websocket: WebSocketRequestConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiListEntry {
+    pub schema_version: u32,
+    pub entity_type: EntityType,
+    pub id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub protocol: RequestProtocol,
+    pub method: String,
+    pub url: String,
+    pub description: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +359,8 @@ pub struct ApiSummary {
     pub id: String,
     pub slug: String,
     pub name: String,
+    #[serde(default)]
+    pub protocol: RequestProtocol,
     pub method: String,
     pub url: String,
     pub description: String,
@@ -393,6 +473,8 @@ pub struct CreateApiInput {
     pub project_id: String,
     pub parent_collection_id: Option<String>,
     pub name: String,
+    #[serde(default)]
+    pub protocol: RequestProtocol,
     pub method: String,
     pub url: String,
     #[serde(default)]
@@ -409,6 +491,8 @@ pub struct CreateApiInput {
     pub pre_request_script: String,
     #[serde(default)]
     pub post_request_script: String,
+    #[serde(default)]
+    pub websocket: WebSocketRequestConfig,
     pub slug: Option<String>,
 }
 
@@ -417,6 +501,8 @@ pub struct CreateApiInput {
 pub struct UpdateApiInput {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub protocol: RequestProtocol,
     pub method: String,
     pub url: String,
     #[serde(default)]
@@ -433,6 +519,8 @@ pub struct UpdateApiInput {
     pub pre_request_script: String,
     #[serde(default)]
     pub post_request_script: String,
+    #[serde(default)]
+    pub websocket: WebSocketRequestConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -499,6 +587,8 @@ pub struct SetActiveEnvironmentInput {
 pub type ProjectSummary = ProjectMetadata;
 pub type CollectionSummary = CollectionMetadata;
 
+const ENVIRONMENTS_FILE: &str = "environments.json";
+
 #[derive(Debug, Clone)]
 enum ParentRef {
     ProjectRoot(String),
@@ -510,6 +600,7 @@ struct ProjectEntry {
     dir: PathBuf,
     items_dir: PathBuf,
     metadata: ProjectMetadata,
+    children: Vec<TreeNode>,
 }
 
 #[derive(Debug, Clone)]
@@ -524,7 +615,6 @@ struct CollectionEntry {
 #[derive(Debug, Clone)]
 struct ApiEntry {
     path: PathBuf,
-    definition: ApiDefinition,
     parent: ParentRef,
 }
 
@@ -582,6 +672,7 @@ impl ProjectIndex {
                 dir: index.root.clone(),
                 items_dir,
                 metadata,
+                children,
             },
         );
 
@@ -589,7 +680,10 @@ impl ProjectIndex {
             .projects
             .get_mut(&project_id)
             .expect("project inserted");
-        project.metadata.root_order = ordered_child_ids(project.metadata.root_order.clone(), &children);
+        project.metadata.root_order = ordered_child_ids(
+            project.metadata.root_order.clone(),
+            &project.children,
+        );
 
         Ok(index)
     }
@@ -601,26 +695,30 @@ impl ProjectIndex {
             .next()
             .ok_or_else(|| AppError::InvalidInput("current project is unavailable".to_string()))?;
 
-        let children = if project_entry.items_dir.exists() {
-            scan_children(
-                &project_entry.metadata.id,
-                &project_entry.items_dir,
-                &project_entry.metadata.root_order,
-                &ParentRef::ProjectRoot(project_entry.metadata.id.clone()),
-                &mut HashMap::new(),
-                &mut HashMap::new(),
-                &mut HashMap::new(),
-            )?
-        } else {
-            vec![]
-        };
-        let environments = read_environments(&self.root, &project_entry.metadata.id)?;
+        let environments = read_environments_at_path(&project_entry.dir.join(ENVIRONMENTS_FILE))?;
 
         Ok(ProjectSnapshot {
             metadata: project_entry.metadata.clone(),
-            children,
+            children: project_entry.children.clone(),
             environments,
         })
+    }
+}
+
+impl From<ApiListEntry> for ApiSummary {
+    fn from(value: ApiListEntry) -> Self {
+        Self {
+            id: value.id,
+            slug: value.slug,
+            name: value.name,
+            protocol: value.protocol,
+            method: value.method,
+            url: value.url,
+            description: value.description,
+            tags: value.tags,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
     }
 }
 
@@ -788,7 +886,8 @@ pub fn create_api(root: impl AsRef<Path>, input: CreateApiInput) -> AppResult<Ap
         updated_at: now,
         slug,
         name,
-        method: normalized_method(&input.method),
+        protocol: input.protocol.clone(),
+        method: normalized_method(&input.protocol, &input.method),
         url: input.url,
         description: input.description,
         tags: input.tags,
@@ -797,6 +896,7 @@ pub fn create_api(root: impl AsRef<Path>, input: CreateApiInput) -> AppResult<Ap
         mock: input.mock,
         pre_request_script: input.pre_request_script,
         post_request_script: input.post_request_script,
+        websocket: input.websocket,
     };
 
     write_json_file(&parent_dir.join(file_name), &definition)?;
@@ -812,9 +912,11 @@ pub fn update_api(root: impl AsRef<Path>, input: UpdateApiInput) -> AppResult<Ap
         .get(&input.id)
         .ok_or_else(|| AppError::NotFound(format!("api {}", input.id)))?;
 
-    let mut definition = entry.definition.clone();
+    let mut definition: ApiDefinition = read_json_file(&entry.path)?;
+    validate_api_definition(&definition)?;
     definition.name = required_name(&input.name, "api")?;
-    definition.method = normalized_method(&input.method);
+    definition.protocol = input.protocol;
+    definition.method = normalized_method(&definition.protocol, &input.method);
     definition.url = input.url;
     definition.description = input.description;
     definition.tags = input.tags;
@@ -823,6 +925,7 @@ pub fn update_api(root: impl AsRef<Path>, input: UpdateApiInput) -> AppResult<Ap
     definition.mock = input.mock;
     definition.pre_request_script = input.pre_request_script;
     definition.post_request_script = input.post_request_script;
+    definition.websocket = input.websocket;
     definition.updated_at = now_iso_string();
     write_json_file(&entry.path, &definition)?;
 
@@ -950,10 +1053,10 @@ pub fn read_api(root: impl AsRef<Path>, id: &str) -> AppResult<ApiDefinition> {
         .apis
         .get(id)
         .ok_or_else(|| AppError::NotFound(format!("api {}", id)))?;
-    Ok(entry.definition.clone())
+    let definition: ApiDefinition = read_json_file(&entry.path)?;
+    validate_api_definition(&definition)?;
+    Ok(definition)
 }
-
-const ENVIRONMENTS_FILE: &str = "environments.json";
 
 fn read_environments(root: &Path, project_id: &str) -> AppResult<Vec<Environment>> {
     let index = ProjectIndex::load(root)?;
@@ -961,11 +1064,14 @@ fn read_environments(root: &Path, project_id: &str) -> AppResult<Vec<Environment
         .projects
         .get(project_id)
         .ok_or_else(|| AppError::NotFound(format!("project {}", project_id)))?;
-    let path = project.dir.join(ENVIRONMENTS_FILE);
+    read_environments_at_path(&project.dir.join(ENVIRONMENTS_FILE))
+}
+
+fn read_environments_at_path(path: &Path) -> AppResult<Vec<Environment>> {
     if !path.exists() {
         return Ok(vec![]);
     }
-    read_json_file(&path)
+    read_json_file(path)
 }
 
 fn write_environments(
@@ -1191,29 +1297,19 @@ fn scan_children(
             continue;
         }
 
-        let definition: ApiDefinition = read_json_file(&path)?;
-        validate_api_definition(&definition)?;
+        let definition: ApiListEntry = read_json_file(&path)?;
+        validate_api_list_entry(&definition)?;
         register_id(seen_ids, &definition.id, "api")?;
+        let summary = ApiSummary::from(definition);
         apis.insert(
-            definition.id.clone(),
+            summary.id.clone(),
             ApiEntry {
                 path,
-                definition: definition.clone(),
                 parent: parent.clone(),
             },
         );
 
-        children.push(TreeNode::Api(ApiSummary {
-            id: definition.id,
-            slug: definition.slug,
-            name: definition.name,
-            method: definition.method,
-            url: definition.url,
-            description: definition.description,
-            tags: definition.tags,
-            created_at: definition.created_at,
-            updated_at: definition.updated_at,
-        }));
+        children.push(TreeNode::Api(summary));
     }
 
     Ok(sort_children(stored_order, children))
@@ -1262,6 +1358,25 @@ fn validate_collection_metadata(metadata: &CollectionMetadata) -> AppResult<()> 
 }
 
 fn validate_api_definition(definition: &ApiDefinition) -> AppResult<()> {
+    if definition.schema_version != SCHEMA_VERSION {
+        return Err(AppError::InvalidProject(format!(
+            "api {} has unsupported schema version {}",
+            definition.id, definition.schema_version
+        )));
+    }
+    if definition.entity_type != EntityType::Api {
+        return Err(AppError::InvalidProject(format!(
+            "api {} has invalid entityType",
+            definition.id
+        )));
+    }
+    if definition.id.is_empty() {
+        return Err(AppError::InvalidProject("api id is empty".to_string()));
+    }
+    Ok(())
+}
+
+fn validate_api_list_entry(definition: &ApiListEntry) -> AppResult<()> {
     if definition.schema_version != SCHEMA_VERSION {
         return Err(AppError::InvalidProject(format!(
             "api {} has unsupported schema version {}",
@@ -1381,21 +1496,9 @@ fn child_ids_for_parent(index: &ProjectIndex, parent: &ParentRef) -> AppResult<V
                 .projects
                 .get(project_id)
                 .ok_or_else(|| AppError::NotFound(format!("project {}", project_id)))?;
-            let children = if project.items_dir.exists() {
-                scan_children(
-                    project_id,
-                    &project.items_dir,
-                    &project.metadata.root_order,
-                    parent,
-                    &mut HashMap::new(),
-                    &mut HashMap::new(),
-                    &mut HashMap::new(),
-                )?
-            } else {
-                vec![]
-            };
-            Ok(children
-                .into_iter()
+            Ok(project
+                .children
+                .iter()
                 .map(|node| node.id().to_string())
                 .collect())
         }
@@ -1578,7 +1681,11 @@ fn unique_slug(
     }
 }
 
-fn normalized_method(method: &str) -> String {
+fn normalized_method(protocol: &RequestProtocol, method: &str) -> String {
+    if *protocol == RequestProtocol::Websocket {
+        return "WS".to_string();
+    }
+
     let trimmed = method.trim();
     if trimmed.is_empty() {
         "GET".to_string()
@@ -1604,9 +1711,13 @@ fn normalize_request(mut request: RequestDefinition) -> RequestDefinition {
         .chain(request.query.iter_mut())
         .chain(request.path_params.iter_mut())
         .chain(request.cookies.iter_mut())
-        .chain(request.body.form_data.iter_mut())
         .chain(request.body.url_encoded.iter_mut())
     {
+        if item.id.is_empty() {
+            item.id = new_id();
+        }
+    }
+    for item in request.body.form_data.iter_mut() {
         if item.id.is_empty() {
             item.id = new_id();
         }
@@ -1778,6 +1889,7 @@ mod tests {
                 project_id: project_id.clone(),
                 parent_collection_id: None,
                 name: "Health".to_string(),
+                protocol: RequestProtocol::Http,
                 method: "get".to_string(),
                 url: "https://example.com/health".to_string(),
                 description: String::new(),
@@ -1787,6 +1899,7 @@ mod tests {
                 mock: ApiMock::default(),
                 pre_request_script: String::new(),
                 post_request_script: String::new(),
+                websocket: WebSocketRequestConfig::default(),
                 slug: None,
             },
         )
@@ -1827,6 +1940,7 @@ mod tests {
                 project_id: snapshot.metadata.id.clone(),
                 parent_collection_id: None,
                 name: "Login".to_string(),
+                protocol: RequestProtocol::Http,
                 method: "post".to_string(),
                 url: "https://example.com/login".to_string(),
                 description: String::new(),
@@ -1836,6 +1950,7 @@ mod tests {
                 mock: ApiMock::default(),
                 pre_request_script: String::new(),
                 post_request_script: String::new(),
+                websocket: WebSocketRequestConfig::default(),
                 slug: None,
             },
         )
@@ -1849,6 +1964,7 @@ mod tests {
             UpdateApiInput {
                 id: api.id.clone(),
                 name: "User Login".to_string(),
+                protocol: RequestProtocol::Http,
                 method: "put".to_string(),
                 url: "https://example.com/sessions".to_string(),
                 description: "renamed".to_string(),
@@ -1858,6 +1974,7 @@ mod tests {
                 mock: ApiMock::default(),
                 pre_request_script: String::new(),
                 post_request_script: String::new(),
+                websocket: WebSocketRequestConfig::default(),
             },
         )
         .expect("update api");
@@ -1865,6 +1982,88 @@ mod tests {
         let refreshed_path = find_api_path(&project_dir, &updated.id);
         assert_eq!(original_path, refreshed_path);
         assert_eq!(updated.slug, api.slug);
+
+        let summary_snapshot = open_project(temp_dir.path()).expect("open project");
+        let summary = summary_snapshot
+            .children
+            .iter()
+            .find_map(|node| match node {
+                TreeNode::Api(summary) if summary.id == updated.id => Some(summary),
+                TreeNode::Api(_) => None,
+                TreeNode::Collection(_) => None,
+            })
+            .expect("api summary");
+        assert_eq!(summary.name, "User Login");
+        assert_eq!(summary.method, "PUT");
+    }
+
+    #[test]
+    fn read_api_loads_full_definition_on_demand() {
+        let temp_dir = tempdir().expect("create temp dir");
+        let snapshot = bootstrap_project(temp_dir.path(), None).expect("bootstrap project");
+
+        let api = create_api(
+            temp_dir.path(),
+            CreateApiInput {
+                project_id: snapshot.metadata.id.clone(),
+                parent_collection_id: None,
+                name: "Scripted".to_string(),
+                protocol: RequestProtocol::Http,
+                method: "post".to_string(),
+                url: "https://example.com/scripted".to_string(),
+                description: "api with full fields".to_string(),
+                tags: vec!["demo".to_string()],
+                request: RequestDefinition {
+                    body: BodySpec {
+                        mode: BodyMode::Json,
+                        json: "{\"ok\":true}".to_string(),
+                        ..BodySpec::default()
+                    },
+                    ..RequestDefinition::default()
+                },
+                documentation: ApiDocumentation {
+                    summary: "summary".to_string(),
+                    description: "docs".to_string(),
+                    deprecated: false,
+                    operation_id: "scriptedOp".to_string(),
+                    group_name: "Demo".to_string(),
+                },
+                mock: ApiMock {
+                    enabled: true,
+                    status: 201,
+                    latency_ms: 25,
+                    headers: vec![],
+                    body: serde_json::json!({ "ok": true }),
+                    content_type: "application/json".to_string(),
+                },
+                pre_request_script: "console.log('pre')".to_string(),
+                post_request_script: "console.log('post')".to_string(),
+                websocket: WebSocketRequestConfig::default(),
+                slug: None,
+            },
+        )
+        .expect("create api");
+
+        let summary_snapshot = open_project(temp_dir.path()).expect("open project");
+        let summary = summary_snapshot
+            .children
+            .iter()
+            .find_map(|node| match node {
+                TreeNode::Api(summary) if summary.id == api.id => Some(summary),
+                TreeNode::Api(_) => None,
+                TreeNode::Collection(_) => None,
+            })
+            .expect("api summary");
+        assert_eq!(summary.name, "Scripted");
+        assert_eq!(summary.url, "https://example.com/scripted");
+
+        let full = read_api(temp_dir.path(), &api.id).expect("read full api");
+        assert_eq!(full.documentation.operation_id, "scriptedOp");
+        assert_eq!(full.pre_request_script, "console.log('pre')");
+        assert_eq!(full.post_request_script, "console.log('post')");
+        assert_eq!(full.request.body.mode, BodyMode::Json);
+        assert_eq!(full.request.body.json, "{\"ok\":true}");
+        assert_eq!(full.mock.status, 201);
     }
 
     #[test]
@@ -1903,6 +2102,7 @@ mod tests {
                 project_id: project_id.clone(),
                 parent_collection_id: Some(source.id.clone()),
                 name: "Login".to_string(),
+                protocol: RequestProtocol::Http,
                 method: "post".to_string(),
                 url: "https://example.com/login".to_string(),
                 description: String::new(),
@@ -1912,6 +2112,7 @@ mod tests {
                 mock: ApiMock::default(),
                 pre_request_script: String::new(),
                 post_request_script: String::new(),
+                websocket: WebSocketRequestConfig::default(),
                 slug: None,
             },
         )
@@ -1967,6 +2168,7 @@ mod tests {
             updated_at: now_iso_string(),
             slug: "duplicate".to_string(),
             name: "Duplicate".to_string(),
+            protocol: RequestProtocol::Http,
             method: "GET".to_string(),
             url: "https://example.com".to_string(),
             description: String::new(),
@@ -1976,6 +2178,7 @@ mod tests {
             mock: ApiMock::default(),
             pre_request_script: String::new(),
             post_request_script: String::new(),
+            websocket: WebSocketRequestConfig::default(),
         };
         write_json_file(&api_path, &definition).expect("write duplicate api");
 
