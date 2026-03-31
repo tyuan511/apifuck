@@ -19,6 +19,15 @@ export interface KeyValue {
   description: string
 }
 
+export type FormDataEntryType = 'text' | 'file'
+
+export interface FormDataEntry extends KeyValue {
+  entryType?: FormDataEntryType
+  filePath?: string
+  fileName?: string
+  contentType?: string
+}
+
 export interface Environment {
   id: string
   name: string
@@ -86,7 +95,7 @@ export interface BodySpec {
   mode: BodyMode
   raw: string
   json: string
-  formData: KeyValue[]
+  formData: FormDataEntry[]
   urlEncoded: KeyValue[]
   binary: {
     filePath?: string
@@ -110,6 +119,16 @@ export interface ApiDocumentation {
   groupName: string
 }
 
+export type RequestProtocol = 'http' | 'websocket'
+export type WebSocketMessageFormat = 'text' | 'json'
+
+export interface WebSocketConfig {
+  defaultMessage: string
+  messageFormat: WebSocketMessageFormat
+  connectScript: string
+  onMessageScript: string
+}
+
 export interface ApiMock {
   enabled: boolean
   status: number
@@ -127,6 +146,7 @@ export interface ApiDefinition {
   updatedAt: string
   slug: string
   name: string
+  protocol: RequestProtocol
   method: string
   url: string
   description: string
@@ -136,6 +156,7 @@ export interface ApiDefinition {
   mock: ApiMock
   preRequestScript: string
   postRequestScript: string
+  websocket: WebSocketConfig
 }
 
 export interface ApiSummary {
@@ -143,6 +164,7 @@ export interface ApiSummary {
   id: string
   slug: string
   name: string
+  protocol: RequestProtocol
   method: string
   url: string
   description: string
@@ -210,6 +232,7 @@ export interface CreateApiInput {
   projectId: string
   parentCollectionId?: string
   name: string
+  protocol: RequestProtocol
   method: string
   url: string
   description: string
@@ -219,12 +242,14 @@ export interface CreateApiInput {
   mock: ApiMock
   preRequestScript: string
   postRequestScript: string
+  websocket: WebSocketConfig
   slug?: string
 }
 
 export interface UpdateApiInput {
   id: string
   name: string
+  protocol: RequestProtocol
   method: string
   url: string
   description: string
@@ -234,6 +259,7 @@ export interface UpdateApiInput {
   mock: ApiMock
   preRequestScript: string
   postRequestScript: string
+  websocket: WebSocketConfig
 }
 
 export interface MoveNodeInput {
@@ -256,6 +282,88 @@ export interface SendRequestInput {
   method: string
   url: string
   request: RequestDefinition
+}
+
+export interface WebSocketConnectionInfo {
+  connectionId: string
+  requestId: string
+  connectedAt: number
+}
+
+export interface ConnectWebSocketInput {
+  connectionId: string
+  requestId: string
+  url: string
+  headers: KeyValue[]
+  query: KeyValue[]
+  auth: AuthConfig
+  defaultMessage: string
+  messageFormat: WebSocketMessageFormat
+}
+
+export interface SendWebSocketMessageInput {
+  connectionId: string
+  requestId: string
+  message: string
+}
+
+export interface DisconnectWebSocketInput {
+  connectionId: string
+}
+
+export interface WebSocketConnectedEvent {
+  kind: 'connected'
+  connectionId: string
+  requestId: string
+  connectedAt: number
+}
+
+export interface WebSocketMessageEvent {
+  kind: 'message'
+  connectionId: string
+  requestId: string
+  direction: 'inbound' | 'outbound'
+  message: string
+  timestamp: number
+}
+
+export interface WebSocketErrorEvent {
+  kind: 'error'
+  connectionId: string
+  requestId: string
+  error: string
+  timestamp: number
+}
+
+export interface WebSocketClosedEvent {
+  kind: 'closed'
+  connectionId: string
+  requestId: string
+  code?: number
+  reason?: string
+  timestamp: number
+}
+
+export type WebSocketEvent
+  = | WebSocketConnectedEvent
+    | WebSocketMessageEvent
+    | WebSocketErrorEvent
+    | WebSocketClosedEvent
+
+interface WebSocketEventWire {
+  kind?: string
+  connectionId?: string
+  connection_id?: string
+  requestId?: string
+  request_id?: string
+  connectedAt?: number
+  connected_at?: number
+  direction?: 'inbound' | 'outbound'
+  message?: string
+  error?: string
+  code?: number
+  reason?: string
+  timestamp?: number
 }
 
 export interface ResponseHeader {
@@ -343,6 +451,15 @@ export function createDefaultRequest(): RequestDefinition {
       urlEncoded: [],
       binary: {},
     },
+  }
+}
+
+export function createDefaultWebSocketConfig(): WebSocketConfig {
+  return {
+    defaultMessage: '',
+    messageFormat: 'text',
+    connectScript: '',
+    onMessageScript: '',
   }
 }
 
@@ -449,6 +566,28 @@ export function sendRequest(
   return invoke<SendRequestResponse>('send_request', { input, onEvent })
 }
 
+export function connectWebSocket(
+  input: ConnectWebSocketInput,
+  onEvent?: (event: WebSocketEvent) => void,
+) {
+  const channel = new Channel<WebSocketEvent>()
+  if (onEvent) {
+    channel.onmessage = (event) => {
+      onEvent(normalizeWebSocketEvent(event as WebSocketEventWire))
+    }
+  }
+
+  return invoke<WebSocketConnectionInfo>('connect_websocket', { input, onEvent: channel })
+}
+
+export function sendWebSocketMessage(input: SendWebSocketMessageInput) {
+  return invoke<void>('send_websocket_message', { input })
+}
+
+export function disconnectWebSocket(input: DisconnectWebSocketInput) {
+  return invoke<void>('disconnect_websocket', { input })
+}
+
 function normalizeSendRequestStreamEvent(event: SendRequestStreamEventWire): SendRequestStreamEvent {
   const kind = event.kind
   const requestId = event.requestId ?? event.request_id ?? ''
@@ -479,6 +618,52 @@ function normalizeSendRequestStreamEvent(event: SendRequestStreamEventWire): Sen
     sizeBytes: event.sizeBytes ?? event.size_bytes ?? 0,
     responseType: event.responseType ?? event.response_type ?? 'text',
     body: event.body ?? '',
+  }
+}
+
+function normalizeWebSocketEvent(event: WebSocketEventWire): WebSocketEvent {
+  const kind = event.kind ?? 'error'
+  const connectionId = event.connectionId ?? event.connection_id ?? ''
+  const requestId = event.requestId ?? event.request_id ?? ''
+  const timestamp = event.timestamp ?? Date.now()
+
+  if (kind === 'connected') {
+    return {
+      kind,
+      connectionId,
+      requestId,
+      connectedAt: event.connectedAt ?? event.connected_at ?? timestamp,
+    }
+  }
+
+  if (kind === 'message') {
+    return {
+      kind,
+      connectionId,
+      requestId,
+      direction: event.direction ?? 'inbound',
+      message: event.message ?? '',
+      timestamp,
+    }
+  }
+
+  if (kind === 'closed') {
+    return {
+      kind,
+      connectionId,
+      requestId,
+      code: event.code,
+      reason: event.reason,
+      timestamp,
+    }
+  }
+
+  return {
+    kind: 'error',
+    connectionId,
+    requestId,
+    error: event.error ?? 'WebSocket error',
+    timestamp,
   }
 }
 

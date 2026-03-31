@@ -8,6 +8,7 @@ import type {
   ProjectSnapshot,
   ResponseHeader,
   ResponseType,
+  WebSocketMessageFormat,
 } from '@/lib/project'
 
 export type EditorPanelTab = 'query' | 'headers' | 'auth' | 'body' | 'preRequestScript' | 'postRequestScript'
@@ -68,6 +69,22 @@ export interface ResponseState {
   body: string
   isLoading: boolean
   error: string | null
+}
+
+export interface WebSocketMessage {
+  direction: 'inbound' | 'outbound' | 'system' | 'error'
+  message: string
+  timestamp: number
+}
+
+export interface WebSocketSessionState {
+  connectionId: string | null
+  status: 'idle' | 'connecting' | 'connected' | 'closing' | 'closed' | 'error'
+  messages: WebSocketMessage[]
+  draftMessage: string
+  messageFormat: WebSocketMessageFormat
+  error: string | null
+  connectedAt: number | null
 }
 
 export interface WorkbenchBootPayload {

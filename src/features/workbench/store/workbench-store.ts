@@ -13,6 +13,7 @@ import type {
   ResponseState,
   SettingsPanelTab,
   TreeSelection,
+  WebSocketSessionState,
   WorkbenchBootPayload,
   WorkbenchPanelTab,
 } from '../types'
@@ -23,10 +24,13 @@ import type {
   CollectionTreeNode,
   CreateApiInput,
   Environment,
+  FormDataEntry,
   KeyValue,
   ProjectSnapshot,
   RequestScopeConfig,
   SendRequestStreamEvent,
+  WebSocketEvent,
+  WebSocketMessageFormat,
 } from '@/lib/project'
 import type { RequestConfig, ResponseData } from '@/lib/script-runner'
 import { open } from '@tauri-apps/plugin-dialog'
@@ -34,7 +38,7 @@ import { startTransition } from 'react'
 import { toast } from 'sonner'
 import { create } from 'zustand'
 import { readAppConfig, updateAppConfig, updateTabState } from '@/lib/app-config'
-import { bootstrapProject, createApi, createCollection, createDefaultDocumentation, createDefaultMock, createDefaultRequest, createDefaultRequestScopeConfig, createEnvironment, deleteEnvironment, deleteNode, deleteProjectFiles, moveNode, openProject, readApi, sendRequest, setActiveEnvironment, updateApi, updateCollection, updateEnvironment, updateProject } from '@/lib/project'
+import { bootstrapProject, connectWebSocket, createApi, createCollection, createDefaultDocumentation, createDefaultMock, createDefaultRequest, createDefaultRequestScopeConfig, createDefaultWebSocketConfig, createEnvironment, deleteEnvironment, deleteNode, deleteProjectFiles, disconnectWebSocket, moveNode, openProject, readApi, sendRequest, sendWebSocketMessage, setActiveEnvironment, updateApi, updateCollection, updateEnvironment, updateProject } from '@/lib/project'
 import {
   createPostRequestContext,
   createPreRequestContext,
@@ -53,6 +57,7 @@ import {
   findCollectionName,
   findCollectionPath,
   isValidRequestUrl,
+  isValidWebSocketUrl,
   mergeKeyValueEntries,
   normalizeRequestUrl,
   resolveInheritedAuth,
@@ -85,6 +90,7 @@ interface WorkbenchState {
   dirtyRequestIds: Set<string>
   loadingRequestIds: string[]
   requestResponses: Record<string, ResponseState>
+  webSocketSessions: Record<string, WebSocketSessionState>
   activeEditorTab: WorkbenchPanelTab
   splitRatio: number
   settingsDialogOpen: boolean
@@ -105,6 +111,7 @@ interface WorkbenchState {
   requestDialogParentCollectionId: string | null
   requestNameDraft: string
   requestDescriptionDraft: string
+  requestProtocolDraft: 'http' | 'websocket'
   editRequestDialogOpen: boolean
   editingRequestId: string | null
   editRequestNameDraft: string
@@ -172,6 +179,7 @@ interface WorkbenchActions {
   closeCreateRequestDialog: () => void
   setRequestNameDraft: (value: string) => void
   setRequestDescriptionDraft: (value: string) => void
+  setRequestProtocolDraft: (value: 'http' | 'websocket') => void
   handleCreateRequest: () => Promise<void>
   openEditRequestDialog: (summary: ApiSummary) => void
   closeEditRequestDialog: () => void
@@ -182,6 +190,11 @@ interface WorkbenchActions {
   updateRequestDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
   handleSaveRequest: () => Promise<void>
   handleSendRequest: () => Promise<void>
+  handleConnectWebSocket: () => Promise<void>
+  handleDisconnectWebSocket: () => Promise<void>
+  handleSendWebSocketMessage: () => Promise<void>
+  setWebSocketDraftMessage: (requestId: string, value: string) => void
+  setWebSocketMessageFormat: (requestId: string, format: WebSocketMessageFormat) => void
   requestCloseRequestTab: (requestId: string) => void
   closeRequestTab: (requestId: string) => void
   clearPendingCloseRequest: () => void
@@ -250,6 +263,7 @@ const initialState: WorkbenchState = {
   dirtyRequestIds: new Set(),
   loadingRequestIds: [],
   requestResponses: {},
+  webSocketSessions: {},
   activeEditorTab: 'query',
   splitRatio: 0.55,
   settingsDialogOpen: false,
@@ -270,6 +284,7 @@ const initialState: WorkbenchState = {
   requestDialogParentCollectionId: null,
   requestNameDraft: '',
   requestDescriptionDraft: '',
+  requestProtocolDraft: 'http',
   editRequestDialogOpen: false,
   editingRequestId: null,
   editRequestNameDraft: '',
@@ -409,6 +424,18 @@ function createEnvironmentEditorDraft(environment: Environment): EnvironmentEdit
   return JSON.parse(JSON.stringify(environment)) as EnvironmentEditorDraft
 }
 
+function createEmptyWebSocketSessionState(): WebSocketSessionState {
+  return {
+    connectionId: null,
+    status: 'idle',
+    messages: [],
+    draftMessage: '',
+    messageFormat: 'text',
+    error: null,
+    connectedAt: null,
+  }
+}
+
 const environmentSettingsTabId = 'environment:settings'
 const environmentSettingsTabTitle = '环境设置'
 
@@ -490,22 +517,18 @@ function applySendRequestStreamEvent(
   get: () => WorkbenchStore,
   event: SendRequestStreamEvent,
 ) {
-  logSseDebug(event.requestId, `channel:received kind=${event.kind}`)
   const entityId = findResponseEntityIdByRequestId(get().requestResponses, event.requestId)
   if (!entityId) {
-    logSseDebug(event.requestId, 'channel:dropped missing-entity')
     return
   }
 
   set((state) => {
     const current = state.requestResponses[entityId]
     if (!current || current.requestId !== event.requestId) {
-      logSseDebug(event.requestId, 'store:dropped stale-request')
       return {}
     }
 
     if (event.kind === 'started') {
-      logSseDebug(event.requestId, 'store:apply started')
       return {
         requestResponses: {
           ...state.requestResponses,
@@ -526,10 +549,6 @@ function applySendRequestStreamEvent(
     }
 
     if (event.kind === 'chunk') {
-      logSseDebug(
-        event.requestId,
-        `store:apply chunk chunkLen=${event.chunk.length} nextBodyLen=${current.body.length + event.chunk.length}`,
-      )
       return {
         requestResponses: {
           ...state.requestResponses,
@@ -544,7 +563,6 @@ function applySendRequestStreamEvent(
       }
     }
 
-    logSseDebug(event.requestId, 'store:apply finished')
     return {
       requestResponses: {
         ...state.requestResponses,
@@ -561,12 +579,99 @@ function applySendRequestStreamEvent(
   })
 }
 
-function logSseDebug(requestId: string, message: string) {
-  if (!import.meta.env.DEV || !requestId.trim()) {
+function applyWebSocketEvent(
+  set: WorkbenchSetState,
+  get: () => WorkbenchStore,
+  event: WebSocketEvent,
+) {
+  const entityId = event.requestId
+  const existing = get().webSocketSessions[entityId] ?? createEmptyWebSocketSessionState()
+
+  if (event.kind === 'connected') {
+    set(state => ({
+      webSocketSessions: {
+        ...state.webSocketSessions,
+        [entityId]: {
+          ...existing,
+          connectionId: event.connectionId,
+          status: 'connected',
+          error: null,
+          connectedAt: event.connectedAt,
+          messages: [
+            ...existing.messages,
+            {
+              direction: 'system',
+              message: 'WebSocket connected',
+              timestamp: event.connectedAt,
+            },
+          ],
+        },
+      },
+    }))
     return
   }
 
-  console.warn(`[sse-debug][${Date.now()}][${requestId}] ${message}`)
+  if (event.kind === 'message') {
+    set(state => ({
+      webSocketSessions: {
+        ...state.webSocketSessions,
+        [entityId]: {
+          ...existing,
+          status: 'connected',
+          messages: [
+            ...existing.messages,
+            {
+              direction: event.direction === 'inbound' ? 'inbound' : 'outbound',
+              message: event.message,
+              timestamp: event.timestamp,
+            },
+          ],
+        },
+      },
+    }))
+    return
+  }
+
+  if (event.kind === 'closed') {
+    set(state => ({
+      webSocketSessions: {
+        ...state.webSocketSessions,
+        [entityId]: {
+          ...existing,
+          status: 'closed',
+          error: null,
+          messages: [
+            ...existing.messages,
+            {
+              direction: 'system',
+              message: `WebSocket closed${event.reason ? `: ${event.reason}` : ''}`,
+              timestamp: event.timestamp,
+            },
+          ],
+        },
+      },
+    }))
+    return
+  }
+
+  set(state => ({
+    webSocketSessions: {
+      ...state.webSocketSessions,
+      [entityId]: {
+        ...existing,
+        status: 'error',
+        error: event.error,
+        messages: [
+          ...existing.messages,
+          {
+            direction: 'error',
+            message: event.error,
+            timestamp: event.timestamp,
+          },
+        ],
+      },
+    },
+  }))
 }
 
 const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
@@ -592,6 +697,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         savedProjects: {},
         dirtyRequestIds: new Set(),
         requestResponses: {},
+        webSocketSessions: {},
         loadingRequestIds: [],
         settingsDialogOpen: false,
         projectDialogOpen: false,
@@ -611,6 +717,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         requestDialogParentCollectionId: null,
         requestNameDraft: '',
         requestDescriptionDraft: '',
+        requestProtocolDraft: 'http',
         editRequestDialogOpen: false,
         editingRequestId: null,
         editRequestNameDraft: '',
@@ -1308,6 +1415,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       requestDialogParentCollectionId: parentCollectionId,
       requestNameDraft: '',
       requestDescriptionDraft: '',
+      requestProtocolDraft: 'http',
     })
   },
 
@@ -1317,6 +1425,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       requestDialogParentCollectionId: null,
       requestNameDraft: '',
       requestDescriptionDraft: '',
+      requestProtocolDraft: 'http',
     })
   },
 
@@ -1328,11 +1437,16 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     set({ requestDescriptionDraft: value })
   },
 
+  setRequestProtocolDraft(value) {
+    set({ requestProtocolDraft: value })
+  },
+
   async handleCreateRequest() {
     const {
       requestDialogParentCollectionId,
       requestNameDraft,
       requestDescriptionDraft,
+      requestProtocolDraft,
       project,
     } = get()
     const name = requestNameDraft.trim()
@@ -1346,7 +1460,8 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       projectId: project.metadata.id,
       parentCollectionId: parentCollectionId ?? undefined,
       name,
-      method: 'GET',
+      protocol: requestProtocolDraft,
+      method: requestProtocolDraft === 'websocket' ? 'WS' : 'GET',
       url: '',
       description: requestDescriptionDraft.trim(),
       tags: [],
@@ -1357,6 +1472,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       mock: createDefaultMock(),
       preRequestScript: '',
       postRequestScript: '',
+      websocket: createDefaultWebSocketConfig(),
     }
 
     await runTask(set, async () => {
@@ -1426,6 +1542,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const saved = await updateApi({
         id: requestSource.id,
         name,
+        protocol: requestSource.protocol,
         method: requestSource.method,
         url: requestSource.url,
         description: editRequestDescriptionDraft.trim(),
@@ -1435,6 +1552,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         mock: requestSource.mock,
         preRequestScript: requestSource.preRequestScript,
         postRequestScript: requestSource.postRequestScript,
+        websocket: requestSource.websocket,
       })
       get().syncRequestState(saved)
       await get().refreshProjectInternal()
@@ -1530,6 +1648,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       const saved = await updateApi({
         id: draft.id,
         name: draft.name,
+        protocol: draft.protocol,
         method: draft.method,
         url: draft.url,
         description: draft.description,
@@ -1539,6 +1658,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         mock: draft.mock,
         preRequestScript: draft.preRequestScript,
         postRequestScript: draft.postRequestScript,
+        websocket: draft.websocket,
       })
       get().setRequestLoaded(saved)
       await get().refreshProjectInternal()
@@ -1554,6 +1674,10 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }
 
     const draft = cloneApiDefinition(state.requestDrafts[entityId])
+    if (draft.protocol === 'websocket') {
+      await get().handleConnectWebSocket()
+      return
+    }
     draft.url = normalizeRequestUrl(draft.url)
     if (!isValidRequestUrl(draft.url)) {
       toast.error('请求 URL 格式不正确')
@@ -1648,10 +1772,16 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         ...mutableConfig.body,
         raw: resolveEnvironmentVariables(mutableConfig.body.raw, variables),
         json: resolveEnvironmentVariables(mutableConfig.body.json, variables),
-        formData: mutableConfig.body.formData.map(item => ({
+        formData: mutableConfig.body.formData.map<FormDataEntry>(item => ({
           ...item,
           key: resolveEnvironmentVariables(item.key, variables),
-          value: resolveEnvironmentVariables(item.value, variables),
+          entryType: item.entryType === 'file' ? 'file' : 'text',
+          value: item.entryType === 'file' ? item.value : resolveEnvironmentVariables(item.value, variables),
+          filePath: item.entryType === 'file' && item.filePath
+            ? resolveEnvironmentVariables(item.filePath, variables)
+            : item.filePath,
+          fileName: item.fileName,
+          contentType: item.contentType,
         })),
         urlEncoded: mutableConfig.body.urlEncoded.map(item => ({
           ...item,
@@ -1780,6 +1910,223 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
     }
   },
 
+  async handleConnectWebSocket() {
+    const state = get()
+    const entityId = getActiveRequestEntityId(state)
+    if (!entityId) {
+      return
+    }
+
+    const draft = state.requestDrafts[entityId]
+    const project = state.project
+    const { resolveUrl, resolveEnvironmentVariables } = state
+    if (!draft || !project || draft.protocol !== 'websocket') {
+      return
+    }
+
+    const parentCollectionId = findApiLocation(project, draft.id)?.parentCollectionId ?? null
+    const requestScopeChain = getRequestScopeChain(project, parentCollectionId, draft)
+    const activeEnv = state.activeEnvironmentId
+      ? state.environments.find(item => item.id === state.activeEnvironmentId) ?? null
+      : null
+
+    const variables = activeEnv?.variables ?? []
+    const scopeBaseUrl = requestScopeChain.resolvedBaseUrl || activeEnv?.baseUrl
+    const resolvedUrl = resolveUrl(draft.url, scopeBaseUrl)
+    const finalUrl = resolveEnvironmentVariables(resolvedUrl, variables)
+    if (!isValidWebSocketUrl(finalUrl)) {
+      toast.error('WebSocket URL 必须以 ws:// 或 wss:// 开头')
+      return
+    }
+
+    const existing = state.webSocketSessions[entityId]
+    if (existing?.status === 'connected' || existing?.status === 'connecting') {
+      return
+    }
+
+    const connectionId = generateId()
+    set(current => ({
+      webSocketSessions: {
+        ...current.webSocketSessions,
+        [entityId]: {
+          ...(current.webSocketSessions[entityId] ?? createEmptyWebSocketSessionState()),
+          connectionId,
+          status: 'connecting',
+          error: null,
+          draftMessage: current.webSocketSessions[entityId]?.draftMessage ?? draft.websocket.defaultMessage,
+          messageFormat: current.webSocketSessions[entityId]?.messageFormat ?? draft.websocket.messageFormat,
+        },
+      },
+    }))
+
+    try {
+      await connectWebSocket(
+        {
+          connectionId,
+          requestId: draft.id,
+          url: finalUrl,
+          headers: requestScopeChain.mergedHeaders.map(item => ({
+            ...item,
+            value: resolveEnvironmentVariables(item.value, variables),
+          })),
+          query: draft.request.query.map(item => ({
+            ...item,
+            key: resolveEnvironmentVariables(item.key, variables),
+            value: resolveEnvironmentVariables(item.value, variables),
+          })),
+          auth: requestScopeChain.mergedAuth,
+          defaultMessage: draft.websocket.defaultMessage,
+          messageFormat: draft.websocket.messageFormat,
+        },
+        event => applyWebSocketEvent(set, get, event),
+      )
+    }
+    catch (error) {
+      set(current => ({
+        webSocketSessions: {
+          ...current.webSocketSessions,
+          [entityId]: {
+            ...(current.webSocketSessions[entityId] ?? createEmptyWebSocketSessionState()),
+            connectionId,
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          },
+        },
+      }))
+      toast.error(error instanceof Error ? error.message : String(error))
+    }
+  },
+
+  async handleDisconnectWebSocket() {
+    const state = get()
+    const entityId = getActiveRequestEntityId(state)
+    if (!entityId) {
+      return
+    }
+    const session = state.webSocketSessions[entityId]
+    if (!session?.connectionId) {
+      return
+    }
+
+    set(current => ({
+      webSocketSessions: {
+        ...current.webSocketSessions,
+        [entityId]: {
+          ...session,
+          status: 'closing',
+        },
+      },
+    }))
+
+    try {
+      await disconnectWebSocket({ connectionId: session.connectionId })
+    }
+    catch (error) {
+      set(current => ({
+        webSocketSessions: {
+          ...current.webSocketSessions,
+          [entityId]: {
+            ...session,
+            status: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          },
+        },
+      }))
+    }
+  },
+
+  async handleSendWebSocketMessage() {
+    const state = get()
+    const entityId = getActiveRequestEntityId(state)
+    if (!entityId) {
+      toast.error('当前没有打开的 WebSocket 请求')
+      return
+    }
+    const draft = state.requestDrafts[entityId]
+    const session = state.webSocketSessions[entityId]
+    if (!draft || draft.protocol !== 'websocket') {
+      toast.error('当前请求不是 WebSocket 类型')
+      return
+    }
+    if (!session?.connectionId) {
+      toast.error('当前 WebSocket 还没有建立连接')
+      return
+    }
+    if (session.status !== 'connected') {
+      toast.error(`当前连接状态为 ${session.status}，请重新连接后再发送`)
+      return
+    }
+
+    const message = session.draftMessage
+    if (!message.trim()) {
+      toast.error('请输入要发送的消息')
+      return
+    }
+
+    if (session.messageFormat === 'json') {
+      try {
+        JSON.parse(message)
+      }
+      catch {
+        toast.error('当前消息不是合法 JSON')
+        return
+      }
+    }
+
+    try {
+      await sendWebSocketMessage({
+        connectionId: session.connectionId,
+        requestId: draft.id,
+        message,
+      })
+
+      set(current => ({
+        webSocketSessions: {
+          ...current.webSocketSessions,
+          [entityId]: {
+            ...(current.webSocketSessions[entityId] ?? createEmptyWebSocketSessionState()),
+            draftMessage: '',
+          },
+        },
+      }))
+    }
+    catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      applyWebSocketEvent(set, get, {
+        kind: 'error',
+        connectionId: session.connectionId,
+        requestId: draft.id,
+        error: errorMessage,
+        timestamp: Date.now(),
+      })
+      toast.error(errorMessage)
+    }
+  },
+
+  setWebSocketDraftMessage(requestId, value) {
+    set(state => ({
+      webSocketSessions: {
+        ...state.webSocketSessions,
+        [requestId]: {
+          ...(state.webSocketSessions[requestId] ?? createEmptyWebSocketSessionState()),
+          draftMessage: value,
+        },
+      },
+    }))
+  },
+
+  setWebSocketMessageFormat(requestId, format) {
+    set(state => ({
+      webSocketSessions: {
+        ...state.webSocketSessions,
+        [requestId]: {
+          ...(state.webSocketSessions[requestId] ?? createEmptyWebSocketSessionState()),
+          messageFormat: format,
+        },
+      },
+    }))
+  },
+
   requestCloseRequestTab(requestId) {
     const tab = get().openRequestTabs.find(item => item.requestId === requestId)
     if (tab && get().dirtyRequestIds.has(tab.entityId)) {
@@ -1792,6 +2139,14 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
 
   closeRequestTab(requestId) {
     const { project, selectedTreeNode } = get()
+    const closingTab = get().openRequestTabs.find(item => item.requestId === requestId) ?? null
+    if (closingTab?.entityType === 'request') {
+      const definition = get().requestDrafts[closingTab.entityId] ?? get().savedRequests[closingTab.entityId]
+      const session = get().webSocketSessions[closingTab.entityId]
+      if (definition?.protocol === 'websocket' && session?.connectionId) {
+        void disconnectWebSocket({ connectionId: session.connectionId }).catch(() => {})
+      }
+    }
 
     set((state) => {
       const remaining = state.openRequestTabs.filter(tab => tab.requestId !== requestId)
@@ -1828,6 +2183,9 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         ),
         requestResponses: Object.fromEntries(
           Object.entries(state.requestResponses).filter(([id]) => id !== closingTab?.entityId),
+        ),
+        webSocketSessions: Object.fromEntries(
+          Object.entries(state.webSocketSessions).filter(([id]) => id !== closingTab?.entityId),
         ),
         dirtyRequestIds: new Set([...state.dirtyRequestIds].filter(id => id !== closingTab?.entityId)),
       }
@@ -2072,6 +2430,16 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         requestResponses: state.requestResponses[definition.id]
           ? state.requestResponses
           : { ...state.requestResponses, [definition.id]: createEmptyResponseState() },
+        webSocketSessions: state.webSocketSessions[definition.id]
+          ? state.webSocketSessions
+          : {
+              ...state.webSocketSessions,
+              [definition.id]: {
+                ...createEmptyWebSocketSessionState(),
+                draftMessage: definition.websocket.defaultMessage,
+                messageFormat: definition.websocket.messageFormat,
+              },
+            },
         dirtyRequestIds: nextDirtyIds,
         openRequestTabs: existing
           ? state.openRequestTabs.map(tab => (tab.requestId === requestId ? nextTab : tab))
@@ -2145,6 +2513,9 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
         savedProjects: state.savedProjects,
         requestResponses: Object.fromEntries(
           Object.entries(state.requestResponses).filter(([id]) => !removedRequestIds.has(id)),
+        ),
+        webSocketSessions: Object.fromEntries(
+          Object.entries(state.webSocketSessions).filter(([id]) => !removedRequestIds.has(id)),
         ),
         loadingRequestIds: state.loadingRequestIds.filter(requestId => !removedRequestIds.has(requestId)),
         dirtyRequestIds: new Set(
@@ -2604,7 +2975,7 @@ const createWorkbenchStore: StateCreator<WorkbenchStore> = (set, get) => ({
       return normalizedUrl
     }
 
-    if (/^https?:\/\//.test(normalizedUrl)) {
+    if (/^(https?|wss?):\/\//i.test(normalizedUrl)) {
       return normalizedUrl
     }
     const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl

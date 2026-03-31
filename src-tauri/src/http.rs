@@ -1,7 +1,8 @@
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::{path::Path, time::{Instant, SystemTime, UNIX_EPOCH}};
 
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_TYPE},
+    multipart::{Form, Part},
     Method, Url, Version,
 };
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,7 @@ use tauri::ipc::Channel;
 
 use crate::{
     error::{AppError, AppResult},
-    storage::{AuthType, BodyMode, KeyValue, RequestDefinition},
+    storage::{AuthType, BodyMode, FormDataEntryType, KeyValue, RequestDefinition},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -314,11 +315,64 @@ fn apply_body(
             }
             Ok(request_builder)
         }
-        BodyMode::FormData | BodyMode::XWwwFormUrlencoded | BodyMode::Binary => Err(
-            AppError::InvalidInput(
-                "this build currently supports request body modes: none, raw, json".to_string(),
-            ),
-        ),
+        BodyMode::FormData => {
+            let mut form = Form::new();
+
+            for entry in request
+                .body
+                .form_data
+                .iter()
+                .filter(|entry| entry.enabled && !entry.key.trim().is_empty())
+            {
+                if entry.entry_type == FormDataEntryType::File {
+                    let file_path = entry.file_path.as_deref().ok_or_else(|| {
+                        AppError::InvalidInput(format!("form-data file field {} is missing a file", entry.key))
+                    })?;
+                    let bytes = std::fs::read(file_path)?;
+                    let file_name = entry
+                        .file_name
+                        .clone()
+                        .or_else(|| {
+                            Path::new(file_path)
+                                .file_name()
+                                .map(|name| name.to_string_lossy().to_string())
+                        })
+                        .unwrap_or_else(|| "upload.bin".to_string());
+                    let mut part = Part::bytes(bytes).file_name(file_name);
+                    if let Some(content_type) = entry.content_type.as_deref().filter(|value| !value.trim().is_empty()) {
+                        part = part
+                            .mime_str(content_type)
+                            .map_err(|error| AppError::InvalidInput(format!("invalid content type for {}: {error}", entry.key)))?;
+                    }
+                    form = form.part(entry.key.trim().to_string(), part);
+                }
+                else {
+                    form = form.text(entry.key.trim().to_string(), entry.value.clone());
+                }
+            }
+
+            Ok(request_builder.multipart(form))
+        }
+        BodyMode::XWwwFormUrlencoded => {
+            let encoded = request
+                .body
+                .url_encoded
+                .iter()
+                .filter(|entry| entry.enabled && !entry.key.trim().is_empty())
+                .map(|entry| (entry.key.trim().to_string(), entry.value.clone()))
+                .collect::<Vec<_>>();
+            Ok(request_builder.form(&encoded))
+        }
+        BodyMode::Binary => {
+            let file_path = request
+                .body
+                .binary
+                .file_path
+                .as_deref()
+                .ok_or_else(|| AppError::InvalidInput("binary body requires a file".to_string()))?;
+            let bytes = std::fs::read(file_path)?;
+            Ok(request_builder.body(bytes))
+        }
     }
 }
 
@@ -406,7 +460,6 @@ fn log_sse_debug(request_id: &str, message: &str) {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis())
             .unwrap_or_default();
-        eprintln!("[sse-debug][{timestamp_ms}][{request_id}] {message}");
     }
 }
 

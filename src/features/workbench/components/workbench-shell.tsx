@@ -102,6 +102,10 @@ export function WorkbenchShell() {
       ?? shell.savedRequests[requestId]
       ?? await readApi(requestId)
 
+    if (request.protocol === 'websocket') {
+      throw new Error('暂不支持导出 WebSocket 请求')
+    }
+
     setCopyRequestName(request.name)
     setCopyRequestSnippets(buildRequestExportSnippets({
       activeEnvironmentId: shell.activeEnvironmentId,
@@ -161,6 +165,7 @@ export function WorkbenchShell() {
           activeRequestId={shell.activeRequestId}
           activeRequestIsLoading={shell.activeRequestIsLoading}
           activeResponse={shell.activeResponse}
+          activeWebSocketSession={shell.activeWebSocketSession}
           dirtyRequestIds={shell.dirtyRequestIds}
           environmentDrafts={shell.environmentDrafts}
           environments={shell.environments}
@@ -184,6 +189,11 @@ export function WorkbenchShell() {
           onSaveEnvironment={() => { void shell.saveEnvironmentFromTab() }}
           onSaveProject={() => { void shell.handleEditProject() }}
           onSendRequest={() => { void shell.handleSendRequest() }}
+          onConnectWebSocket={() => { void shell.handleConnectWebSocket() }}
+          onDisconnectWebSocket={() => { void shell.handleDisconnectWebSocket() }}
+          onSendWebSocketMessage={() => { void shell.handleSendWebSocketMessage() }}
+          onWebSocketDraftMessageChange={shell.setWebSocketDraftMessage}
+          onWebSocketMessageFormatChange={shell.setWebSocketMessageFormat}
           onSetActiveEnvironment={(environmentId) => { void shell.handleSetActiveEnvironment(environmentId) }}
           onSelectEnvironmentForTab={shell.selectEnvironmentForTab}
           onStartCreateEnvironment={shell.startCreateEnvironmentInTab}
@@ -233,8 +243,10 @@ export function WorkbenchShell() {
         name={shell.requestNameDraft}
         open={shell.requestDialogOpen}
         parentLabel={shell.requestDialogParentLabel}
+        protocol={shell.requestProtocolDraft}
         onDescriptionChange={shell.setRequestDescriptionDraft}
         onNameChange={shell.setRequestNameDraft}
+        onProtocolChange={shell.setRequestProtocolDraft}
         onOpenChange={(open) => {
           if (!open) {
             shell.closeCreateRequestDialog()

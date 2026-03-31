@@ -12,7 +12,7 @@ export interface RequestConfig {
     mode: string
     raw: string
     json: string
-    formData: Array<{ id: string, key: string, value: string, enabled: boolean, description: string }>
+    formData: Array<{ id: string, key: string, value: string, enabled: boolean, description: string, entryType?: string, filePath?: string, fileName?: string, contentType?: string }>
     urlEncoded: Array<{ id: string, key: string, value: string, enabled: boolean, description: string }>
   }
 }

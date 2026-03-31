@@ -7,9 +7,10 @@ import type {
   RequestEditorDraft,
   ResponseState,
   SettingsPanelTab,
+  WebSocketSessionState,
   WorkbenchPanelTab,
 } from '../types'
-import type { AuthType, Environment, KeyValue, RequestScopeConfig } from '@/lib/project'
+import type { AuthType, Environment, FormDataEntry, KeyValue, RequestScopeConfig, WebSocketMessageFormat } from '@/lib/project'
 import { PointerActivationConstraints } from '@dnd-kit/dom'
 import {
   DragDropProvider,
@@ -17,6 +18,7 @@ import {
   PointerSensor,
   useDraggable,
 } from '@dnd-kit/react'
+import { open } from '@tauri-apps/plugin-dialog'
 import { BracesIcon, CompassIcon, EllipsisIcon, PlusIcon, SaveIcon, SendHorizonalIcon, XIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import * as React from 'react'
@@ -70,6 +72,7 @@ import {
   formatBytes,
   hasVisibleResponse,
   isValidRequestUrl,
+  isValidWebSocketUrl,
   normalizeRequestUrl,
   parseUrlQueryParams,
   startWindowDragging,
@@ -88,6 +91,7 @@ interface RequestPaneProps {
   activeRequestId: string | null
   activeRequestIsLoading: boolean
   activeResponse: ResponseState | null
+  activeWebSocketSession: WebSocketSessionState | null
   dirtyRequestIds: Set<string>
   environmentDrafts: Record<string, EnvironmentEditorDraft>
   environments: Environment[]
@@ -111,6 +115,11 @@ interface RequestPaneProps {
   onSaveEnvironment: () => void
   onSaveProject: () => void
   onSendRequest: () => void
+  onConnectWebSocket: () => void
+  onDisconnectWebSocket: () => void
+  onSendWebSocketMessage: () => void
+  onWebSocketDraftMessageChange: (requestId: string, value: string) => void
+  onWebSocketMessageFormatChange: (requestId: string, format: WebSocketMessageFormat) => void
   onDeleteEnvironment: (environmentId: string) => void
   onSetActiveEnvironment: (environmentId: string | null) => void
   onSelectEnvironmentForTab: (environmentId: string | null) => void
@@ -242,66 +251,129 @@ export function RequestPane(props: RequestPaneProps) {
         : props.activeTabRecord?.entityType === 'request' && props.activeDraft
           ? (
               <>
-                <RequestHeaderBar
-                  draft={props.activeDraft}
-                  hasUnsavedChanges={hasUnsavedChanges}
-                  isBusy={props.isBusy}
-                  onChangeDraft={props.onChangeDraft}
-                  onUrlChange={handleUrlChange}
-                  onSaveRequest={props.onSaveRequest}
-                  onSendRequest={props.onSendRequest}
-                />
-
-                {shouldShowResponsePane
+                {props.activeDraft.protocol === 'websocket'
                   ? (
-                      <ResizablePanelGroup
-                        id="request-pane-panels"
-                        orientation="vertical"
-                        className="min-h-0 min-w-0 flex-1 overflow-hidden"
-                        onLayoutChanged={(layout) => {
-                          const requestEditorSize = layout.requestEditorPanel
-                          if (typeof requestEditorSize === 'number') {
-                            props.onSplitRatioChange(requestEditorSize / 100)
-                          }
-                        }}
-                      >
-                        <ResizablePanel
-                          id="requestEditorPanel"
-                          className="flex min-h-0 min-w-0 flex-col overflow-hidden"
-                          defaultSize={props.splitRatio * 100}
-                          minSize={28}
+                      <>
+                        <WebSocketHeaderBar
+                          draft={props.activeDraft}
+                          hasUnsavedChanges={hasUnsavedChanges}
+                          isBusy={props.isBusy}
+                          session={props.activeWebSocketSession}
+                          onChangeDraft={props.onChangeDraft}
+                          onUrlChange={handleUrlChange}
+                          onSaveRequest={props.onSaveRequest}
+                          onConnect={props.onConnectWebSocket}
+                          onDisconnect={props.onDisconnectWebSocket}
+                        />
+                        <ResizablePanelGroup
+                          id="websocket-pane-panels"
+                          orientation="vertical"
+                          className="min-h-0 min-w-0 flex-1 overflow-hidden"
+                          onLayoutChanged={(layout) => {
+                            const requestEditorSize = layout.requestEditorPanel
+                            if (typeof requestEditorSize === 'number') {
+                              props.onSplitRatioChange(requestEditorSize / 100)
+                            }
+                          }}
                         >
-                          <RequestEditorTabs
-                            activeTab={props.activeEditorTab as EditorPanelTab}
-                            draft={props.activeDraft}
-                            onActiveTabChange={props.onActiveEditorTabChange}
-                            onChangeDraft={props.onChangeDraft}
-                            onQueryChange={handleQueryChange}
-                          />
-                        </ResizablePanel>
+                          <ResizablePanel
+                            id="requestEditorPanel"
+                            className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+                            defaultSize={props.splitRatio * 100}
+                            minSize={28}
+                          >
+                            <RequestEditorTabs
+                              activeTab={props.activeEditorTab as EditorPanelTab}
+                              draft={props.activeDraft}
+                              onActiveTabChange={props.onActiveEditorTabChange}
+                              onChangeDraft={props.onChangeDraft}
+                              onQueryChange={handleQueryChange}
+                            />
+                          </ResizablePanel>
 
-                        <ResizableHandle withHandle className="mx-3 my-0.5 bg-transparent transition hover:bg-accent/50" />
+                          <ResizableHandle withHandle className="mx-3 my-0.5 bg-transparent transition hover:bg-accent/50" />
 
-                        <ResizablePanel
-                          id="requestResponsePanel"
-                          className="flex min-h-0 min-w-0 flex-col overflow-hidden"
-                          defaultSize={(1 - props.splitRatio) * 100}
-                          minSize={22}
-                        >
-                          <ResponsePane response={props.activeResponse} />
-                        </ResizablePanel>
-                      </ResizablePanelGroup>
+                          <ResizablePanel
+                            id="requestResponsePanel"
+                            className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+                            defaultSize={(1 - props.splitRatio) * 100}
+                            minSize={22}
+                          >
+                            <WebSocketPane
+                              requestId={props.activeDraft.id}
+                              session={props.activeWebSocketSession}
+                              onDraftMessageChange={props.onWebSocketDraftMessageChange}
+                              onMessageFormatChange={props.onWebSocketMessageFormatChange}
+                              onSendMessage={props.onSendWebSocketMessage}
+                            />
+                          </ResizablePanel>
+                        </ResizablePanelGroup>
+                      </>
                     )
                   : (
-                      <div className="min-h-0 flex-1 overflow-hidden">
-                        <RequestEditorTabs
-                          activeTab={props.activeEditorTab as EditorPanelTab}
+                      <>
+                        <RequestHeaderBar
                           draft={props.activeDraft}
-                          onActiveTabChange={props.onActiveEditorTabChange}
+                          hasUnsavedChanges={hasUnsavedChanges}
+                          isBusy={props.isBusy}
                           onChangeDraft={props.onChangeDraft}
-                          onQueryChange={handleQueryChange}
+                          onUrlChange={handleUrlChange}
+                          onSaveRequest={props.onSaveRequest}
+                          onSendRequest={props.onSendRequest}
                         />
-                      </div>
+
+                        {shouldShowResponsePane
+                          ? (
+                              <ResizablePanelGroup
+                                id="request-pane-panels"
+                                orientation="vertical"
+                                className="min-h-0 min-w-0 flex-1 overflow-hidden"
+                                onLayoutChanged={(layout) => {
+                                  const requestEditorSize = layout.requestEditorPanel
+                                  if (typeof requestEditorSize === 'number') {
+                                    props.onSplitRatioChange(requestEditorSize / 100)
+                                  }
+                                }}
+                              >
+                                <ResizablePanel
+                                  id="requestEditorPanel"
+                                  className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+                                  defaultSize={props.splitRatio * 100}
+                                  minSize={28}
+                                >
+                                  <RequestEditorTabs
+                                    activeTab={props.activeEditorTab as EditorPanelTab}
+                                    draft={props.activeDraft}
+                                    onActiveTabChange={props.onActiveEditorTabChange}
+                                    onChangeDraft={props.onChangeDraft}
+                                    onQueryChange={handleQueryChange}
+                                  />
+                                </ResizablePanel>
+
+                                <ResizableHandle withHandle className="mx-3 my-0.5 bg-transparent transition hover:bg-accent/50" />
+
+                                <ResizablePanel
+                                  id="requestResponsePanel"
+                                  className="flex min-h-0 min-w-0 flex-col overflow-hidden"
+                                  defaultSize={(1 - props.splitRatio) * 100}
+                                  minSize={22}
+                                >
+                                  <ResponsePane response={props.activeResponse} />
+                                </ResizablePanel>
+                              </ResizablePanelGroup>
+                            )
+                          : (
+                              <div className="min-h-0 flex-1 overflow-hidden">
+                                <RequestEditorTabs
+                                  activeTab={props.activeEditorTab as EditorPanelTab}
+                                  draft={props.activeDraft}
+                                  onActiveTabChange={props.onActiveEditorTabChange}
+                                  onChangeDraft={props.onChangeDraft}
+                                  onQueryChange={handleQueryChange}
+                                />
+                              </div>
+                            )}
+                      </>
                     )}
               </>
             )
@@ -1255,9 +1327,72 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
   )
 }
 
+function WebSocketHeaderBar(props: {
+  draft: RequestEditorDraft
+  hasUnsavedChanges: boolean
+  isBusy: boolean
+  session: WebSocketSessionState | null
+  onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
+  onUrlChange: (url: string) => void
+  onSaveRequest: () => void
+  onConnect: () => void
+  onDisconnect: () => void
+}) {
+  const normalizedUrl = React.useMemo(() => normalizeRequestUrl(props.draft.url), [props.draft.url])
+  const hasUrl = normalizedUrl.length > 0
+  const hasUrlError = hasUrl && !isValidWebSocketUrl(normalizedUrl)
+  const statusLabel = props.session?.status ?? 'idle'
+
+  return (
+    <div className="border-b border-border/70 px-3 py-3">
+      <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+        <div className="inline-flex h-7 w-[112px] items-center justify-center rounded-md border border-border/70 bg-muted/40 text-xs font-semibold uppercase tracking-wide">
+          WS
+        </div>
+
+        <Input
+          className="h-7 min-w-[280px] flex-1 text-sm focus-visible:border-input focus-visible:ring-0"
+          aria-invalid={hasUrlError || undefined}
+          value={props.draft.url}
+          onChange={event => props.onUrlChange(event.target.value)}
+          placeholder="ws:// 或 wss:// 地址"
+        />
+
+        <Badge variant="outline" className="h-7 rounded-md px-2 text-xs capitalize">
+          {statusLabel}
+        </Badge>
+
+        {props.session?.status === 'connected'
+          ? (
+              <Button size="sm" disabled={props.isBusy} onClick={props.onDisconnect}>
+                断开
+              </Button>
+            )
+          : (
+              <Button size="sm" disabled={props.isBusy || hasUrlError} onClick={props.onConnect}>
+                连接
+              </Button>
+            )}
+        <Button size="sm" disabled={props.isBusy || !props.hasUnsavedChanges} variant="outline" onClick={props.onSaveRequest}>
+          <SaveIcon />
+          保存
+        </Button>
+      </div>
+      {hasUrlError && (
+        <p className="mt-2 text-xs text-destructive">
+          WebSocket URL 必须以 `ws://` 或 `wss://` 开头。
+        </p>
+      )}
+    </div>
+  )
+}
+
 const requestBodyModeOptions = [
   { label: 'JSON', value: 'json' },
   { label: '原始文本', value: 'raw' },
+  { label: 'form-data', value: 'form-data' },
+  { label: 'x-www-form-urlencoded', value: 'x-www-form-urlencoded' },
+  { label: '二进制文件', value: 'binary' },
   { label: '无', value: 'none' },
 ] as const
 
@@ -1330,6 +1465,16 @@ interface RequestEditorTabsProps {
 
 function RequestEditorTabs(props: RequestEditorTabsProps) {
   const bodyMode = props.draft.request.body.mode
+  const isWebSocket = props.draft.protocol === 'websocket'
+  const visibleTabs = React.useMemo(
+    () => (isWebSocket
+      ? editorTabs.filter(tab => ['query', 'headers', 'auth'].includes(tab.value))
+      : editorTabs),
+    [isWebSocket],
+  )
+  const effectiveActiveTab = visibleTabs.some(tab => tab.value === props.activeTab)
+    ? props.activeTab
+    : 'query'
   const bodyModeLabel = requestBodyModeLabelMap[bodyMode as keyof typeof requestBodyModeLabelMap] ?? bodyMode
   const environments = useWorkbenchStore(s => s.environments)
   const activeEnvironmentId = useWorkbenchStore(s => s.activeEnvironmentId)
@@ -1353,7 +1498,7 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
   const envName = activeEnv?.name ?? 'default'
 
   const handleAddKeyValueRow = React.useCallback(() => {
-    if (props.activeTab === 'query') {
+    if (effectiveActiveTab === 'query') {
       props.onChangeDraft(draft => ({
         ...draft,
         request: {
@@ -1364,7 +1509,7 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
       return
     }
 
-    if (props.activeTab === 'headers') {
+    if (effectiveActiveTab === 'headers') {
       props.onChangeDraft(draft => ({
         ...draft,
         request: {
@@ -1373,14 +1518,20 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
         },
       }))
     }
-  }, [props.activeTab, props.onChangeDraft])
+  }, [effectiveActiveTab, props.onChangeDraft])
+
+  React.useEffect(() => {
+    if (props.activeTab !== effectiveActiveTab) {
+      props.onActiveTabChange(effectiveActiveTab)
+    }
+  }, [effectiveActiveTab, props.activeTab, props.onActiveTabChange])
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden border-b border-border/70 px-3 py-3">
-      <Tabs value={props.activeTab} onValueChange={value => props.onActiveTabChange(value as EditorPanelTab)} className="h-full min-h-0">
+      <Tabs value={effectiveActiveTab} onValueChange={value => props.onActiveTabChange(value as EditorPanelTab)} className="h-full min-h-0">
         <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
           <TabsList>
-            {editorTabs.map(tab => (
+            {visibleTabs.map(tab => (
               <TabsTrigger key={tab.value} value={tab.value} className="px-1.5 py-0.5 text-[13px]">
                 {tab.label}
               </TabsTrigger>
@@ -1388,14 +1539,14 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
           </TabsList>
 
           <div className="flex shrink-0 items-center gap-2">
-            {(props.activeTab === 'query' || props.activeTab === 'headers') && (
+            {(effectiveActiveTab === 'query' || effectiveActiveTab === 'headers') && (
               <Button size="xs" variant="outline" onClick={handleAddKeyValueRow}>
                 <PlusIcon className="size-4" />
                 新增
               </Button>
             )}
 
-            {props.activeTab === 'body' && (
+            {effectiveActiveTab === 'body' && !isWebSocket && (
               <Select
                 value={bodyMode}
                 onValueChange={(value) => {
@@ -1410,12 +1561,12 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
                   }
                 }}
               >
-                <SelectTrigger size="sm" className="w-[164px]">
+                <SelectTrigger size="sm" className="w-[220px]">
                   <SelectValue>
                     {bodyModeLabel}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="min-w-[220px]">
                   {requestBodyModeOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
@@ -1425,7 +1576,7 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
               </Select>
             )}
 
-            {props.activeTab === 'auth' && (
+            {effectiveActiveTab === 'auth' && (
               <Select
                 value={getAuthModeValue(props.draft.request.auth, true)}
                 onValueChange={(value) => {
@@ -1500,17 +1651,33 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
           />
         </TabsContent>
 
-        <TabsContent value="body" className="min-h-0 overflow-auto">
-          <BodyEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
-        </TabsContent>
+        {!isWebSocket && (
+          <TabsContent value="body" className="min-h-0 overflow-auto">
+            <BodyEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
+          </TabsContent>
+        )}
 
-        <TabsContent value="preRequestScript" className="flex min-h-0 flex-1 overflow-hidden">
-          <PreRequestScriptEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
-        </TabsContent>
+        {!isWebSocket && (
+          <TabsContent value="preRequestScript" className="flex min-h-0 flex-1 overflow-hidden">
+            <PreRequestScriptEditor
+              draft={props.draft}
+              title="请求前脚本"
+              placeholder="// 请求发送前执行，可通过 fuck.config 修改请求配置，通过 fuck.env 操作环境变量"
+              onChangeDraft={props.onChangeDraft}
+            />
+          </TabsContent>
+        )}
 
-        <TabsContent value="postRequestScript" className="flex min-h-0 flex-1 overflow-hidden">
-          <PostRequestScriptEditor draft={props.draft} onChangeDraft={props.onChangeDraft} />
-        </TabsContent>
+        {!isWebSocket && (
+          <TabsContent value="postRequestScript" className="flex min-h-0 flex-1 overflow-hidden">
+            <PostRequestScriptEditor
+              draft={props.draft}
+              title="响应脚本"
+              placeholder="// 请求响应后执行，可通过 fuck.response 访问响应内容"
+              onChangeDraft={props.onChangeDraft}
+            />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )
@@ -1518,6 +1685,8 @@ function RequestEditorTabs(props: RequestEditorTabsProps) {
 
 export function PreRequestScriptEditor(props: {
   draft: RequestEditorDraft
+  placeholder?: string
+  title?: string
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
 }) {
   return (
@@ -1529,13 +1698,15 @@ export function PreRequestScriptEditor(props: {
       onChange={(value) => {
         props.onChangeDraft(draft => ({ ...draft, preRequestScript: value }))
       }}
-      placeholder="// 请求发送前执行，可通过 fuck.config 修改请求配置，通过 fuck.env 操作环境变量"
+      placeholder={props.placeholder ?? '// 请求发送前执行，可通过 fuck.config 修改请求配置，通过 fuck.env 操作环境变量'}
     />
   )
 }
 
 export function PostRequestScriptEditor(props: {
   draft: RequestEditorDraft
+  placeholder?: string
+  title?: string
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
 }) {
   return (
@@ -1547,8 +1718,108 @@ export function PostRequestScriptEditor(props: {
       onChange={(value) => {
         props.onChangeDraft(draft => ({ ...draft, postRequestScript: value }))
       }}
-      placeholder="// 请求响应后执行，可通过 fuck.response 访问响应内容"
+      placeholder={props.placeholder ?? '// 请求响应后执行，可通过 fuck.response 访问响应内容'}
     />
+  )
+}
+
+function WebSocketPane(props: {
+  requestId: string
+  session: WebSocketSessionState | null
+  onDraftMessageChange: (requestId: string, value: string) => void
+  onMessageFormatChange: (requestId: string, format: WebSocketMessageFormat) => void
+  onSendMessage: () => void
+}) {
+  const session = props.session
+  const timelineRef = React.useRef<HTMLDivElement | null>(null)
+  const getMessageLabel = (direction: WebSocketSessionState['messages'][number]['direction']) => {
+    if (direction === 'outbound') {
+      return '请求'
+    }
+    if (direction === 'inbound') {
+      return '响应'
+    }
+    if (direction === 'system') {
+      return '系统'
+    }
+    return '错误'
+  }
+
+  React.useEffect(() => {
+    const container = timelineRef.current
+    if (!container) {
+      return
+    }
+    container.scrollTop = container.scrollHeight
+  }, [session?.messages.length])
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="border-b border-border/70 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={session?.draftMessage ?? ''}
+            onChange={event => props.onDraftMessageChange(props.requestId, event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                props.onSendMessage()
+              }
+            }}
+            placeholder="输入要发送的文本或 JSON 消息，按回车发送"
+            className="h-8 min-w-[220px] flex-1"
+          />
+          <Select
+            value={session?.messageFormat ?? 'text'}
+            onValueChange={value => props.onMessageFormatChange(props.requestId, value as WebSocketMessageFormat)}
+          >
+            <SelectTrigger size="sm" className="w-[132px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="text">文本</SelectItem>
+              <SelectItem value="json">JSON</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div ref={timelineRef} className="min-h-0 flex-1 overflow-auto px-3 py-3">
+        {session && session.messages.length > 0
+          ? (
+              <div className="space-y-2">
+                {session.messages.map((message, index) => (
+                  <div
+                    key={`${message.timestamp}-${index}`}
+                    className={cn(
+                      'rounded-xl border px-3 py-2 text-sm',
+                      message.direction === 'inbound' && 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20',
+                      message.direction === 'outbound' && 'border-sky-200 bg-sky-50/50 dark:border-sky-900 dark:bg-sky-950/20',
+                      message.direction === 'system' && 'border-border/70 bg-muted/30',
+                      message.direction === 'error' && 'border-destructive/20 bg-destructive/5 text-destructive',
+                    )}
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <span>{getMessageLabel(message.direction)}</span>
+                      <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <pre className="overflow-auto whitespace-pre-wrap break-all font-mono text-xs">{message.message}</pre>
+                  </div>
+                ))}
+              </div>
+            )
+          : (
+              <div className="grid h-full place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
+                建立连接后，WebSocket 收发消息会出现在这里。
+              </div>
+            )}
+      </div>
+      {session?.error && (
+        <div className="border-t border-border/70 px-3 py-2">
+          <p className="text-xs text-destructive">{session.error}</p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -2647,6 +2918,69 @@ function BodyEditor(props: {
     }
   }, [body.json, props.onChangeDraft])
 
+  const createFormDataEntry = React.useCallback((entryType: 'text' | 'file' = 'text'): FormDataEntry => ({
+    ...createKeyValueDraft(),
+    entryType,
+    filePath: '',
+    fileName: '',
+    contentType: '',
+  }), [])
+
+  const handlePickBinaryFile = React.useCallback(async () => {
+    const selectedPath = await open({
+      multiple: false,
+      directory: false,
+      title: '选择二进制请求体文件',
+    })
+
+    if (typeof selectedPath !== 'string') {
+      return
+    }
+
+    props.onChangeDraft(draft => ({
+      ...draft,
+      request: {
+        ...draft.request,
+        body: {
+          ...draft.request.body,
+          binary: { filePath: selectedPath },
+        },
+      },
+    }))
+  }, [props.onChangeDraft])
+
+  const handlePickFormDataFile = React.useCallback(async (rowId: string) => {
+    const selectedPath = await open({
+      multiple: false,
+      directory: false,
+      title: '选择 form-data 文件',
+    })
+
+    if (typeof selectedPath !== 'string') {
+      return
+    }
+
+    const fileName = selectedPath.split(/[/\\]/).pop() ?? selectedPath
+    props.onChangeDraft(draft => ({
+      ...draft,
+      request: {
+        ...draft.request,
+        body: {
+          ...draft.request.body,
+          formData: draft.request.body.formData.map(item => item.id === rowId
+            ? {
+                ...item,
+                entryType: 'file',
+                filePath: selectedPath,
+                fileName,
+                value: fileName,
+              }
+            : item),
+        },
+      },
+    }))
+  }, [props.onChangeDraft])
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {body.mode === 'none' && (
@@ -2713,6 +3047,216 @@ function BodyEditor(props: {
               }))}
             />
           </React.Suspense>
+        </div>
+      )}
+
+      {body.mode === 'form-data' && (
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="mb-3 flex items-center justify-end">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => props.onChangeDraft(draft => ({
+                ...draft,
+                request: {
+                  ...draft.request,
+                  body: {
+                    ...draft.request.body,
+                    formData: [...draft.request.body.formData, createFormDataEntry()],
+                  },
+                },
+              }))}
+            >
+              <PlusIcon className="size-4" />
+              新增字段
+            </Button>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-auto pr-1">
+            {body.formData.length > 0
+              ? body.formData.map((row) => {
+                  const entryType = row.entryType ?? 'text'
+                  return (
+                    <div
+                      key={row.id}
+                      className="grid grid-cols-[28px_112px_minmax(0,_1fr)_minmax(0,_1fr)_32px] items-center gap-1.5 rounded-xl border border-border/70 bg-muted/30 p-1.5"
+                    >
+                      <div className="flex items-center justify-center">
+                        <Checkbox
+                          checked={row.enabled}
+                          onCheckedChange={checked => props.onChangeDraft(draft => ({
+                            ...draft,
+                            request: {
+                              ...draft.request,
+                              body: {
+                                ...draft.request.body,
+                                formData: draft.request.body.formData.map(item => item.id === row.id
+                                  ? { ...item, enabled: Boolean(checked) }
+                                  : item),
+                              },
+                            },
+                          }))}
+                        />
+                      </div>
+                      <Select
+                        value={entryType}
+                        onValueChange={value => props.onChangeDraft(draft => ({
+                          ...draft,
+                          request: {
+                            ...draft.request,
+                            body: {
+                              ...draft.request.body,
+                              formData: draft.request.body.formData.map(item => item.id === row.id
+                                ? {
+                                    ...item,
+                                    entryType: value as 'text' | 'file',
+                                    filePath: value === 'file' ? item.filePath : '',
+                                    fileName: value === 'file' ? item.fileName : '',
+                                    contentType: value === 'file' ? item.contentType : '',
+                                  }
+                                : item),
+                            },
+                          },
+                        }))}
+                      >
+                        <SelectTrigger size="sm" className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="text">文本</SelectItem>
+                          <SelectItem value="file">文件</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        value={row.key}
+                        onChange={event => props.onChangeDraft(draft => ({
+                          ...draft,
+                          request: {
+                            ...draft.request,
+                            body: {
+                              ...draft.request.body,
+                              formData: draft.request.body.formData.map(item => item.id === row.id
+                                ? { ...item, key: event.target.value }
+                                : item),
+                            },
+                          },
+                        }))}
+                        placeholder="字段名"
+                      />
+                      {entryType === 'file'
+                        ? (
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <Input
+                                value={row.filePath ?? ''}
+                                readOnly
+                                placeholder="请选择文件"
+                                className="min-w-0"
+                              />
+                              <Button size="sm" variant="outline" onClick={() => { void handlePickFormDataFile(row.id) }}>
+                                选择文件
+                              </Button>
+                            </div>
+                          )
+                        : (
+                            <EnvironmentVariableInput
+                              value={row.value}
+                              onChange={newValue => props.onChangeDraft(draft => ({
+                                ...draft,
+                                request: {
+                                  ...draft.request,
+                                  body: {
+                                    ...draft.request.body,
+                                    formData: draft.request.body.formData.map(item => item.id === row.id
+                                      ? { ...item, value: newValue }
+                                      : item),
+                                  },
+                                },
+                              }))}
+                              variables={envVariables}
+                              environmentName={activeEnv?.name ?? 'default'}
+                              placeholder="字段值"
+                            />
+                          )}
+                      <button
+                        type="button"
+                        onClick={() => props.onChangeDraft(draft => ({
+                          ...draft,
+                          request: {
+                            ...draft.request,
+                            body: {
+                              ...draft.request.body,
+                              formData: draft.request.body.formData.filter(item => item.id !== row.id),
+                            },
+                          },
+                        }))}
+                        className="rounded-md p-1.5 text-muted-foreground transition hover:bg-background hover:text-foreground"
+                      >
+                        <XIcon className="size-4" />
+                      </button>
+                    </div>
+                  )
+                })
+              : (
+                  <div className="grid min-h-[140px] place-items-center rounded-xl border border-dashed border-border/70 text-sm text-muted-foreground">
+                    暂无 form-data 字段
+                  </div>
+                )}
+          </div>
+        </div>
+      )}
+
+      {body.mode === 'x-www-form-urlencoded' && (
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="mb-3 flex items-center justify-end">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => props.onChangeDraft(draft => ({
+                ...draft,
+                request: {
+                  ...draft.request,
+                  body: {
+                    ...draft.request.body,
+                    urlEncoded: [...draft.request.body.urlEncoded, createKeyValueDraft()],
+                  },
+                },
+              }))}
+            >
+              <PlusIcon className="size-4" />
+              新增字段
+            </Button>
+          </div>
+          <KeyValueTable
+            emptyLabel="暂无 x-www-form-urlencoded 字段"
+            rows={body.urlEncoded}
+            environmentVariables={envVariables}
+            environmentName={activeEnv?.name ?? 'default'}
+            onChange={rows => props.onChangeDraft(draft => ({
+              ...draft,
+              request: {
+                ...draft.request,
+                body: { ...draft.request.body, urlEncoded: rows },
+              },
+            }))}
+          />
+        </div>
+      )}
+
+      {body.mode === 'binary' && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Input
+              value={body.binary.filePath ?? ''}
+              readOnly
+              placeholder="请选择要发送的文件"
+            />
+            <Button variant="outline" onClick={() => { void handlePickBinaryFile() }}>
+              选择文件
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            会直接以二进制方式发送所选文件内容。
+          </p>
         </div>
       )}
     </div>

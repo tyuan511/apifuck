@@ -2,6 +2,7 @@ mod app_config;
 mod error;
 mod http;
 mod storage;
+mod websocket;
 
 use std::{
     path::PathBuf,
@@ -31,6 +32,13 @@ use storage::{
     CreateProjectInput, DeleteEnvironmentInput, DeleteNodeInput, Environment, MoveNodeInput,
     ProjectSnapshot, ProjectSummary, ReorderChildrenInput, SetActiveEnvironmentInput,
     UpdateApiInput, UpdateCollectionInput, UpdateEnvironmentInput, UpdateProjectInput,
+};
+use websocket::{
+    connect_websocket as connect_websocket_runtime,
+    disconnect_websocket as disconnect_websocket_runtime,
+    send_websocket_message as send_websocket_message_runtime, ConnectWebSocketInput,
+    DisconnectWebSocketInput, SendWebSocketMessageInput, WebSocketConnectionInfo,
+    WebSocketEvent, WebSocketState,
 };
 
 #[derive(Default)]
@@ -226,6 +234,31 @@ async fn send_request(
     send_request_http(input, on_event).await
 }
 
+#[tauri::command]
+async fn connect_websocket(
+    input: ConnectWebSocketInput,
+    on_event: tauri::ipc::Channel<WebSocketEvent>,
+    state: tauri::State<'_, WebSocketState>,
+) -> AppResult<WebSocketConnectionInfo> {
+    connect_websocket_runtime(state, input, on_event).await
+}
+
+#[tauri::command]
+fn send_websocket_message(
+    input: SendWebSocketMessageInput,
+    state: tauri::State<'_, WebSocketState>,
+) -> AppResult<()> {
+    send_websocket_message_runtime(state, input)
+}
+
+#[tauri::command]
+fn disconnect_websocket(
+    input: DisconnectWebSocketInput,
+    state: tauri::State<'_, WebSocketState>,
+) -> AppResult<()> {
+    disconnect_websocket_runtime(state, input)
+}
+
 fn current_project_root(state: &tauri::State<'_, ProjectState>) -> AppResult<PathBuf> {
     let guard = lock_project_state(state)?;
     guard.clone().ok_or(AppError::ProjectNotOpen)
@@ -256,6 +289,7 @@ fn sync_last_opened_project_path(state: &tauri::State<'_, ProjectState>) -> AppR
 pub fn run() {
     tauri::Builder::default()
         .manage(ProjectState::default())
+        .manage(WebSocketState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -284,7 +318,10 @@ pub fn run() {
             delete_environment,
             list_environments,
             set_active_environment,
-            send_request
+            send_request,
+            connect_websocket,
+            send_websocket_message,
+            disconnect_websocket
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

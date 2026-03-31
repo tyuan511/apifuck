@@ -1,6 +1,6 @@
 import type { RequestExportLanguage, RequestExportSnippet } from '../request-export'
 import type { PendingCollectionDeletion, PendingEnvironmentDeletion, PendingRecentProjectRemoval, PendingRequestDeletion } from '../types'
-import type { RequestScopeConfig } from '@/lib/project'
+import type { RequestProtocol, RequestScopeConfig } from '@/lib/project'
 import { CopyIcon } from 'lucide-react'
 import * as React from 'react'
 import { toast } from 'sonner'
@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { RequestScopeConfigEditor } from './request-pane'
@@ -170,11 +171,15 @@ export function CreateRequestDialog(props: {
   name: string
   open: boolean
   parentLabel: string
+  protocol: RequestProtocol
   onDescriptionChange: (value: string) => void
   onNameChange: (value: string) => void
+  onProtocolChange: (value: RequestProtocol) => void
   onOpenChange: (open: boolean) => void
   onSubmit: () => void
 }) {
+  const nameInputRef = React.useRef<HTMLInputElement | null>(null)
+
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent>
@@ -188,8 +193,31 @@ export function CreateRequestDialog(props: {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          <LabelBlock label="请求类型">
+            <Select value={props.protocol} onValueChange={value => props.onProtocolChange(value as RequestProtocol)}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="请选择请求类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="http">HTTP</SelectItem>
+                <SelectItem value="websocket">WebSocket</SelectItem>
+              </SelectContent>
+            </Select>
+          </LabelBlock>
           <LabelBlock label="请求名称">
-            <Input value={props.name} onChange={event => props.onNameChange(event.target.value)} placeholder="请求名称" />
+            <Input
+              autoFocus
+              ref={nameInputRef}
+              value={props.name}
+              onChange={event => props.onNameChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault()
+                  props.onSubmit()
+                }
+              }}
+              placeholder="请求名称"
+            />
           </LabelBlock>
           <LabelBlock label="描述（可选）">
             <Textarea
