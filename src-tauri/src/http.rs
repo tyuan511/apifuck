@@ -1,7 +1,7 @@
 use std::{path::Path, time::{Instant, SystemTime, UNIX_EPOCH}};
 
 use reqwest::{
-    header::{HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_TYPE},
+    header::{HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_TYPE, COOKIE},
     multipart::{Form, Part},
     Method, Url, Version,
 };
@@ -98,7 +98,8 @@ pub async fn send_request(
         .map(|header| is_event_stream_content_type(&header.value))
         .unwrap_or(false);
 
-    let (headers, has_content_type) = build_headers(&input.request.headers)?;
+    let (mut headers, has_content_type) = build_headers(&input.request.headers)?;
+    append_cookie_header(&mut headers, &input.request.cookies)?;
     let client = build_http_client(expects_event_stream)?;
     let mut request_builder = client.request(method, url).headers(headers);
     request_builder = apply_auth(request_builder, &input.request);
@@ -240,6 +241,27 @@ fn build_headers(entries: &[KeyValue]) -> AppResult<(HeaderMap, bool)> {
     }
 
     Ok((headers, has_content_type))
+}
+
+fn append_cookie_header(headers: &mut HeaderMap, entries: &[KeyValue]) -> AppResult<()> {
+    if headers.contains_key(COOKIE) {
+        return Ok(());
+    }
+
+    let cookies = entries
+        .iter()
+        .filter(|entry| entry.enabled && !entry.key.trim().is_empty())
+        .map(|entry| format!("{}={}", entry.key.trim(), entry.value))
+        .collect::<Vec<_>>();
+
+    if cookies.is_empty() {
+        return Ok(());
+    }
+
+    let cookie_value = HeaderValue::from_str(&cookies.join("; "))
+        .map_err(|error| AppError::InvalidInput(format!("invalid cookie header value: {error}")))?;
+    headers.insert(COOKIE, cookie_value);
+    Ok(())
 }
 
 fn append_enabled_query_pairs(url: &mut Url, entries: &[KeyValue]) {
@@ -477,7 +499,9 @@ fn looks_like_json(content_type: &str, text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_response_body, ResponseType};
+    use super::{append_cookie_header, classify_response_body, ResponseType};
+    use crate::storage::KeyValue;
+    use reqwest::header::{HeaderMap, COOKIE};
 
     #[test]
     fn classifies_json_response_body() {
@@ -501,5 +525,30 @@ mod tests {
 
         assert_eq!(response_type, ResponseType::EventStream);
         assert_eq!(body, "data: hello\n\n");
+    }
+
+    #[test]
+    fn appends_cookie_header_from_cookie_entries() {
+        let mut headers = HeaderMap::new();
+        let cookies = vec![
+            KeyValue {
+                id: "cookie-1".to_string(),
+                key: "token".to_string(),
+                value: "abc".to_string(),
+                enabled: true,
+                description: String::new(),
+            },
+            KeyValue {
+                id: "cookie-2".to_string(),
+                key: "user".to_string(),
+                value: "42".to_string(),
+                enabled: true,
+                description: String::new(),
+            },
+        ];
+
+        append_cookie_header(&mut headers, &cookies).unwrap();
+
+        assert_eq!(headers.get(COOKIE).unwrap(), "token=abc; user=42");
     }
 }

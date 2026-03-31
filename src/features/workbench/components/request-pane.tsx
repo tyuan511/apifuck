@@ -59,6 +59,7 @@ import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { looksLikeCurlCommand, parseCurlCommand } from '../curl-parser'
 import { useWorkbenchStore } from '../store/workbench-store'
 import {
   editorTabs,
@@ -209,6 +210,30 @@ export function RequestPane(props: RequestPaneProps) {
     }
   }, [props.onChangeDraft])
 
+  const handleApplyCurlCommand = React.useCallback((command: string) => {
+    const parsed = parseCurlCommand(command)
+    if (!parsed) {
+      toast.error('这段 curl 命令暂时无法解析')
+      return
+    }
+
+    props.onChangeDraft(draft => ({
+      ...draft,
+      method: parsed.method,
+      url: parsed.url,
+      request: {
+        ...draft.request,
+        query: parsed.request.query,
+        headers: parsed.request.headers,
+        cookies: [],
+        auth: parsed.request.auth,
+        body: parsed.request.body,
+      },
+    }))
+
+    toast.success('已从 curl 命令解析请求')
+  }, [props.onChangeDraft])
+
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || event.altKey || event.shiftKey) {
@@ -316,6 +341,7 @@ export function RequestPane(props: RequestPaneProps) {
                           draft={props.activeDraft}
                           hasUnsavedChanges={hasUnsavedChanges}
                           isBusy={props.isBusy}
+                          onApplyCurlCommand={handleApplyCurlCommand}
                           onChangeDraft={props.onChangeDraft}
                           onUrlChange={handleUrlChange}
                           onSaveRequest={props.onSaveRequest}
@@ -1261,6 +1287,7 @@ interface RequestHeaderBarProps {
   draft: RequestEditorDraft
   hasUnsavedChanges: boolean
   isBusy: boolean
+  onApplyCurlCommand: (command: string) => void
   onChangeDraft: (updater: (draft: RequestEditorDraft) => RequestEditorDraft) => void
   onUrlChange: (url: string) => void
   onSaveRequest: () => void
@@ -1271,6 +1298,15 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
   const normalizedUrl = React.useMemo(() => normalizeRequestUrl(props.draft.url), [props.draft.url])
   const hasUrl = normalizedUrl.length > 0
   const hasUrlError = hasUrl && !isValidRequestUrl(normalizedUrl)
+  const handlePaste = React.useCallback((event: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = event.clipboardData.getData('text')
+    if (!looksLikeCurlCommand(pastedText)) {
+      return
+    }
+
+    event.preventDefault()
+    props.onApplyCurlCommand(pastedText)
+  }, [props])
 
   return (
     <div className="border-b border-border/70 px-3 py-3">
@@ -1300,13 +1336,14 @@ function RequestHeaderBar(props: RequestHeaderBarProps) {
           aria-invalid={hasUrlError || undefined}
           value={props.draft.url}
           onChange={event => props.onUrlChange(event.target.value)}
+          onPaste={handlePaste}
           onBlur={(event) => {
             const nextUrl = normalizeRequestUrl(event.target.value)
             if (nextUrl !== props.draft.url) {
               props.onUrlChange(nextUrl)
             }
           }}
-          placeholder="请输入请求地址"
+          placeholder="请输入请求地址，或直接粘贴 curl 命令"
         />
 
         <Button size="sm" disabled={props.isBusy} onClick={props.onSendRequest}>
@@ -1933,11 +1970,11 @@ function ResponseHeadersView(props: { response: ResponseState }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border/70 bg-background">
-      <Table>
+      <Table className="table-fixed">
         <TableBody>
           {props.response.headers.map(header => (
             <TableRow key={`${header.name}:${header.value}`}>
-              <TableCell className="px-3 py-2.5 align-top text-muted-foreground break-all whitespace-normal">
+              <TableCell className="w-56 min-w-56 px-3 py-2.5 align-top text-muted-foreground break-all whitespace-normal">
                 {header.name}
               </TableCell>
               <TableCell className="px-3 py-2.5 font-medium text-foreground break-all whitespace-normal">
