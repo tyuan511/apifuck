@@ -197,6 +197,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
       - name: Publish GitHub release
         shell: bash
         env:
