@@ -52,6 +52,10 @@ async function fetchRelease(repo, tagName) {
     headers: buildHeaders(),
   })
 
+  if (response.status === 404) {
+    return null
+  }
+
   if (!response.ok) {
     const body = await response.text()
     throw new Error(`Failed to fetch release ${tagName}: ${response.status} ${response.statusText}\n${body}`)
@@ -60,8 +64,40 @@ async function fetchRelease(repo, tagName) {
   return response.json()
 }
 
+async function listReleases(repo) {
+  const response = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`, {
+    headers: buildHeaders(),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    throw new Error(`Failed to list releases for ${repo}: ${response.status} ${response.statusText}\n${body}`)
+  }
+
+  return response.json()
+}
+
+async function resolveRelease(repo, tagName) {
+  const release = await fetchRelease(repo, tagName)
+
+  if (release) {
+    return release
+  }
+
+  const releases = await listReleases(repo)
+  return releases.find(item => item.tag_name === tagName) ?? null
+}
+
 function findAsset(assets, matcher) {
   return assets.find(asset => matcher.test(asset.name))
+}
+
+function buildReleaseDownloadUrl(repo, tagName, assetName) {
+  return `https://github.com/${repo}/releases/download/${tagName}/${encodeURIComponent(assetName)}`
+}
+
+function buildReleasePageUrl(repo, tagName) {
+  return `https://github.com/${repo}/releases/tag/${tagName}`
 }
 
 async function resolveAssets(repo, tagName) {
@@ -72,7 +108,18 @@ async function resolveAssets(repo, tagName) {
   }
 
   for (let attempt = 1; attempt <= 12; attempt += 1) {
-    const release = await fetchRelease(repo, tagName)
+    const release = await resolveRelease(repo, tagName)
+
+    if (!release) {
+      if (attempt < 12) {
+        console.log(`Release ${tagName} is not ready yet (attempt ${attempt}/12), retrying in 5 seconds...`)
+        await sleep(5000)
+        continue
+      }
+
+      fail(`Release ${tagName} was not found.`)
+    }
+
     const assets = release.assets ?? []
     const selectedAssets = {
       macos: findAsset(assets, requiredMatchers.macos),
@@ -124,18 +171,18 @@ function buildChineseTable(selectedAssets) {
   return [
     '| 平台 | 下载地址 |',
     '|------|---------|',
-    `| macOS | [${selectedAssets.macos.name}](${selectedAssets.macos.browser_download_url}) |`,
-    `| Windows | [${selectedAssets.windows.name}](${selectedAssets.windows.browser_download_url}) |`,
-    `| Linux | [${selectedAssets.linux.name}](${selectedAssets.linux.browser_download_url}) |`,
+    `| macOS | [${selectedAssets.macos.name}](${selectedAssets.macos.downloadUrl}) |`,
+    `| Windows | [${selectedAssets.windows.name}](${selectedAssets.windows.downloadUrl}) |`,
+    `| Linux | [${selectedAssets.linux.name}](${selectedAssets.linux.downloadUrl}) |`,
   ].join('\n')
 }
 
 function buildEnglishDownloadBlock(tagName, selectedAssets, releaseHtmlUrl) {
   return [
     `- Latest release: [${tagName}](${releaseHtmlUrl})`,
-    `- macOS: [${selectedAssets.macos.name}](${selectedAssets.macos.browser_download_url})`,
-    `- Windows: [${selectedAssets.windows.name}](${selectedAssets.windows.browser_download_url})`,
-    `- Linux: [${selectedAssets.linux.name}](${selectedAssets.linux.browser_download_url})`,
+    `- macOS: [${selectedAssets.macos.name}](${selectedAssets.macos.downloadUrl})`,
+    `- Windows: [${selectedAssets.windows.name}](${selectedAssets.windows.downloadUrl})`,
+    `- Linux: [${selectedAssets.linux.name}](${selectedAssets.linux.downloadUrl})`,
   ].join('\n')
 }
 
@@ -145,22 +192,29 @@ async function main() {
   const rootDir = process.cwd()
   const readmePath = path.join(rootDir, 'README.md')
   const readmeEnPath = path.join(rootDir, 'README_en.md')
-  const { release, selectedAssets } = await resolveAssets(repo, tagName)
+  const { selectedAssets } = await resolveAssets(repo, tagName)
+  const normalizedAssets = {
+    macos: {
+      ...selectedAssets.macos,
+      downloadUrl: buildReleaseDownloadUrl(repo, tagName, selectedAssets.macos.name),
+    },
+    windows: {
+      ...selectedAssets.windows,
+      downloadUrl: buildReleaseDownloadUrl(repo, tagName, selectedAssets.windows.name),
+    },
+    linux: {
+      ...selectedAssets.linux,
+      downloadUrl: buildReleaseDownloadUrl(repo, tagName, selectedAssets.linux.name),
+    },
+  }
+  const releasePageUrl = buildReleasePageUrl(repo, tagName)
 
   const readmeContent = fs.readFileSync(readmePath, 'utf8')
   const nextReadmeContent = replaceBetweenMarkers(
     readmeContent,
     '<!-- release-downloads:start -->',
     '<!-- release-downloads:end -->',
-    buildChineseTable(selectedAssets),
-  )
-
-  const readmeEnContent = fs.readFileSync(readmeEnPath, 'utf8')
-  const nextReadmeEnContent = replaceBetweenMarkers(
-    readmeEnContent,
-    '<!-- release-downloads-en:start -->',
-    '<!-- release-downloads-en:end -->',
-    buildEnglishDownloadBlock(tagName, selectedAssets, release.html_url),
+    buildChineseTable(normalizedAssets),
   )
 
   const changedFiles = []
@@ -169,8 +223,18 @@ async function main() {
     changedFiles.push('README.md')
   }
 
-  if (writeIfChanged(readmeEnPath, nextReadmeEnContent)) {
-    changedFiles.push('README_en.md')
+  if (fs.existsSync(readmeEnPath)) {
+    const readmeEnContent = fs.readFileSync(readmeEnPath, 'utf8')
+    const nextReadmeEnContent = replaceBetweenMarkers(
+      readmeEnContent,
+      '<!-- release-downloads-en:start -->',
+      '<!-- release-downloads-en:end -->',
+      buildEnglishDownloadBlock(tagName, normalizedAssets, releasePageUrl),
+    )
+
+    if (writeIfChanged(readmeEnPath, nextReadmeEnContent)) {
+      changedFiles.push('README_en.md')
+    }
   }
 
   if (changedFiles.length === 0) {
