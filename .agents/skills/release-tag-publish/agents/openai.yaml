@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Tag Publish"
+  short_description: "Safely prepare notes and push release tags"
+  default_prompt: "Use $release-tag-publish to fetch remote tags, prepare release notes, commit release changes to main, and publish a requested version."
