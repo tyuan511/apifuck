@@ -1,7 +1,7 @@
 use std::{path::Path, time::{Instant, SystemTime, UNIX_EPOCH}};
 
 use reqwest::{
-    header::{HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_TYPE, COOKIE},
+    header::{HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_TYPE, COOKIE, EXPIRES, PRAGMA},
     multipart::{Form, Part},
     Method, Url, Version,
 };
@@ -100,6 +100,7 @@ pub async fn send_request(
 
     let (mut headers, has_content_type) = build_headers(&input.request.headers)?;
     append_cookie_header(&mut headers, &input.request.cookies)?;
+    apply_no_cache_headers(&mut headers);
     let client = build_http_client(expects_event_stream)?;
     let mut request_builder = client.request(method, url).headers(headers);
     request_builder = apply_auth(request_builder, &input.request);
@@ -403,8 +404,24 @@ fn apply_event_stream_headers(
 ) -> reqwest::RequestBuilder {
     request_builder
         .header(ACCEPT_ENCODING, HeaderValue::from_static("identity"))
-        .header(CACHE_CONTROL, HeaderValue::from_static("no-cache"))
         .header("connection", HeaderValue::from_static("keep-alive"))
+}
+
+fn apply_no_cache_headers(headers: &mut HeaderMap) {
+    headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("no-store, no-cache, max-age=0, must-revalidate"),
+    );
+    headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
+    headers.insert(EXPIRES, HeaderValue::from_static("0"));
+    headers.insert(
+        HeaderName::from_static("if-modified-since"),
+        HeaderValue::from_static("0"),
+    );
+    headers.insert(
+        HeaderName::from_static("if-none-match"),
+        HeaderValue::from_static(""),
+    );
 }
 
 fn build_http_client(expects_event_stream: bool) -> AppResult<reqwest::Client> {
@@ -499,9 +516,9 @@ fn looks_like_json(content_type: &str, text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_cookie_header, classify_response_body, ResponseType};
+    use super::{append_cookie_header, apply_no_cache_headers, classify_response_body, ResponseType};
     use crate::storage::KeyValue;
-    use reqwest::header::{HeaderMap, COOKIE};
+    use reqwest::header::{HeaderMap, CACHE_CONTROL, COOKIE, EXPIRES, PRAGMA};
 
     #[test]
     fn classifies_json_response_body() {
@@ -550,5 +567,21 @@ mod tests {
         append_cookie_header(&mut headers, &cookies).unwrap();
 
         assert_eq!(headers.get(COOKIE).unwrap(), "token=abc; user=42");
+    }
+
+    #[test]
+    fn applies_no_cache_headers_to_outgoing_requests() {
+        let mut headers = HeaderMap::new();
+
+        apply_no_cache_headers(&mut headers);
+
+        assert_eq!(
+            headers.get(CACHE_CONTROL).unwrap(),
+            "no-store, no-cache, max-age=0, must-revalidate",
+        );
+        assert_eq!(headers.get(PRAGMA).unwrap(), "no-cache");
+        assert_eq!(headers.get(EXPIRES).unwrap(), "0");
+        assert_eq!(headers.get("if-modified-since").unwrap(), "0");
+        assert_eq!(headers.get("if-none-match").unwrap(), "");
     }
 }
