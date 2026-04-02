@@ -326,10 +326,8 @@ export function buildUrlWithQuery(url: string, params: KeyValue[]): string {
     }
 
     const urlObj = new URL(normalizedUrl)
+    urlObj.search = ''
     const searchParams = urlObj.searchParams
-
-    // Clear existing query params
-    searchParams.delete('dummy') // Workaround to clear all params
 
     // Append enabled params
     for (const param of params) {

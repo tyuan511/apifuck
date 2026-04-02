@@ -384,7 +384,11 @@ export function RequestPane(props: RequestPaneProps) {
                                   defaultSize={(1 - props.splitRatio) * 100}
                                   minSize={22}
                                 >
-                                  <ResponsePane response={props.activeResponse} />
+                                  <ResponsePane
+                                    key={props.activeRequestId ?? 'response-pane'}
+                                    response={props.activeResponse}
+                                    responseKey={props.activeRequestId ?? 'response-pane'}
+                                  />
                                 </ResizablePanel>
                               </ResizablePanelGroup>
                             )
@@ -1860,7 +1864,7 @@ function WebSocketPane(props: {
   )
 }
 
-function ResponsePane(props: { response: ResponseState | null }) {
+function ResponsePane(props: { response: ResponseState | null, responseKey: string }) {
   if (!props.response) {
     return (
       <div className="grid h-full min-h-0 place-items-center px-3 py-5">
@@ -1911,7 +1915,7 @@ function ResponsePane(props: { response: ResponseState | null }) {
         </div>
 
         <TabsContent value="body" className="min-h-0 flex-1 overflow-hidden px-3 py-3">
-          <ResponseBodyView response={props.response} />
+          <ResponseBodyView response={props.response} responseKey={props.responseKey} />
         </TabsContent>
 
         <TabsContent value="headers" className="min-h-0 flex-1 overflow-auto px-3 py-3">
@@ -1922,7 +1926,7 @@ function ResponsePane(props: { response: ResponseState | null }) {
   )
 }
 
-function ResponseBodyView(props: { response: ResponseState }) {
+function ResponseBodyView(props: { response: ResponseState, responseKey: string }) {
   if (props.response.responseType === 'eventstream') {
     return <EventStreamResponseView body={props.response.body} isLoading={props.response.isLoading} />
   }
@@ -1947,8 +1951,8 @@ function ResponseBodyView(props: { response: ResponseState }) {
   }
 
   return props.response.responseType === 'json'
-    ? <JsonResponseView body={props.response.body} />
-    : <TextResponseView body={props.response.body} contentType={props.response.contentType} />
+    ? <JsonResponseView body={props.response.body} responseKey={props.response.requestId ?? props.responseKey} />
+    : <TextResponseView body={props.response.body} contentType={props.response.contentType} responseKey={props.response.requestId ?? props.responseKey} />
 }
 
 function ResponseHeadersView(props: { response: ResponseState }) {
@@ -1988,13 +1992,13 @@ function ResponseHeadersView(props: { response: ResponseState }) {
   )
 }
 
-function JsonResponseView(props: { body: string }) {
+function JsonResponseView(props: { body: string, responseKey: string }) {
   return (
     <MonacoCodeEditor
       className="h-full"
       language="json"
       lineNumbers="on"
-      modelUri="file:///response-body.json"
+      modelUri={`file:///response/${encodeURIComponent(props.responseKey)}.json`}
       readOnly
       value={props.body || '没有响应体'}
       wordWrap="on"
@@ -2002,7 +2006,7 @@ function JsonResponseView(props: { body: string }) {
   )
 }
 
-function TextResponseView(props: { body: string, contentType: string }) {
+function TextResponseView(props: { body: string, contentType: string, responseKey: string }) {
   const isHtml = props.contentType.toLowerCase().includes('html')
 
   if (isHtml) {
@@ -2011,7 +2015,7 @@ function TextResponseView(props: { body: string, contentType: string }) {
         className="h-full"
         language="html"
         lineNumbers="on"
-        modelUri="file:///response-body.html"
+        modelUri={`file:///response/${encodeURIComponent(props.responseKey)}.html`}
         readOnly
         value={props.body || '没有响应体'}
         wordWrap="on"
@@ -2024,7 +2028,7 @@ function TextResponseView(props: { body: string, contentType: string }) {
       className="h-full"
       language="plaintext"
       lineNumbers="on"
-      modelUri="file:///response-body.txt"
+      modelUri={`file:///response/${encodeURIComponent(props.responseKey)}.txt`}
       readOnly
       value={props.body || '没有响应体'}
       wordWrap="on"
