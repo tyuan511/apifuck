@@ -71,12 +71,6 @@ export function createDmg({ app, destination, directory, run = runTool }) {
   }
 }
 
-export function createBundleArchive({ app, destination, run = runTool }) {
-  // Rust tar readers do not interpret Apple's ._ sidecars. Those extra files break
-  // the sealed resource list after extraction; archive the signed tree itself.
-  run('env', ['COPYFILE_DISABLE=1', 'tar', '--no-xattrs', '-czf', destination, '-C', path.dirname(app), path.basename(app)])
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if (process.platform !== 'darwin') throw new Error('macOS packaging requires macOS')

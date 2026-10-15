@@ -62,7 +62,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang libasound2-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libssl-dev pkg-config libfontconfig1-dev libudev-dev
+          sudo apt-get install -y clang libasound2-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libssl-dev pkg-config libfontconfig1-dev libudev-dev patchelf desktop-file-utils
       - name: Require Apple signing and notarization credentials
         if: runner.os == 'macOS'
         env:
@@ -87,6 +87,9 @@ jobs:
       - run: cargo build --release --locked -p apifuck-desktop --target "${{ matrix.target }}"
       - name: Stage binary and checksum
         run: node scripts/release/artifacts.mjs stage "${{ matrix.target }}"
+      - name: Package and verify Linux AppImage without launching the app
+        if: runner.os == 'Linux'
+        run: node scripts/release/linux-package.mjs
       - name: Package, sign and notarize macOS app and DMG
         if: runner.os == 'macOS'
         timeout-minutes: 75

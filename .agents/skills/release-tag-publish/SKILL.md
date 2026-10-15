@@ -54,7 +54,7 @@ When publication was requested:
    git push origin v<version>
    ```
 4. Find the `Release` workflow for this exact tag and commit, and follow it using `gh run list` / `gh run view`. Report progress without a long blocking wait. The workflow validates notes/version, checks and builds all three platforms, stages artifacts, verifies local and uploaded checksums, and publishes only after every platform succeeds. Prereleases never become `latest`; already public releases are never overwritten.
-5. On success, verify `gh release view <tag> --json url,isDraft,isPrerelease,assets` contains all desktop assets, the signed/notarized macOS DMG, whole-app `.app.tar.gz`, legacy standalone ZIP and `SHA256SUMS`, and `isDraft` is false. A pushed tag or a created draft is not a completed release.
+5. On success, verify `gh release view <tag> --json url,isDraft,isPrerelease,assets` contains all desktop assets, exactly the signed/notarized macOS DMG, Windows EXE, Linux AppImage and `SHA256SUMS`, and `isDraft` is false. A pushed tag or a created draft is not a completed release.
 6. On failure, report the failed job and cause. Do not recreate the tag or loop over retries. After a concrete fix, use a new version for source changes; for a transient failure, resume the existing workflow/draft only when authorized. An infrastructure setup request must not dispatch this publishing workflow as a test.
 
 Report version, comparison baseline, checks, release commit/tag, CI status and the Release link. Clearly distinguish prepared, pushed, building and published states.

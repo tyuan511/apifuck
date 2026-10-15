@@ -3,8 +3,8 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { assetName, digest, macosArchive, macosBundleArchive, macosDmg } from './artifacts.mjs'
-import { createApp, createDmg, createBundleArchive, bundleIdentifier } from './macos-package.mjs'
+import { assetName, digest, macosDmg } from './artifacts.mjs'
+import { createApp, createDmg, bundleIdentifier } from './macos-package.mjs'
 
 const requiredSecrets = ['APPLE_CERT_P12', 'APPLE_CERT_PASSWORD', 'APPLE_API_KEY_P8', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
 
@@ -65,14 +65,13 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
   validateCredentials(env)
   if (platform !== 'darwin') throw new Error('Signing and notarization require a macOS runner')
   const { directory, keychain, savedList } = locations(env)
-  const file = path.join(root, 'release-assets', assetName('aarch64-apple-darwin'))
+  const file = path.join(root, 'target/release-staging', assetName('aarch64-apple-darwin'))
   if (!fs.statSync(file).isFile()) throw new Error('The staged macOS binary is missing')
   // Refuse to reuse another invocation's keychain, including on self-hosted runners.
   fs.mkdirSync(directory, { mode: 0o700 })
-  const archive = path.join(root, 'release-assets', macosArchive)
-  const bundleArchive = path.join(root, 'release-assets', macosBundleArchive)
+  fs.mkdirSync(path.join(root, 'release-assets'), { recursive: true })
   const dmg = path.join(root, 'release-assets', macosDmg)
-  const assets = [file, archive, bundleArchive, dmg]
+  const assets = [dmg]
   const diagnostics = path.join(env.RUNNER_TEMP, 'apifuck-notarization')
   fs.mkdirSync(diagnostics, { recursive: true })
   const password = randomBytes(32).toString('hex')
@@ -81,7 +80,7 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
   const credentials = ['--key', apiKey, '--key-id', env.APPLE_API_KEY_ID, '--issuer', env.APPLE_API_ISSUER]
   // Hashes must be regenerated after signing changes the binary's bytes.
   for (const asset of assets) fs.rmSync(`${asset}.sha256`, { force: true })
-  for (const asset of assets.slice(1)) fs.rmSync(asset, { force: true })
+  for (const asset of assets) fs.rmSync(asset, { force: true })
   try {
     fs.writeFileSync(certificate, Buffer.from(env.APPLE_CERT_P12, 'base64'), { mode: 0o600 })
     fs.writeFileSync(apiKey, env.APPLE_API_KEY_P8, { mode: 0o600 })
@@ -113,13 +112,9 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
       run('xcrun', ['stapler', 'staple', target])
       run('xcrun', ['stapler', 'validate', target])
     }
-    fs.chmodSync(file, 0o755)
-    sign(file)
-    verify(file)
-    // One submission covers both the legacy standalone executable and the new app.
+    // Only the app and DMG are distributed. The raw executable stays in build staging.
     const submission = path.join(directory, 'submission')
     fs.mkdirSync(submission)
-    fs.copyFileSync(file, path.join(submission, path.basename(file)))
     const app = createApp({ root, binary: file, directory: submission, run })
     sign(app)
     verify(app)
@@ -128,9 +123,6 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
     notarize(submissionArchive, 'app')
     staple(app)
     verify(app)
-    run('ditto', ['-c', '-k', '--keepParent', file, archive])
-    // Match the whole-app archive used by Rust bundle updaters, including Tauri.
-    createBundleArchive({ app, destination: bundleArchive, run })
     createDmg({ app, destination: dmg, directory, run })
     sign(dmg)
     verify(dmg)

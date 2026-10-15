@@ -1,59 +1,11 @@
 //! Adapt our verified, user-approved download to self_update's whole-bundle installer.
 use super::DownloadedUpdate;
 use anyhow::{Context, Result, ensure};
-use self_update::{
-    backends::custom::Update,
-    http_client::{HeaderMap, HttpClient, HttpResponse},
-    update::{Release, ReleaseAsset, ReleaseSource},
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
 };
-use std::{fs, io::Read, path::Path, process::Command, sync::Arc, time::Duration};
-
-struct ApprovedRelease(Release);
-impl ReleaseSource for ApprovedRelease {
-    fn get_releases(&self) -> self_update::Result<Vec<Release>> {
-        Ok(vec![self.0.clone()])
-    }
-}
-
-// The UI already downloaded this exact release. An injected transport lets the library
-// own verification, extraction, replacement and rollback without a second network fetch
-// or silently switching to a different release after the user approved installation.
-struct CachedDownload {
-    url: String,
-    file: fs::File,
-}
-struct CachedResponse {
-    headers: HeaderMap,
-    file: fs::File,
-}
-impl HttpClient for CachedDownload {
-    fn get(
-        &self,
-        url: &str,
-        _: &HeaderMap,
-        _: Option<Duration>,
-    ) -> self_update::Result<Box<dyn HttpResponse>> {
-        if url != self.url {
-            return Err(self_update::Error::verification_rejected(
-                "Unapproved update URL",
-            ));
-        }
-        let mut file = self.file.try_clone()?;
-        std::io::Seek::rewind(&mut file)?;
-        Ok(Box::new(CachedResponse {
-            headers: HeaderMap::new(),
-            file,
-        }))
-    }
-}
-impl HttpResponse for CachedResponse {
-    fn headers(&self) -> &HeaderMap {
-        &self.headers
-    }
-    fn body(self: Box<Self>) -> Box<dyn Read> {
-        Box::new(self.file)
-    }
-}
 
 fn command_output(command: &str, args: &[&std::ffi::OsStr]) -> Result<std::process::Output> {
     let output = Command::new(command).args(args).output()?;
@@ -153,9 +105,103 @@ fn verify_bundle(bundle: &Path, requirement: &str, version: &str) -> Result<()> 
 pub(super) fn install(download: &DownloadedUpdate, bundle: &Path) -> Result<()> {
     let requirement = signing_requirement(bundle)?;
     let version = download.release.version.clone();
-    install_with_verifier(download, bundle, env!("CARGO_PKG_VERSION"), move |staged| {
-        verify_bundle(staged, &requirement, &version)
-            .map_err(|error| self_update::Error::verification_rejected(error.to_string()))
+    let prepared = prepare_dmg(download, &requirement)?;
+    install_with_verifier(
+        &prepared,
+        bundle,
+        env!("CARGO_PKG_VERSION"),
+        move |staged| {
+            verify_bundle(staged, &requirement, &version)
+                .map_err(|error| self_update::Error::verification_rejected(error.to_string()))
+        },
+    )
+}
+
+struct MountedDmg {
+    _directory: tempfile::TempDir,
+    mount: PathBuf,
+    attached: bool,
+}
+impl MountedDmg {
+    fn open(image: &Path) -> Result<Self> {
+        let directory = tempfile::tempdir()?;
+        let mount = directory.path().join("volume");
+        fs::create_dir(&mount)?;
+        let mut mounted = Self {
+            _directory: directory,
+            mount,
+            attached: true,
+        };
+        let result = command_output(
+            "/usr/bin/hdiutil",
+            &[
+                "attach".as_ref(),
+                "-readonly".as_ref(),
+                "-nobrowse".as_ref(),
+                "-noautoopen".as_ref(),
+                "-mountpoint".as_ref(),
+                mounted.mount.as_os_str(),
+                image.as_os_str(),
+            ],
+        );
+        if result.is_err() {
+            let _ = mounted.detach();
+        }
+        result?;
+        Ok(mounted)
+    }
+    fn detach(&mut self) -> Result<()> {
+        command_output(
+            "/usr/bin/hdiutil",
+            &["detach".as_ref(), self.mount.as_os_str()],
+        )?;
+        self.attached = false;
+        Ok(())
+    }
+}
+impl Drop for MountedDmg {
+    fn drop(&mut self) {
+        if self.attached {
+            let _ = Command::new("/usr/bin/hdiutil")
+                .arg("detach")
+                .arg("-force")
+                .arg(&self.mount)
+                .output();
+        }
+    }
+}
+
+fn prepare_dmg(download: &DownloadedUpdate, requirement: &str) -> Result<DownloadedUpdate> {
+    use sha2::{Digest, Sha256};
+    download.verify()?;
+    let mut mounted = MountedDmg::open(&download.path)?;
+    let app = mounted.mount.join("ApiFuck.app");
+    verify_bundle(&app, requirement, &download.release.version)?;
+    // self_update installs bundle archives. Convert only the verified app from the
+    // read-only DMG into a private local archive; no extra release asset or download.
+    let archive = tempfile::NamedTempFile::new()?;
+    let output = Command::new("/usr/bin/tar")
+        .env("COPYFILE_DISABLE", "1")
+        .args(["--no-xattrs", "-czf"])
+        .arg(archive.path())
+        .arg("-C")
+        .arg(&mounted.mount)
+        .arg("ApiFuck.app")
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "Unable to prepare the verified app: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    mounted.detach()?;
+    let mut release = download.release.clone();
+    release.size = archive.as_file().metadata()?.len();
+    let mut digest = Sha256::new();
+    std::io::copy(&mut fs::File::open(archive.path())?, &mut digest)?;
+    release.sha256 = format!("{:x}", digest.finalize());
+    Ok(DownloadedUpdate {
+        path: archive.into_temp_path(),
+        release,
     })
 }
 
@@ -165,36 +211,7 @@ fn install_with_verifier(
     current_version: &str,
     verify: impl Fn(&Path) -> self_update::Result<()> + Send + Sync + 'static,
 ) -> Result<()> {
-    download.verify()?;
-    let target = super::target();
-    let asset = ReleaseAsset::new(
-        format!("apifuck-desktop-{target}.app.tar.gz"),
-        &download.release.url,
-    )
-    .with_digest(format!("sha256:{}", download.release.sha256));
-    let release = Release::builder()
-        .version(&download.release.version)
-        .asset(asset)
-        .build()?;
-    let status = Update::configure()
-        .source(ApprovedRelease(release))
-        .http_client(Arc::new(CachedDownload {
-            url: download.release.url.clone(),
-            file: fs::File::open(&download.path)?,
-        }))
-        .bin_name("apifuck-desktop")
-        .target(target)
-        .current_version(current_version)
-        .bundle_path_in_archive("ApiFuck.app")
-        .bundle_install_path(bundle)
-        .no_confirm(true) // The existing UI owns confirmation and draft saving.
-        .show_output(false)
-        .verify_binary(verify)
-        .build()?
-        .update()
-        .context("无法安装更新，请确认应用位于可写目录（macOS 请先移出磁盘映像）")?;
-    ensure!(status.is_updated(), "The approved update was not installed");
-    Ok(())
+    super::installer::install(download, Some(bundle), None, current_version, verify)
 }
 
 #[cfg(test)]
@@ -333,19 +350,30 @@ mod tests {
         assert!(verify_bundle(&app, "identifier \"different.app\"", "99.0.0").is_err());
         assert!(verify_bundle(&app, requirement, "98.0.0").is_err());
         assert!(signing_requirement(&app).is_err()); // Ad-hoc identity is never trusted for production.
-        // Exercise the production archive format and library extraction with real signatures.
-        let archive = tempfile::NamedTempFile::new_in(root.path()).unwrap();
+        // Exercise the actual DMG -> verified app -> library install path, without GUI launch.
+        let image_source = root.path().join("image-source");
+        fs::create_dir(&image_source).unwrap();
         assert!(
-            Command::new("/usr/bin/tar")
-                .env("COPYFILE_DISABLE", "1")
-                .arg("--no-xattrs")
-                .arg("-czf")
-                .arg(archive.path())
-                .arg("-C")
-                .arg(root.path())
-                .arg("ApiFuck.app")
+            Command::new("/usr/bin/ditto")
+                .arg(&app)
+                .arg(image_source.join("ApiFuck.app"))
                 .status()
                 .unwrap()
+                .success()
+        );
+        let archive = tempfile::Builder::new()
+            .suffix(".dmg")
+            .tempfile_in(root.path())
+            .unwrap();
+        assert!(
+            Command::new("/usr/bin/hdiutil")
+                .args(["create", "-ov", "-srcfolder"])
+                .arg(&image_source)
+                .args(["-format", "UDZO", "-fs", "HFS+"])
+                .arg(archive.path())
+                .output()
+                .unwrap()
+                .status
                 .success()
         );
         let bytes = fs::read(archive.path()).unwrap();
@@ -354,17 +382,18 @@ mod tests {
             release: super::super::Release {
                 version: "99.0.0".into(),
                 notes: String::new(),
-                url: "https://github.com/tyuan511/apifuck/releases/download/v99.0.0/app.tar.gz"
-                    .into(),
+                url: "https://github.com/tyuan511/apifuck/releases/download/v99.0.0/app.dmg".into(),
                 sha256: format!("{:x}", Sha256::digest(&bytes)),
                 size: bytes.len() as u64,
                 bundle: true,
             },
         };
+        assert!(prepare_dmg(&download, "identifier \"wrong.signer\"").is_err());
+        let prepared = prepare_dmg(&download, requirement).unwrap();
         let installed = root.path().join("Installed.app");
         fs::create_dir(&installed).unwrap();
         fs::write(installed.join("obsolete-resource"), "old").unwrap();
-        install_with_verifier(&download, &installed, "0.1.0", move |staged| {
+        install_with_verifier(&prepared, &installed, "0.1.0", move |staged| {
             verify_bundle(staged, requirement, "99.0.0")
                 .map_err(|error| self_update::Error::verification_rejected(error.to_string()))
         })

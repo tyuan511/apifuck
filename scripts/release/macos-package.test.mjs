@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import { createApp, createDmg, createBundleArchive, runTool } from './macos-package.mjs'
+import { createApp, createDmg, runTool } from './macos-package.mjs'
 
 test('native tools build a valid application and mountable DMG without launching the app', { skip: process.platform !== 'darwin' }, t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apifuck-package-'))
@@ -25,12 +25,6 @@ test('native tools build a valid application and mountable DMG without launching
   assert.equal(info.LSMinimumSystemVersion, '11.0')
   assert.ok(fs.statSync(path.join(app, 'Contents/MacOS/apifuck-desktop')).mode & 0o111)
   assert.ok(fs.statSync(path.join(app, 'Contents/Resources/ApiFuck.icns')).size > 0)
-  runTool('xattr', ['-w', 'com.apifuck.package-test', 'metadata', path.join(app, 'Contents/Resources/ApiFuck.icns')])
-  const archive = path.join(root, 'ApiFuck.app.tar.gz')
-  createBundleArchive({ app, destination: archive })
-  const entries = runTool('tar', ['-tzf', archive])
-  assert.match(entries, /ApiFuck\.app\/Contents\/MacOS\/apifuck-desktop/)
-  assert.doesNotMatch(entries, /\/\._/)
   assert.throws(() => createApp({ root, binary, directory: root }), /already exists/)
   const dmg = path.join(root, 'ApiFuck.dmg')
   createDmg({ app, destination: dmg, directory: root })

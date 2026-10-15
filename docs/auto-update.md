@@ -33,8 +33,8 @@ node --test scripts/release/*.test.mjs
 ## GitHub Actions
 
 1. **Validate**：tag 必须与 workspace 版本一致，锁文件有效，每个 workspace crate 版本相同，且存在非空的版本说明；运行发布脚本测试。
-2. **Build**：macOS Apple Silicon、Linux x86_64、Windows x86_64 分别运行格式、测试和 Clippy 检查，再用明确的 Rust target 构建 Release 二进制。macOS 封装 `ApiFuck.app`（版本、图标及最低系统版本取自本次构建），使用临时 keychain 导入 Developer ID Application 证书并启用 Hardened Runtime 和可信时间戳签名。先公证应用包及兼容旧更新器的独立程序，给 `.app` 装订并验证票据，再生成整包更新归档和含 Applications 快捷方式的 DMG；DMG 也须签名、公证并装订票据。全部成功才生成最终校验值。打包只调用命令行工具，不运行 Finder 或 UI 脚本。
-3. **Publish**：只有三个构建全部成功才进入。验证完整附件及哈希，创建或继续草稿 Release，上传二进制、macOS 独立程序 ZIP、`.app.tar.gz`、DMG 与 `SHA256SUMS`，再次核对 GitHub 附件的大小和 digest 后公开。已公开版本拒绝覆盖；失败时不公开不完整的草稿。
+2. **Build**：macOS Apple Silicon、Linux x86_64、Windows x86_64 分别运行格式、测试和 Clippy 检查，再用明确的 Rust target 构建 Release 二进制。macOS 封装 `ApiFuck.app`（版本、图标及最低系统版本取自本次构建），使用临时 keychain 导入 Developer ID Application 证书并启用 Hardened Runtime 和可信时间戳签名。先公证应用包，给 `.app` 装订并验证票据，再生成含 Applications 快捷方式的 DMG；DMG 也须签名、公证并装订票据。全部成功才生成最终校验值。打包只调用命令行工具，不运行 Finder 或 UI 脚本。
+3. **Publish**：只有三个构建全部成功才进入。验证完整附件及哈希，创建或继续草稿 Release，只上传 DMG、EXE、AppImage 与 `SHA256SUMS`，再次核对 GitHub 附件的大小和 digest 后公开。已公开版本拒绝覆盖；失败时不公开不完整的草稿。
 
 `v0.2.0-beta.1` 一类 tag 会发布为 prerelease，不会成为 latest，客户端也不会自动安装。晚发布的旧稳定版本不会替换更高版本的 latest。暂时性失败可通过 Actions 重跑，或手动运行 Release workflow 并指定原 tag；源码有修复时使用新的版本和 tag。
 
@@ -42,23 +42,17 @@ GitHub 发布权限使用自动提供的 `GITHUB_TOKEN`，只有 Publish job 有
 
 ## 发布附件
 
-| 平台 | 二进制附件 |
+| 平台 | 唯一安装附件 |
 | --- | --- |
-| macOS Apple Silicon | `apifuck-desktop-aarch64-apple-darwin` |
-| Linux x86_64 | `apifuck-desktop-x86_64-unknown-linux-gnu` |
+| macOS Apple Silicon | `apifuck-desktop-aarch64-apple-darwin.dmg` |
 | Windows x86_64 | `apifuck-desktop-x86_64-pc-windows-msvc.exe` |
+| Linux x86_64 | `apifuck-desktop-x86_64-unknown-linux-gnu.AppImage` |
 
-macOS 还提供以下附件：
+macOS DMG 包含 `ApiFuck.app` 和 Applications 快捷方式；应用和 DMG 均签名、公证并装订票据。Linux 使用固定版本及 SHA-256 校验的 linuxdeploy 打包共享库，检查 AppImage 头、解包目录与动态库解析，不启动 GUI。CI 构建基于 Ubuntu 24.04，AppImage 不保证能在更旧的 glibc 系统运行。
 
-| 附件 | 用途 |
-| --- | --- |
-| `apifuck-desktop-aarch64-apple-darwin.dmg` | 手动安装；将 `ApiFuck.app` 拖入 Applications 后再启动 |
-| `apifuck-desktop-aarch64-apple-darwin.app.tar.gz` | `.app` 安装的整包更新，包含程序、Info.plist、图标、资源和签名 |
-| `apifuck-desktop-aarch64-apple-darwin.zip` | 兼容旧独立程序的手动下载；原始二进制仍供旧更新器使用 |
+`SHA256SUMS` 覆盖三个安装附件；原始中间二进制留在构建目录，macOS 不额外上传裸程序、ZIP 或更新归档，Linux 不上传裸程序或 DEB。GitHub 自动生成的 Source code 链接不是构建附件。
 
-`SHA256SUMS` 覆盖全部六个附件，校验值在签名、公证、票据装订全部完成后生成。应用包和 DMG 均验证装订票据；ZIP 不能直接装订票据。参见 [Apple 自定义公证流程](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)。
-
-本次按维护者明确要求重新发布 **v0.1.0**，补入应用包和 DMG；此前安装的同版本独立程序需要手动下载，更新器不会安装相同版本。常规发布仍使用新的版本号。README 指向最新 Release 页面，网站和下载链接辅助脚本优先选择新 DMG，旧版本回退到独立程序 ZIP。Linux 原始文件下载后需要设置可执行权限。当前没有 Intel Mac、Linux ARM64 附件。
+本次按维护者要求重新发布 **v0.1.0**，此前安装的同版本需要手动下载；更新器不会安装相同版本。常规发布仍使用新的版本号。当前没有 Intel Mac、Linux ARM64 附件。
 
 本地无需签名凭据即可验证结构（输出目录必须尚不存在）：
 
@@ -121,7 +115,7 @@ gh secret set APPLE_API_ISSUER --repo tyuan511/apifuck
 
 更新元数据来自本仓库 GitHub Release。跳过草稿、预发布、同版及旧版，只选择当前架构的精确附件名；下载 URL 必须精确对应此仓库、此 tag 和此附件。SHA-256 digest 和声明大小缺失或非法时拒绝更新。
 
-下载通过 HTTPS 流式写入临时文件，限制大小并校验 SHA-256；失败自动清理文件，避免一次性把整个附件放入内存。安装前再次校验。独立程序继续使用 `self-replace`；macOS 从 `.app/Contents/MacOS/` 运行时只选择 `.app.tar.gz`，不允许退回单文件替换。整包安装复用固定版本 `self_update 1.3.0`：通过自定义 release source 和仅能读取已下载文件的 transport 交付用户已确认的版本，不重新访问网络或切换版本。库在安装目录同一文件系统解包、备份旧包并整体替换，替换失败时尝试回退；回退属于尽力恢复，不宣称断电或磁盘损坏下的强事务保证。安装前校验新包必须满足已安装应用的 designated code-signing requirement，并匹配应用 ID、可执行文件名及已确认版本，拒绝不可信签名和被篡改资源。现有“稍后”和草稿保存流程继续有效，重启目标为整个 `.app`。只读目录或在 macOS 磁盘映像中运行时会提示移至可写目录。SHA-256 不是独立数字签名，信任来源仍是 HTTPS 和仓库的发布权限。
+下载通过 HTTPS 流式写入临时文件，限制大小并校验 SHA-256；失败自动清理文件，避免一次性把整个附件放入内存。安装前再次校验。Windows 使用 `self-replace`。macOS 应用只选择 DMG：先校验镜像哈希，只读挂载且禁止自动打开，检查应用签名和版本，再在本地生成私有临时归档交给安装库；发布页不需要该归档。安装前卸载镜像，所有失败路径清理挂载。Linux 只选择 AppImage：根据 APPIMAGE/APPDIR 和当前进程路径定位外部文件，校验 ELF/AppImage 头后更新外部镜像，不覆盖只读挂载目录中的程序。整包安装复用固定版本 `self_update 1.3.0`：通过自定义 release source 和仅能读取已下载文件的 transport 交付用户已确认的版本，不重新访问网络或切换版本。库在安装目录同一文件系统解包、备份旧包并整体替换，替换失败时尝试回退；回退属于尽力恢复，不宣称断电或磁盘损坏下的强事务保证。安装前校验新包必须满足已安装应用的 designated code-signing requirement，并匹配应用 ID、可执行文件名及已确认版本，拒绝不可信签名和被篡改资源。现有“稍后”和草稿保存流程继续有效，重启目标为整个 `.app` 或外部 AppImage 文件。只读目录或在 macOS 磁盘映像中运行时会提示移至可写目录。SHA-256 不是独立数字签名，信任来源仍是 HTTPS 和仓库的发布权限。
 
 协议依据：[GitHub Releases REST API](https://docs.github.com/en/rest/releases/releases)、[GitHub CLI Release](https://cli.github.com/manual/gh_release_edit)。
 

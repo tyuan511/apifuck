@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { digest, releaseAssetNames, macosDmg, macosBundleArchive, verifyArtifacts, verifyUploadedAssets } from './artifacts.mjs'
+import { digest, releaseAssetNames, macosDmg, linuxAppImage, verifyArtifacts, verifyUploadedAssets } from './artifacts.mjs'
 
 test('release cannot publish with missing, corrupt or incomplete platform assets', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apifuck-assets-'))
@@ -15,13 +15,8 @@ test('release cannot publish with missing, corrupt or incomplete platform assets
     fs.writeFileSync(`${file}.sha256`, `${digest(file)}  ${name}\n`)
   }
   const assets = verifyArtifacts(root)
-  const archive = path.join(root, 'apifuck-desktop-aarch64-apple-darwin.zip')
-  assert.ok(assets.some(asset => asset.name === path.basename(archive)))
-  const archiveBytes = fs.readFileSync(archive)
-  fs.rmSync(archive)
-  assert.throws(() => verifyArtifacts(root))
-  fs.writeFileSync(archive, archiveBytes)
-  for (const name of [macosDmg, macosBundleArchive]) {
+  assert.deepEqual(releaseAssetNames, [macosDmg, 'apifuck-desktop-x86_64-pc-windows-msvc.exe', linuxAppImage])
+  for (const name of [macosDmg, linuxAppImage]) {
     const file = path.join(root, name)
     const bytes = fs.readFileSync(file)
     fs.rmSync(file)
@@ -33,7 +28,12 @@ test('release cannot publish with missing, corrupt or incomplete platform assets
   }
   assert.equal(fs.readFileSync(path.join(root, 'SHA256SUMS'), 'utf8').trim().split('\n').length, releaseAssetNames.length)
   const release = { assets: assets.map(a => ({ name: a.name, size: a.size, state: 'uploaded', digest: `sha256:${a.sha256}` })) }
+  const sums = path.join(root, 'SHA256SUMS')
+  release.assets.push({ name: 'SHA256SUMS', size: fs.statSync(sums).size, state: 'uploaded', digest: `sha256:${digest(sums)}` })
   verifyUploadedAssets(release, assets)
+  release.assets.push({ name: 'obsolete-macos.zip' })
+  assert.throws(() => verifyUploadedAssets(release, assets), /Unexpected/)
+  release.assets.pop()
   release.assets[0].digest = null
   assert.throws(() => verifyUploadedAssets(release, assets))
   fs.appendFileSync(path.join(root, assets[0].name), 'tampered')

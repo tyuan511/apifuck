@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { test } from 'node:test'
-import { assetName, digest, macosArchive, macosBundleArchive, macosDmg } from './artifacts.mjs'
+import { assetName, digest, macosDmg } from './artifacts.mjs'
 import { cleanup, developerIdentity, signAndNotarize, validateCredentials } from './macos-sign.mjs'
 
 function fixture(t, outcome = 'Accepted') {
@@ -13,7 +13,8 @@ function fixture(t, outcome = 'Accepted') {
   fs.mkdirSync(path.join(root, 'assets'))
   fs.writeFileSync(path.join(root, 'assets/apifuck.png'), 'icon')
   fs.writeFileSync(path.join(root, 'Cargo.toml'), '[workspace.package]\nversion = "1.2.3"\n')
-  const file = path.join(root, 'release-assets', assetName('aarch64-apple-darwin'))
+  fs.mkdirSync(path.join(root, 'target/release-staging'), { recursive: true })
+  const file = path.join(root, 'target/release-staging', assetName('aarch64-apple-darwin'))
   fs.writeFileSync(file, 'unsigned executable')
   fs.writeFileSync(`${file}.sha256`, 'old unsigned hash')
   const env = {
@@ -71,9 +72,8 @@ test('accepted notarization hashes signed and stapled app archives and DMG, then
   t.mock.method(console, 'log', () => {})
   const input = fixture(t)
   signAndNotarize(input)
-  const archive = path.join(input.root, 'release-assets', macosArchive)
-  for (const file of [input.file, archive, ...[macosBundleArchive, macosDmg].map(name => path.join(input.root, 'release-assets', name))]) assert.equal(fs.readFileSync(`${file}.sha256`, 'utf8'), `${digest(file)}  ${path.basename(file)}\n`)
-  assert.ok(fs.readFileSync(archive, 'utf8').endsWith(':signed'))
+  for (const file of [path.join(input.root, 'release-assets', macosDmg)]) assert.equal(fs.readFileSync(`${file}.sha256`, 'utf8'), `${digest(file)}  ${path.basename(file)}\n`)
+  assert.deepEqual(fs.readdirSync(path.join(input.root, 'release-assets')).sort(), [macosDmg, `${macosDmg}.sha256`].sort())
   const signing = input.calls.find(args => args[0] === 'codesign' && args.includes('--sign'))
   assert.ok(signing.includes('--timestamp'))
   assert.ok(signing.includes('runtime'))
@@ -81,8 +81,8 @@ test('accepted notarization hashes signed and stapled app archives and DMG, then
   assert.equal(submissions.length, 2)
   assert.ok(submissions[1][3].endsWith('.dmg'))
   const stapleApp = input.calls.findIndex(args => args[1] === 'stapler' && args[2] === 'staple' && args[3].endsWith('.app'))
-  const tar = input.calls.findIndex(args => args[0] === 'env' && args[2] === 'tar')
-  assert.ok(stapleApp > 0 && tar > stapleApp)
+  const dmg = input.calls.findIndex(args => args[0] === 'hdiutil' && args[1] === 'create')
+  assert.ok(stapleApp > 0 && dmg > stapleApp)
   assert.ok(fs.readFileSync(path.join(input.root, 'release-assets', macosDmg), 'utf8').endsWith(':stapled'))
   assert.deepEqual(input.calls.at(-2), ['security', 'list-keychains', '-d', 'user', '-s', '/test/login.keychain-db', '/test/other.keychain-db'])
   assert.equal(input.calls.at(-1)[1], 'delete-keychain')
@@ -94,8 +94,7 @@ for (const outcome of ['Invalid', 'In Progress', 'import-failed', 'dmg-invalid',
   test(`${outcome} blocks publication and removes private credentials`, t => {
     const input = fixture(t, outcome)
     assert.throws(() => signAndNotarize(input))
-    assert.equal(fs.existsSync(`${input.file}.sha256`), false)
-    for (const name of [macosArchive, macosBundleArchive, macosDmg]) assert.equal(fs.existsSync(path.join(input.root, 'release-assets', `${name}.sha256`)), false)
+    for (const name of [macosDmg]) assert.equal(fs.existsSync(path.join(input.root, 'release-assets', `${name}.sha256`)), false)
     assert.equal(fs.existsSync(path.join(input.root, 'apifuck-macos-signing')), false)
     if (!['import-failed', 'staple-failed'].includes(outcome)) assert.ok(fs.existsSync(path.join(input.root, `apifuck-notarization/${outcome === 'dmg-invalid' ? 'dmg' : 'app'}-log.json`)))
   })

@@ -1,4 +1,8 @@
 //! GitHub release updates for standalone executables and macOS application bundles.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod installer;
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 use anyhow::{Context, Result, ensure};
@@ -53,9 +57,11 @@ impl Release {
             return Ok(None);
         }
         let suffix = if bundle {
-            ".app.tar.gz"
+            ".dmg"
         } else if target.contains("windows") {
             ".exe"
+        } else if target.ends_with("unknown-linux-gnu") {
+            ".AppImage"
         } else {
             ""
         };
@@ -287,9 +293,35 @@ pub fn install(download: &DownloadedUpdate) -> Result<()> {
         return macos::install(download, bundle);
     }
     ensure!(!download.release.bundle, "独立程序不能安装应用包更新");
+    #[cfg(target_os = "linux")]
+    if let Some(image) = linux::current_appimage()? {
+        return installer::install(
+            download,
+            None,
+            Some(&image),
+            env!("CARGO_PKG_VERSION"),
+            |file| {
+                linux::prepare_image(file)
+                    .map_err(|error| self_update::Error::verification_rejected(error.to_string()))
+            },
+        );
+    }
     self_replace::self_replace(&download.path)
         .context("无法安装更新，请确认应用位于可写目录（macOS 请先移出磁盘映像）")?;
     Ok(())
+}
+
+pub fn restart_path() -> Result<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    if let Some(image) = linux::current_appimage()? {
+        return Ok(image);
+    }
+    let executable = std::env::current_exe()?;
+    #[cfg(target_os = "macos")]
+    if let Some(app) = app_bundle(&executable) {
+        return Ok(app.to_owned());
+    }
+    Ok(executable)
 }
 
 #[cfg(test)]
@@ -314,9 +346,9 @@ mod tests {
                 .is_none()
         );
         let mut bundle = value["assets"][0].clone();
-        bundle["name"] = json!(format!("apifuck-desktop-{target}.app.tar.gz"));
+        bundle["name"] = json!(format!("apifuck-desktop-{target}.dmg"));
         bundle["browser_download_url"] = json!(format!(
-            "https://github.com/tyuan511/apifuck/releases/download/v0.2.0/apifuck-desktop-{target}.app.tar.gz"
+            "https://github.com/tyuan511/apifuck/releases/download/v0.2.0/apifuck-desktop-{target}.dmg"
         ));
         value["assets"].as_array_mut().unwrap().push(bundle);
         assert!(
@@ -360,6 +392,8 @@ mod tests {
     fn release_value(target: &str) -> Value {
         let suffix = if target.contains("windows") {
             ".exe"
+        } else if target.ends_with("unknown-linux-gnu") {
+            ".AppImage"
         } else {
             ""
         };

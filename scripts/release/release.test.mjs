@@ -86,7 +86,7 @@ test('download sync prefers native DMG over ZIP and historical installers', (t) 
     'ApiFuck_0.0.8_aarch64.dmg', 'ApiFuck_0.0.8_x64-setup.exe', 'ApiFuck_0.0.8_amd64.AppImage',
     'unrelated-tool-aarch64-apple-darwin', 'unrelated-tool-x86_64-pc-windows-msvc.exe', 'unrelated-tool-x86_64-unknown-linux-gnu',
     'apifuck-desktop-aarch64-apple-darwin.zip',
-    'apifuck-desktop-aarch64-apple-darwin.dmg', 'apifuck-desktop-x86_64-pc-windows-msvc.exe', 'apifuck-desktop-x86_64-unknown-linux-gnu',
+    'apifuck-desktop-aarch64-apple-darwin.dmg', 'apifuck-desktop-x86_64-pc-windows-msvc.exe', 'apifuck-desktop-x86_64-unknown-linux-gnu.AppImage',
   ]
   writeFileSync(path.join(root, 'mock-fetch.mjs'), `globalThis.fetch = async () => new Response(JSON.stringify(${JSON.stringify({ tag_name: 'v1.2.3', assets: names.map(name => ({ name })) })}), {status: 200});\n`)
   const result = run(process.execPath, ['--import', './mock-fetch.mjs', path.join(repository, 'scripts/release/update-readme-downloads.mjs'), 'v1.2.3', '--repo', 'example/apifuck'], root)
@@ -95,7 +95,7 @@ test('download sync prefers native DMG over ZIP and historical installers', (t) 
   for (const name of names.slice(-3)) {
     assert.ok(readme.includes(`https://github.com/example/apifuck/releases/download/v1.2.3/${name}`))
   }
-  assert.doesNotMatch(readme, /unrelated-tool|\.zip|ApiFuck_0\.0\.8|setup\.exe|AppImage/)
+  assert.doesNotMatch(readme, /unrelated-tool|\.zip|ApiFuck_0\.0\.8|setup\.exe/)
   assert.ok(readme.startsWith('Before\n'))
   assert.ok(readme.endsWith('\nAfter\n'))
   assert.match(readme, /Latest release:/)
@@ -109,9 +109,9 @@ test('download sync preserves English and Chinese README content and is idempote
   }
   const before = ['README.md', 'README_zh-CN.md'].map(name => readFileSync(path.join(root, name), 'utf8'))
   const names = [
-    'apifuck-desktop-aarch64-apple-darwin.zip',
+    'apifuck-desktop-aarch64-apple-darwin.dmg',
     'apifuck-desktop-x86_64-pc-windows-msvc.exe',
-    'apifuck-desktop-x86_64-unknown-linux-gnu',
+    'apifuck-desktop-x86_64-unknown-linux-gnu.AppImage',
   ]
   writeFileSync(path.join(root, 'mock-fetch.mjs'), `globalThis.fetch = async () => new Response(JSON.stringify(${JSON.stringify({ tag_name: 'v1.2.3', assets: names.map(name => ({ name })) })}), {status: 200});\n`)
   const sync = () => run(process.execPath, ['--import', './mock-fetch.mjs', path.join(repository, 'scripts/release/update-readme-downloads.mjs'), 'v1.2.3', '--repo', 'example/apifuck'], root)

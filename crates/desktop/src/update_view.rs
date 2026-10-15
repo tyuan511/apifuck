@@ -235,20 +235,13 @@ impl AppUpdate {
         };
         // Linux may report a "(deleted)" /proc/self/exe after replacement. Capture
         // the original launch target before installing so restart uses the new file.
-        let executable = match std::env::current_exe() {
+        let executable = match update::restart_path() {
             Ok(path) => path,
             Err(error) => {
                 self.fail(error, window, cx);
                 return;
             }
         };
-        #[cfg(target_os = "macos")]
-        let executable = executable
-            .ancestors()
-            .nth(3)
-            .filter(|path| path.extension().is_some_and(|ext| ext == "app"))
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or(executable);
         cx.set_restart_path(executable);
         self.phase = Phase::Installing;
         cx.notify();
