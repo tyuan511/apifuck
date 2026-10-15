@@ -7,6 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 const BRIDGE_SOURCE: &str = include_str!("../resources/javascript/bridge.bundle.js");
+const WORKER_STACK_BYTES: usize = 16 * 1024 * 1024;
+const JS_STACK_BYTES: usize = 8 * 1024 * 1024;
 struct Converter {
     context: rquickjs::Context,
     runtime: rquickjs::Runtime,
@@ -16,7 +18,10 @@ impl Converter {
     fn new() -> Result<Self> {
         let runtime = rquickjs::Runtime::new()?;
         runtime.set_memory_limit(128 * 1024 * 1024);
-        runtime.set_max_stack_size(2 * 1024 * 1024);
+        // The MSVC debug build needs more stack while loading the bundled parser.
+        // Keep the interpreter limit below the native worker stack, with headroom
+        // for Rust/FFI frames and exception handling.
+        runtime.set_max_stack_size(JS_STACK_BYTES);
         let deadline = Arc::new(Mutex::new(Instant::now() + Duration::from_secs(30)));
         let end = deadline.clone();
         runtime.set_interrupt_handler(Some(Box::new(move || {
@@ -86,7 +91,7 @@ impl ConverterWorker {
             .name("apifuck-bru".into())
             // QuickJS initialization can exhaust a Windows/Tokio caller's stack.
             // Keep the VM and its cache on this larger stack for their entire life.
-            .stack_size(16 * 1024 * 1024)
+            .stack_size(WORKER_STACK_BYTES)
             .spawn(move || {
                 let mut converter = None;
                 for request in receiver {
