@@ -1,10 +1,21 @@
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { content } from "../src/content.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const out = resolve(root, "dist");
+// One content version keeps HTML, CSS, scripts and the screenshot in sync on refresh.
+const assetFiles = ["styles.css", "site.js", "theme.js", "releases.mjs"];
+const assetHash = createHash("sha256");
+for (const name of assetFiles)
+  assetHash.update(await readFile(resolve(root, "src", name)));
+assetHash.update(
+  await readFile(resolve(root, "public/workbench-screenshot.png")),
+);
+const assetVersion = assetHash.digest("hex").slice(0, 16);
+const assetUrl = (name) => `/${name}?v=${assetVersion}`;
 const github = "https://github.com/tyuan511/apifuck";
 const origin = "https://apifuck.fastvibe.dev";
 const esc = (s) =>
@@ -31,7 +42,7 @@ function page(t, locale) {
 <meta name="color-scheme" content="light dark"><meta name="theme-color" content="#3262d8">
 <meta property="og:type" content="website"><meta property="og:title" content="${esc(t.title)}"><meta property="og:description" content="${esc(t.description)}"><meta property="og:image" content="${origin}/apifuck.png"><meta property="og:url" content="${origin}/${locale === "en" ? "en/" : ""}">
 <link rel="canonical" href="${origin}/${locale === "en" ? "en/" : ""}"><link rel="alternate" hreflang="zh-CN" href="${origin}/"><link rel="alternate" hreflang="en" href="${origin}/en/"><link rel="alternate" hreflang="x-default" href="${origin}/">
-<link rel="icon" href="/apifuck.png"><script src="/theme.js"></script><link rel="stylesheet" href="/styles.css"><script src="/site.js" type="module"></script>
+<link rel="icon" href="/apifuck.png"><script src="${assetUrl("theme.js")}"></script><link rel="stylesheet" href="${assetUrl("styles.css")}"><script src="${assetUrl("site.js")}" type="module"></script>
 </head>
 <body>
 <a class="skip-link" href="#main">${t.skip}</a>
@@ -44,7 +55,7 @@ function page(t, locale) {
 <main id="main">
 <section class="hero" id="top"><div class="hero-backdrop" aria-hidden="true"></div>
 <div class="hero-copy"><p class="eyebrow hero-eyebrow"><span></span>${t.eyebrow}</p><h1>${t.headline.map((x) => `<span>${esc(x)}</span>`).join("")}</h1><p class="hero-lead">${lines(t.lead)}</p><div class="hero-actions"><a class="button hero-button" href="#download">${t.download}<span aria-hidden="true">↓</span></a><a class="hero-source" href="${github}">${t.source} ${arrow}</a></div><p class="platform-hint">${t.platforms}</p></div>
-<figure class="preview-wrap"><a class="screenshot-link" href="/workbench-screenshot.png" target="_blank" rel="noreferrer"><img class="workbench-screenshot" src="/workbench-screenshot.png" width="2560" height="1680" alt="${esc(t.previewAlt)}" fetchpriority="high" decoding="async"></a><figcaption class="preview-caption">${t.preview}</figcaption></figure></section>
+<figure class="preview-wrap"><a class="screenshot-link" href="${assetUrl("workbench-screenshot.png")}" target="_blank" rel="noreferrer"><img class="workbench-screenshot" src="${assetUrl("workbench-screenshot.png")}" width="2560" height="1680" alt="${esc(t.previewAlt)}" fetchpriority="high" decoding="async"></a><figcaption class="preview-caption">${t.preview}</figcaption></figure></section>
 <div class="trust-strip wrap">${t.strip.map((s, i) => `<span><i aria-hidden="true">${["◈", "◎", "⌘", "↗"][i]}</i>${s}</span>`).join("")}</div>
 <section class="section wrap" id="workbench"><div class="section-heading"><p class="eyebrow">${t.workflowEyebrow}</p><h2>${lines(t.workflowTitle)}</h2><p>${t.workflowLead}</p></div>
 <div class="protocol-tabs" role="tablist" aria-label="${t.nav[0]}">${t.protocols.map((p, i) => `<button role="tab" id="protocol-tab-${i}" aria-selected="${i === 0}" tabindex="${i === 0 ? "0" : "-1"}" aria-controls="protocol-panel-${i}" data-protocol-tab="${i}">${p[0]}</button>`).join("")}</div>
@@ -59,8 +70,15 @@ ${t.protocols.map((p, i) => `<div class="protocol-panel" role="tabpanel" id="pro
 await rm(out, { recursive: true, force: true });
 await mkdir(resolve(out, "en"), { recursive: true });
 await cp(resolve(root, "public"), out, { recursive: true });
-for (const name of ["styles.css", "site.js", "theme.js", "releases.mjs"])
-  await cp(resolve(root, "src", name), resolve(out, name));
+for (const name of assetFiles) {
+  if (name === "site.js") {
+    const source = await readFile(resolve(root, "src", name), "utf8");
+    await writeFile(
+      resolve(out, name),
+      source.replace('"./releases.mjs"', `"./releases.mjs?v=${assetVersion}"`),
+    );
+  } else await cp(resolve(root, "src", name), resolve(out, name));
+}
 for (const [locale, t] of Object.entries(content))
   await writeFile(
     resolve(out, locale === "en" ? "en/index.html" : "index.html"),

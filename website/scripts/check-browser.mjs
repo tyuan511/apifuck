@@ -22,6 +22,15 @@ try {
       await context.route(endpoint, (route) =>
         route.fulfill({ json: { tag_name: "v0.0.8", assets: [] } }),
       );
+      // An old unversioned asset must not be reused after the page updates.
+      await context.route(
+        (url) => url.pathname === "/styles.css" && !url.search,
+        (route) =>
+          route.fulfill({
+            contentType: "text/css",
+            body: ".workbench-screenshot { width: 2560px !important; }",
+          }),
+      );
       const page = await context.newPage();
       page.setDefaultTimeout(15000);
       page.on("pageerror", (error) => errors.push(error.message));
@@ -87,9 +96,29 @@ try {
           true,
           "screenshot retains its full aspect ratio",
         );
+        const imageUrl = await screenshot.getAttribute("src");
         assert.equal(
           await page.locator(".screenshot-link").getAttribute("href"),
+          imageUrl,
+        );
+        assert.equal(
+          new URL(imageUrl, origin).pathname,
           "/workbench-screenshot.png",
+        );
+        assert.equal(
+          await screenshot.evaluate((image) => {
+            const imageRect = image.getBoundingClientRect();
+            const containerRect = image
+              .closest("figure")
+              .getBoundingClientRect();
+            return (
+              imageRect.left >= containerRect.left &&
+              imageRect.right <= containerRect.right + 1 &&
+              imageRect.right <= innerWidth
+            );
+          }),
+          true,
+          "entire screenshot fits inside its container and viewport",
         );
         assert.equal(await page.locator("[data-platform]").count(), 3);
         for (const link of await page.locator("[data-platform]").all())

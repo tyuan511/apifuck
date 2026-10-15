@@ -388,12 +388,16 @@ pre {
 }
 .screenshot-link {
   display: block;
+  width: 100%;
+  min-width: 0;
   border-radius: 16px;
 }
 .workbench-screenshot {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
+  object-fit: contain;
   border-radius: 16px;
   box-shadow: var(--shadow);
 }
