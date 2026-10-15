@@ -14,8 +14,8 @@ function themeState() {
     : dark.matches;
   theme.setAttribute("aria-pressed", String(isDark));
   document.querySelector('meta[name="theme-color"]').content = isDark
-    ? "#101217"
-    : "#3262d8";
+    ? "#0d1621"
+    : "#3278a7";
 }
 theme.hidden = false;
 themeState();

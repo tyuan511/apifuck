@@ -1,23 +1,23 @@
 :root {
   color-scheme: light;
-  --bg: #fff;
+  --bg: #fcfdff;
   --surface: #fff;
-  --soft: #f6f7f9;
-  --fg: #17191d;
-  --body: #4b505b;
-  --muted: #747b87;
-  --line: #e5e7ec;
-  --accent: #4868ec;
+  --soft: #f2f6fa;
+  --fg: #17283c;
+  --body: #4d6073;
+  --muted: #687b8e;
+  --line: #dfe7ef;
+  --accent: #28739d;
   --green: #087f5b;
-  --code: #3c4557;
-  --header: rgb(255 255 255 / 0.78);
-  --shadow: 0 28px 90px -38px #213e8580;
-  --hero-bottom: #fff;
-  --hero-blue: #387ce1;
-  --hero-purple: #5d49cb;
-  --hero-cyan: #6cbded;
+  --code: #36516b;
+  --header: rgb(250 253 255 / 0.86);
+  --shadow: 0 28px 90px -38px #143c6259;
+  --hero-bottom: #fcfdff;
+  --hero-blue: #3278a7;
+  --hero-deep: #273f70;
+  --hero-cyan: #4799a9;
   --on-ink: #fff;
-  --ink: #17191d;
+  --ink: #19344d;
   font-family:
     Inter,
     -apple-system,
@@ -29,46 +29,46 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #101217;
-  --surface: #1a1d24;
-  --soft: #16191f;
-  --fg: #f1f3f7;
-  --body: #b3bac7;
-  --muted: #8e98aa;
-  --line: #2d333e;
-  --accent: #a1b1ff;
+  --bg: #0d1621;
+  --surface: #162331;
+  --soft: #111e2b;
+  --fg: #edf4fa;
+  --body: #b5c5d3;
+  --muted: #94a9bb;
+  --line: #293c4e;
+  --accent: #8bc9e2;
   --green: #72dfb2;
-  --code: #c8d0df;
-  --header: rgb(23 26 34 / 0.83);
+  --code: #c3d8e8;
+  --header: rgb(17 30 43 / 0.9);
   --shadow: 0 28px 90px -38px #000c;
-  --hero-bottom: #101217;
-  --hero-blue: #1b418b;
-  --hero-purple: #433087;
-  --hero-cyan: #266b9c;
-  --on-ink: #17191d;
-  --ink: #f1f3f7;
+  --hero-bottom: #0d1621;
+  --hero-blue: #1b4668;
+  --hero-deep: #182b4d;
+  --hero-cyan: #276477;
+  --on-ink: #102437;
+  --ink: #edf4fa;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #101217;
-    --surface: #1a1d24;
-    --soft: #16191f;
-    --fg: #f1f3f7;
-    --body: #b3bac7;
-    --muted: #8e98aa;
-    --line: #2d333e;
-    --accent: #a1b1ff;
+    --bg: #0d1621;
+    --surface: #162331;
+    --soft: #111e2b;
+    --fg: #edf4fa;
+    --body: #b5c5d3;
+    --muted: #94a9bb;
+    --line: #293c4e;
+    --accent: #8bc9e2;
     --green: #72dfb2;
-    --code: #c8d0df;
-    --header: rgb(23 26 34 / 0.83);
+    --code: #c3d8e8;
+    --header: rgb(17 30 43 / 0.9);
     --shadow: 0 28px 90px -38px #000c;
-    --hero-bottom: #101217;
-    --hero-blue: #1b418b;
-    --hero-purple: #433087;
-    --hero-cyan: #266b9c;
-    --on-ink: #17191d;
-    --ink: #f1f3f7;
+    --hero-bottom: #0d1621;
+    --hero-blue: #1b4668;
+    --hero-deep: #182b4d;
+    --hero-cyan: #276477;
+    --on-ink: #102437;
+    --ink: #edf4fa;
   }
 }
 * {
@@ -139,8 +139,8 @@ pre {
   overflow-wrap: anywhere;
 }
 ::selection {
-  background: #a8bcff;
-  color: #151a2e;
+  background: #b4dce9;
+  color: #18344d;
 }
 :focus-visible {
   outline: 3px solid var(--accent);
@@ -241,7 +241,7 @@ pre {
 }
 .languages [aria-current] {
   background: #fff;
-  color: #252936;
+  color: #19344d;
 }
 .scrolled .languages,
 .site-header[data-open] .languages {
@@ -274,8 +274,8 @@ pre {
   inset: 0 0 110px;
   background:
     radial-gradient(ellipse at 78% 10%, var(--hero-cyan), transparent 50%),
-    radial-gradient(ellipse at 12% 35%, var(--hero-purple), transparent 64%),
-    linear-gradient(155deg, var(--hero-blue), var(--hero-purple));
+    radial-gradient(ellipse at 12% 35%, var(--hero-deep), transparent 64%),
+    linear-gradient(155deg, var(--hero-blue), var(--hero-deep));
   overflow: hidden;
 }
 .hero-backdrop:after {
@@ -326,7 +326,7 @@ pre {
 .hero-lead {
   font-size: 17px;
   line-height: 1.85;
-  color: #f2f5ff;
+  color: #edf6fb;
   margin-top: 27px;
 }
 .hero-actions {
@@ -356,7 +356,7 @@ pre {
   opacity: 0.88;
 }
 .hero-button {
-  background: #171a24;
+  background: #16364e;
   color: #fff;
   box-shadow: 0 4px 12px #253c5322;
 }
@@ -369,7 +369,7 @@ pre {
 }
 .platform-hint {
   font-size: 11px;
-  color: #f0f4ff;
+  color: #e1eff7;
   margin-top: 15px;
   letter-spacing: 1px;
 }
@@ -508,7 +508,7 @@ h2 {
   padding: 42px 40px;
   display: flex;
   align-items: center;
-  background: radial-gradient(ellipse at 90% 0%, #b8c9fc5e, transparent 80%);
+  background: radial-gradient(ellipse at 90% 0%, #acd6e23d, transparent 80%);
 }
 .mini-window {
   width: 100%;
@@ -733,7 +733,7 @@ h2 {
 .download-section {
   padding: 90px 0;
   background:
-    radial-gradient(ellipse at 0 0, #7e99ea20, transparent 60%), var(--soft);
+    radial-gradient(ellipse at 0 0, #72b4c718, transparent 60%), var(--soft);
 }
 .download-grid {
   display: grid;

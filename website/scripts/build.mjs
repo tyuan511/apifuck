@@ -39,7 +39,7 @@ function page(t, locale) {
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(t.title)}</title><meta name="description" content="${esc(t.description)}">
-<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#3262d8">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#3278a7">
 <meta property="og:type" content="website"><meta property="og:title" content="${esc(t.title)}"><meta property="og:description" content="${esc(t.description)}"><meta property="og:image" content="${origin}/apifuck.png"><meta property="og:url" content="${origin}/${locale === "en" ? "en/" : ""}">
 <link rel="canonical" href="${origin}/${locale === "en" ? "en/" : ""}"><link rel="alternate" hreflang="zh-CN" href="${origin}/"><link rel="alternate" hreflang="en" href="${origin}/en/"><link rel="alternate" hreflang="x-default" href="${origin}/">
 <link rel="icon" href="/apifuck.png"><script src="${assetUrl("theme.js")}"></script><link rel="stylesheet" href="${assetUrl("styles.css")}"><script src="${assetUrl("site.js")}" type="module"></script>
