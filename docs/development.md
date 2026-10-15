@@ -13,6 +13,8 @@
 
 普通 `cargo build` 和已构建的桌面程序不需要 Node.js/Bun。不要按历史 Tauri/React 版本的说明寻找根目录 `package.json` 或前端开发服务器。
 
+开发和测试配置单独以 `opt-level = 2` 编译 `rquickjs-sys` 的 QuickJS 引擎。未优化的 MSVC 构建加载嵌入式 Bru 解析器会触发初始化超时；依赖级优化保留应用代码的开发配置和现有脚本执行时限。Cargo 的 `test` 配置继承这项 `dev` 覆盖，普通本地测试与 CI 使用同一设置。
+
 Linux CI 使用以下系统库：
 
 ```sh
