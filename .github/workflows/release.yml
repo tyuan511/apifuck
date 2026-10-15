@@ -20,13 +20,14 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          package-manager-cache: false
       - uses: dtolnay/rust-toolchain@1.95
       - name: Require matching version, lockfile and release notes
         run: node scripts/release/validate-release.mjs "$RELEASE_TAG"
@@ -50,12 +51,13 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          package-manager-cache: false
       - name: Linux libraries
         if: runner.os == 'Linux'
         run: |
@@ -99,13 +101,13 @@ jobs:
         run: node scripts/release/macos-sign.mjs cleanup
       - name: Upload notarization diagnostics on failure
         if: failure() && runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-notarization-diagnostics
           path: ${{ runner.temp }}/apifuck-notarization/*.json
           if-no-files-found: ignore
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
           path: release-assets/*
@@ -118,13 +120,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8
         with:
           pattern: desktop-*
           path: release-assets

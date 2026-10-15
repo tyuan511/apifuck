@@ -97,4 +97,37 @@ test('download sync selects desktop binaries over unrelated assets and old insta
   assert.doesNotMatch(readme, /unrelated-tool|\.dmg|setup\.exe|AppImage/)
   assert.ok(readme.startsWith('Before\n'))
   assert.ok(readme.endsWith('\nAfter\n'))
+  assert.match(readme, /Latest release:/)
+  assert.doesNotMatch(readme, /平台|下载地址/)
+})
+
+test('download sync preserves English and Chinese README content and is idempotent', (t) => {
+  const root = fixture(t)
+  for (const name of ['README.md', 'README_zh-CN.md']) {
+    copyFileSync(path.join(repository, name), path.join(root, name))
+  }
+  const before = ['README.md', 'README_zh-CN.md'].map(name => readFileSync(path.join(root, name), 'utf8'))
+  const names = [
+    'apifuck-desktop-aarch64-apple-darwin.zip',
+    'apifuck-desktop-x86_64-pc-windows-msvc.exe',
+    'apifuck-desktop-x86_64-unknown-linux-gnu',
+  ]
+  writeFileSync(path.join(root, 'mock-fetch.mjs'), `globalThis.fetch = async () => new Response(JSON.stringify(${JSON.stringify({ tag_name: 'v1.2.3', assets: names.map(name => ({ name })) })}), {status: 200});\n`)
+  const sync = () => run(process.execPath, ['--import', './mock-fetch.mjs', path.join(repository, 'scripts/release/update-readme-downloads.mjs'), 'v1.2.3', '--repo', 'example/apifuck'], root)
+  const first = sync()
+  assert.equal(first.status, 0, first.stderr)
+  const after = ['README.md', 'README_zh-CN.md'].map(name => readFileSync(path.join(root, name), 'utf8'))
+  const block = /<!-- release-downloads:start -->[\s\S]*?<!-- release-downloads:end -->/
+  for (let index = 0; index < after.length; index += 1) {
+    assert.equal(after[index].replace(block, ''), before[index].replace(block, ''))
+    for (const name of names) {
+      assert.ok(after[index].includes(`https://github.com/example/apifuck/releases/download/v1.2.3/${name}`))
+    }
+  }
+  assert.match(after[0], /Latest release:/)
+  assert.match(after[1], /平台.*下载地址/)
+  const second = sync()
+  assert.equal(second.status, 0, second.stderr)
+  assert.match(second.stdout, /already up to date/)
+  assert.deepEqual(['README.md', 'README_zh-CN.md'].map(name => readFileSync(path.join(root, name), 'utf8')), after)
 })

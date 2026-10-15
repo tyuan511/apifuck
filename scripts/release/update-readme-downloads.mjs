@@ -191,7 +191,7 @@ async function main() {
   const tagName = version.startsWith('v') ? version : `v${version}`
   const rootDir = process.cwd()
   const readmePath = path.join(rootDir, 'README.md')
-  const readmeEnPath = path.join(rootDir, 'README_en.md')
+  const readmeZhPath = path.join(rootDir, 'README_zh-CN.md')
   const { selectedAssets } = await resolveAssets(repo, tagName)
   const normalizedAssets = {
     macos: {
@@ -214,7 +214,7 @@ async function main() {
     readmeContent,
     '<!-- release-downloads:start -->',
     '<!-- release-downloads:end -->',
-    buildChineseTable(normalizedAssets),
+    buildEnglishDownloadBlock(tagName, normalizedAssets, releasePageUrl),
   )
 
   const changedFiles = []
@@ -223,17 +223,17 @@ async function main() {
     changedFiles.push('README.md')
   }
 
-  if (fs.existsSync(readmeEnPath)) {
-    const readmeEnContent = fs.readFileSync(readmeEnPath, 'utf8')
-    const nextReadmeEnContent = replaceBetweenMarkers(
-      readmeEnContent,
-      '<!-- release-downloads-en:start -->',
-      '<!-- release-downloads-en:end -->',
-      buildEnglishDownloadBlock(tagName, normalizedAssets, releasePageUrl),
+  if (fs.existsSync(readmeZhPath)) {
+    const readmeZhContent = fs.readFileSync(readmeZhPath, 'utf8')
+    const nextReadmeZhContent = replaceBetweenMarkers(
+      readmeZhContent,
+      '<!-- release-downloads:start -->',
+      '<!-- release-downloads:end -->',
+      buildChineseTable(normalizedAssets),
     )
 
-    if (writeIfChanged(readmeEnPath, nextReadmeEnContent)) {
-      changedFiles.push('README_en.md')
+    if (writeIfChanged(readmeZhPath, nextReadmeZhContent)) {
+      changedFiles.push('README_zh-CN.md')
     }
   }
 
