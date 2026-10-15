@@ -10,7 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 tokio.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream", "gzip", "brotli", "deflate", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream", "gzip", "brotli", "deflate", "socks", "system-proxy"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 rquickjs = "0.11"

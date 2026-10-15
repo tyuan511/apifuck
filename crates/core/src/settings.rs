@@ -14,6 +14,7 @@ pub struct NetworkSettings {
     pub forward_authorization_header: bool,
     pub max_redirects: usize,
     pub allow_invalid_certificates: bool,
+    /// None uses system proxies; an empty string disables proxies; a URL overrides them.
     pub proxy: Option<String>,
     pub max_response_bytes: usize,
 }
@@ -36,7 +37,9 @@ impl NetworkSettings {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.connect_timeout_ms > 0, "连接超时必须大于 0");
         anyhow::ensure!(self.max_response_bytes > 0, "响应大小上限必须大于 0");
-        if let Some(proxy) = &self.proxy {
+        if let Some(proxy) = &self.proxy
+            && !proxy.is_empty()
+        {
             let url = url::Url::parse(proxy).context("代理地址需要完整的协议和主机名")?;
             anyhow::ensure!(
                 matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
@@ -413,6 +416,17 @@ mod preference_tests {
             workspace.network.proxy.as_deref(),
             Some("socks5h://127.0.0.1:1080")
         );
+    }
+
+    #[test]
+    fn disabled_proxy_survives_preferences_save_and_reload() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("preferences.json");
+        let mut preferences = AppPreferences::default();
+        preferences.network.proxy = Some(String::new());
+        preferences.save_to(&path).unwrap();
+        let restored = AppPreferences::load_from(&path).unwrap().unwrap();
+        assert_eq!(restored.network.proxy.as_deref(), Some(""));
     }
 
     #[test]

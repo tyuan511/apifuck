@@ -85,6 +85,24 @@ fn assert_sent_headers_match_wire(head: &apifuck_core::RequestHead, wire: &[u8])
 }
 
 #[tokio::test]
+async fn disabled_proxy_connects_directly() {
+    let (_dir, collection) = project();
+    let (url, wire) = server(ok("{}")).await;
+    let doc = request(&collection, &url, json!({}));
+    let mut settings = NetworkSettings::default();
+    settings.proxy = Some(String::new());
+    settings.validate().unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        execute(prepare(&collection, &doc, None, settings).unwrap(), None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(wire.await.unwrap().starts_with(b"GET / HTTP/1.1\r\n"));
+}
+
+#[tokio::test]
 async fn sent_headers_include_inheritance_auth_scripts_duplicates_and_transport_defaults() {
     let (_dir, c) = project();
     let root = json!({"opencollection":"1.0.0","info":{"name":"Tests"},"request":{

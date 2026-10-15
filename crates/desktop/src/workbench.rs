@@ -599,6 +599,7 @@ impl Workbench {
         .detach();
     }
     fn render_environment_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let unsaved_paths = self.unsaved_document_paths(cx);
         let query = self.environment_search.read(cx).value().to_lowercase();
         let mut environments = environment_rows(self.collection.as_ref());
         let total = environments.len();
@@ -689,6 +690,7 @@ impl Workbench {
                         )
                     })
                     .children(environments.into_iter().map(|(path, name)| {
+                        let is_dirty = unsaved_paths.contains(&collection::portable_path(&path));
                         let is_editing = editing.as_ref() == Some(&path);
                         let is_enabled = self.state.environment.as_deref() == Some(name.as_str());
                         let tooltip = format!("{}\n{}", name, path.display());
@@ -743,7 +745,8 @@ impl Workbench {
                                             .child(Icon::new(AppIcon::Check).size_3())
                                             .child(tr("当前启用")),
                                     )
-                                }),
+                                })
+                                .when(is_dirty, |row| row.child(unsaved_indicator(cx))),
                         )
                         .on_click(cx.listener(
                             move |this, _, window, cx| {
@@ -1021,6 +1024,18 @@ impl Workbench {
             cx.notify();
         });
         self.tab_subscriptions.insert(tab.entity_id(), subscription);
+    }
+    fn unsaved_document_paths(&self, cx: &App) -> std::collections::BTreeSet<String> {
+        unsaved_document_paths(
+            &self.state,
+            self.tabs.iter().map(|tab| {
+                let tab = tab.read(cx);
+                (
+                    collection::portable_path(tab.document().path()),
+                    tab.is_dirty(),
+                )
+            }),
+        )
     }
     fn autosave(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let error = self.persist(cx).err().map(|error| {
@@ -2063,6 +2078,7 @@ impl Render for Workbench {
             .unwrap_or_default();
         let tree_handle = cx.entity().downgrade();
         let tree_menu_handle = tree_handle.clone();
+        let unsaved_paths = self.unsaved_document_paths(cx);
         let sidebar = div()
             .flex()
             .flex_col()
@@ -2330,6 +2346,9 @@ impl Render for Workbench {
                                                     .child(label)
                                                     .into_any_element()
                                             }
+                                        })
+                                        .when(unsaved_paths.contains(&row_path), |row| {
+                                            row.child(unsaved_indicator(cx))
                                         }),
                                 )
                         })
@@ -2630,14 +2649,7 @@ impl Render for Workbench {
                     })
                     .label(t.read(cx).name(cx))
                     .when(t.read(cx).is_dirty(), |tab| {
-                        tab.child(
-                            div()
-                                .ml_2()
-                                .size(px(6.))
-                                .flex_shrink_0()
-                                .rounded_full()
-                                .bg(cx.theme().warning),
-                        )
+                        tab.child(unsaved_indicator(cx).ml_2())
                     })
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
                     .on_drag(drag, |drag, _, _, cx| {
@@ -3271,9 +3283,77 @@ fn active_after_close(active: usize, closed: usize, count: usize) -> usize {
     }
 }
 
+fn unsaved_indicator(cx: &App) -> Div {
+    div()
+        .size(px(6.))
+        .flex_shrink_0()
+        .rounded_full()
+        .bg(cx.theme().warning)
+}
+
+fn unsaved_document_paths(
+    state: &WorkspaceState,
+    open_documents: impl IntoIterator<Item = (String, bool)>,
+) -> std::collections::BTreeSet<String> {
+    let mut paths: std::collections::BTreeSet<_> =
+        state
+            .drafts
+            .keys()
+            .chain(state.editor_drafts.iter().filter_map(|(path, draft)| {
+                draft["dirty"].as_bool().unwrap_or(false).then_some(path)
+            }))
+            .map(|path| collection::portable_path(std::path::Path::new(path)))
+            .collect();
+    // Live state takes precedence while a save/reload notification is still pending.
+    for (path, dirty) in open_documents {
+        if dirty {
+            paths.insert(path);
+        } else {
+            paths.remove(&path);
+        }
+    }
+    paths
+}
+
 #[cfg(test)]
 mod tests {
     use super::{TabCloseAction, active_after_close};
+
+    #[test]
+    fn sidebar_unsaved_paths_include_closed_drafts_and_prefer_live_tabs() {
+        let mut state = apifuck_core::settings::WorkspaceState::default();
+        state
+            .drafts
+            .insert("invalid.yml".into(), "invalid: [".into());
+        state.drafts.insert("saved.yml".into(), "old draft".into());
+        state
+            .editor_drafts
+            .insert("api/folder.yml".into(), serde_json::json!({"dirty": true}));
+        state.editor_drafts.insert(
+            "environments/local.yml".into(),
+            serde_json::json!({"dirty": true}),
+        );
+        state.editor_drafts.insert(
+            "clean.yml".into(),
+            serde_json::json!({"dirty": false, "message": "unsent message"}),
+        );
+        let paths = super::unsaved_document_paths(
+            &state,
+            [("saved.yml".into(), false), ("editing.yml".into(), true)],
+        );
+        assert_eq!(
+            paths,
+            [
+                "invalid.yml",
+                "api/folder.yml",
+                "environments/local.yml",
+                "editing.yml"
+            ]
+            .map(String::from)
+            .into_iter()
+            .collect()
+        );
+    }
 
     #[test]
     fn tree_menus_cover_folders_and_protocols_without_unsupported_exports() {
