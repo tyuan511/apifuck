@@ -566,9 +566,12 @@ fn runner_uses_depth_first_folder_sequence() {
     let c = Collection::open(c.root()).unwrap();
     let paths: Vec<_> = apifuck_core::runner::ordered_requests(&c, None)
         .iter()
-        .map(|d| d.path().to_string_lossy().into_owned())
+        .map(|d| d.path().to_owned())
         .collect();
-    assert_eq!(paths, vec!["a/first.yml", "b/last.yml"]);
+    assert_eq!(
+        paths,
+        vec![Path::new("a/first.yml"), Path::new("b/last.yml")]
+    );
 }
 
 #[tokio::test]
