@@ -102,7 +102,7 @@ function buildReleasePageUrl(repo, tagName) {
 
 async function resolveAssets(repo, tagName) {
   const requiredMatchers = {
-    macos: /^apifuck-desktop-aarch64-apple-darwin\.zip$/,
+    macos: /^apifuck-desktop-aarch64-apple-darwin\.dmg$/,
     windows: /^apifuck-desktop-x86_64-pc-windows-msvc\.exe$/,
     linux: /^apifuck-desktop-x86_64-unknown-linux-gnu$/,
   }
@@ -122,7 +122,7 @@ async function resolveAssets(repo, tagName) {
 
     const assets = release.assets ?? []
     const selectedAssets = {
-      macos: findAsset(assets, requiredMatchers.macos),
+      macos: findAsset(assets, requiredMatchers.macos) ?? findAsset(assets, /^apifuck-desktop-aarch64-apple-darwin\.zip$/),
       windows: findAsset(assets, requiredMatchers.windows),
       linux: findAsset(assets, requiredMatchers.linux),
     }

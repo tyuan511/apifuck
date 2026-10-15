@@ -46,6 +46,14 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo build --workspace --locked
+      - uses: actions/setup-node@v7
+        if: runner.os == 'macOS'
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: Verify macOS app and DMG packaging without launching the app
+        if: runner.os == 'macOS'
+        run: node --test scripts/release/macos-package.test.mjs
       - name: Warm release dependencies on main
         if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
         run: cargo build --release --locked -p apifuck-desktop --target "${{ matrix.target }}"

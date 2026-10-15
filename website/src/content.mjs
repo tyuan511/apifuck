@@ -104,7 +104,7 @@ export const content = {
     sourceGuide: "从源码运行",
     releaseNote: "仅提供与当前原生架构匹配的文件。历史版本与当前产品可能不同。",
     os: [
-      ["macOS", "Apple Silicon · ZIP"],
+      ["macOS", "Apple Silicon"],
       ["Windows", "x86_64 · EXE"],
       ["Linux", "x86_64 · Binary"],
     ],
@@ -252,7 +252,7 @@ export const content = {
     releaseNote:
       "Only builds matching the current native architecture are offered. Historical versions may differ from the current product.",
     os: [
-      ["macOS", "Apple Silicon · ZIP"],
+      ["macOS", "Apple Silicon"],
       ["Windows", "x86_64 · EXE"],
       ["Linux", "x86_64 · Binary"],
     ],

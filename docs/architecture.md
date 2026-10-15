@@ -86,7 +86,7 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 
 `assets/` 中的品牌素材、Lucide 图标以及 `crates/core/resources/javascript/` 下的转换器和运行时 bundle 编译嵌入。修改 JavaScript bundle 才需要 Bun；普通 Rust 构建和应用运行无需 JavaScript 工具链。
 
-核心与 Demo 集成测试通过回环服务验证行为；桌面单元测试验证草稿、导航、变量、语言服务等模型。CI 配置覆盖 macOS/Linux/Windows。发布输出独立可执行文件，不包含签名安装器。
+核心与 Demo 集成测试通过回环服务验证行为；桌面单元测试验证草稿、导航、变量、语言服务等模型。CI 配置覆盖 macOS/Linux/Windows。macOS 发布流程生成签名、公证的应用包、DMG 和整包更新归档；Windows/Linux 保留独立程序。`core/src/update/macos.rs` 适配 `self_update` 的整包替换，复用已有更新界面及下载校验。
 
 开发命令见 [development.md](development.md)，发布门禁与校验见 [auto-update.md](auto-update.md)。
 

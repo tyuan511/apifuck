@@ -87,9 +87,9 @@ jobs:
       - run: cargo build --release --locked -p apifuck-desktop --target "${{ matrix.target }}"
       - name: Stage binary and checksum
         run: node scripts/release/artifacts.mjs stage "${{ matrix.target }}"
-      - name: Sign and notarize macOS distribution
+      - name: Package, sign and notarize macOS app and DMG
         if: runner.os == 'macOS'
-        timeout-minutes: 40
+        timeout-minutes: 75
         env:
           APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
           APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}

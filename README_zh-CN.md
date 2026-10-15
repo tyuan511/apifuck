@@ -19,26 +19,26 @@
 
 ## 下载
 
-原生桌面程序通过 [GitHub Releases](https://github.com/tyuan511/apifuck/releases) 分发。当前发布流程生成 macOS Apple Silicon、Linux x86_64 和 Windows x86_64 的独立可执行文件，附件名为 `apifuck-desktop-<target>`，Windows 以 `.exe` 结尾。
+原生桌面程序通过 [GitHub Releases](https://github.com/tyuan511/apifuck/releases) 分发。当前发布流程为 macOS Apple Silicon 生成 `.app`、DMG 和整包更新归档，Linux x86_64 和 Windows x86_64 保留独立程序。
 
 <!-- release-downloads:start -->
 | 平台 | 最新稳定版 |
 | --- | --- |
-| macOS Apple Silicon | [下载](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-aarch64-apple-darwin.zip) |
+| macOS Apple Silicon | [下载](https://github.com/tyuan511/apifuck/releases/latest) |
 | Windows x86_64 | [下载](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-pc-windows-msvc.exe) |
 | Linux x86_64 | [下载](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-unknown-linux-gnu) |
 
 以上直链指向最新稳定版中的同名附件；若该版本尚无原生附件，请从源码运行。历史版本见 [Releases](https://github.com/tyuan511/apifuck/releases)。
 <!-- release-downloads:end -->
 
-macOS 下载 ZIP 后解压运行，Windows 直接运行 `.exe`。Linux 下载后先添加可执行权限：
+macOS 打开 DMG，将 `ApiFuck.app` 拖入 Applications 后启动。如果已安装此前的 v0.1.0 独立程序，请手动下载本次 DMG；自动更新只选择更高版本。Windows 直接运行 `.exe`。Linux 下载后先添加可执行权限：
 
 ```sh
 chmod +x apifuck-desktop-x86_64-unknown-linux-gnu
 ./apifuck-desktop-x86_64-unknown-linux-gnu
 ```
 
-当前提供独立程序，没有 `.app`、DMG 或安装器，也没有 Intel Mac 和 Linux ARM64 附件。Linux 系统依赖见 [开发指南](docs/development.md)。
+macOS 应用包和 DMG 经签名、公证并装订票据；Windows 和 Linux 仍提供独立程序。当前没有 Intel Mac 和 Linux ARM64 附件。Linux 系统依赖见 [开发指南](docs/development.md)。
 
 工作区版本以 [Cargo.toml](Cargo.toml) 为准；仓库代码不代表已经发布。历史发布说明保留在 [docs/release](docs/release)，其中旧版本的技术栈与安装包说明不适用于当前原生架构。
 

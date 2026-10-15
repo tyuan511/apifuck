@@ -1,4 +1,6 @@
-//! GitHub release updates for the standalone native executable.
+//! GitHub release updates for standalone executables and macOS application bundles.
+#[cfg(target_os = "macos")]
+mod macos;
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -15,6 +17,7 @@ pub struct Release {
     url: String,
     sha256: String,
     size: u64,
+    bundle: bool,
 }
 impl Release {
     pub fn version(&self) -> &str {
@@ -24,6 +27,18 @@ impl Release {
         &self.notes
     }
     pub fn select(value: &Value, current: &str, target: &str) -> Result<Option<Self>> {
+        Self::select_for_install(value, current, target, false)
+    }
+    fn select_for_install(
+        value: &Value,
+        current: &str,
+        target: &str,
+        bundle: bool,
+    ) -> Result<Option<Self>> {
+        ensure!(
+            !bundle || target.ends_with("apple-darwin"),
+            "无效的应用包更新平台"
+        );
         if value["draft"] == true || value["prerelease"] == true {
             return Ok(None);
         }
@@ -37,7 +52,9 @@ impl Release {
         {
             return Ok(None);
         }
-        let suffix = if target.contains("windows") {
+        let suffix = if bundle {
+            ".app.tar.gz"
+        } else if target.contains("windows") {
             ".exe"
         } else {
             ""
@@ -85,6 +102,7 @@ impl Release {
             url: url.into(),
             sha256: sha256.to_lowercase(),
             size,
+            bundle,
         }))
     }
     pub fn verify(&self, bytes: &[u8]) -> Result<()> {
@@ -120,7 +138,22 @@ pub async fn check() -> Result<Option<Release>> {
         return Ok(None);
     }
     let value: Value = response.error_for_status()?.json().await?;
-    Release::select(&value, env!("CARGO_PKG_VERSION"), &target())
+    #[cfg(target_os = "macos")]
+    let bundle = app_bundle(&std::env::current_exe()?).is_some();
+    #[cfg(not(target_os = "macos"))]
+    let bundle = false;
+    Release::select_for_install(&value, env!("CARGO_PKG_VERSION"), &target(), bundle)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn app_bundle(executable: &Path) -> Option<&Path> {
+    let macos = executable.parent()?;
+    let contents = macos.parent()?;
+    let app = contents.parent()?;
+    (macos.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && app.extension()? == "app")
+        .then_some(app)
 }
 /// Read notes for the installed version, never substitute the latest release.
 pub async fn release_notes(version: &str) -> Result<Option<String>> {
@@ -248,6 +281,12 @@ async fn download_with_client(
 pub fn install(download: &DownloadedUpdate) -> Result<()> {
     // Recheck immediately before replacing the executable, not only at download time.
     download.verify()?;
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = app_bundle(&std::env::current_exe()?) {
+        ensure!(download.release.bundle, "应用包不能使用单文件更新");
+        return macos::install(download, bundle);
+    }
+    ensure!(!download.release.bundle, "独立程序不能安装应用包更新");
     self_replace::self_replace(&download.path)
         .context("无法安装更新，请确认应用位于可写目录（macOS 请先移出磁盘映像）")?;
     Ok(())
@@ -257,6 +296,44 @@ pub fn install(download: &DownloadedUpdate) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn application_bundles_select_only_whole_bundle_assets() {
+        assert_eq!(
+            app_bundle(Path::new(
+                "/Applications/ApiFuck.app/Contents/MacOS/apifuck-desktop"
+            )),
+            Some(Path::new("/Applications/ApiFuck.app"))
+        );
+        assert!(app_bundle(Path::new("/tmp/apifuck-desktop")).is_none());
+        assert!(app_bundle(Path::new("/tmp/Other.app/wrong/MacOS/apifuck-desktop")).is_none());
+        let target = "aarch64-apple-darwin";
+        let mut value = release_value(target);
+        assert!(
+            Release::select_for_install(&value, "0.1.0", target, true)
+                .unwrap()
+                .is_none()
+        );
+        let mut bundle = value["assets"][0].clone();
+        bundle["name"] = json!(format!("apifuck-desktop-{target}.app.tar.gz"));
+        bundle["browser_download_url"] = json!(format!(
+            "https://github.com/tyuan511/apifuck/releases/download/v0.2.0/apifuck-desktop-{target}.app.tar.gz"
+        ));
+        value["assets"].as_array_mut().unwrap().push(bundle);
+        assert!(
+            Release::select_for_install(&value, "0.1.0", target, true)
+                .unwrap()
+                .unwrap()
+                .bundle
+        );
+        assert!(
+            !Release::select(&value, "0.1.0", target)
+                .unwrap()
+                .unwrap()
+                .bundle
+        );
+        value["assets"][1]["digest"] = Value::Null;
+        assert!(Release::select_for_install(&value, "0.1.0", target, true).is_err());
+    }
     #[test]
     fn rejects_wrong_version_asset_and_checksum() {
         let data = b"test executable";
@@ -366,6 +443,7 @@ mod tests {
                 url: format!("http://{address}/binary"),
                 sha256: format!("{:x}", Sha256::digest(digest_body)),
                 size: declared_size,
+                bundle: false,
             };
             let directory = tempfile::tempdir().unwrap();
             let client = reqwest::Client::builder()

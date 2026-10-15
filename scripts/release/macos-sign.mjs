@@ -3,7 +3,8 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { assetName, digest, macosArchive } from './artifacts.mjs'
+import { assetName, digest, macosArchive, macosBundleArchive, macosDmg } from './artifacts.mjs'
+import { createApp, createDmg, createBundleArchive, bundleIdentifier } from './macos-package.mjs'
 
 const requiredSecrets = ['APPLE_CERT_P12', 'APPLE_CERT_PASSWORD', 'APPLE_API_KEY_P8', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
 
@@ -69,6 +70,9 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
   // Refuse to reuse another invocation's keychain, including on self-hosted runners.
   fs.mkdirSync(directory, { mode: 0o700 })
   const archive = path.join(root, 'release-assets', macosArchive)
+  const bundleArchive = path.join(root, 'release-assets', macosBundleArchive)
+  const dmg = path.join(root, 'release-assets', macosDmg)
+  const assets = [file, archive, bundleArchive, dmg]
   const diagnostics = path.join(env.RUNNER_TEMP, 'apifuck-notarization')
   fs.mkdirSync(diagnostics, { recursive: true })
   const password = randomBytes(32).toString('hex')
@@ -76,9 +80,8 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
   const apiKey = path.join(directory, 'AuthKey.p8')
   const credentials = ['--key', apiKey, '--key-id', env.APPLE_API_KEY_ID, '--issuer', env.APPLE_API_ISSUER]
   // Hashes must be regenerated after signing changes the binary's bytes.
-  fs.rmSync(`${file}.sha256`, { force: true })
-  fs.rmSync(`${archive}.sha256`, { force: true })
-  fs.rmSync(archive, { force: true })
+  for (const asset of assets) fs.rmSync(`${asset}.sha256`, { force: true })
+  for (const asset of assets.slice(1)) fs.rmSync(asset, { force: true })
   try {
     fs.writeFileSync(certificate, Buffer.from(env.APPLE_CERT_P12, 'base64'), { mode: 0o600 })
     fs.writeFileSync(apiKey, env.APPLE_API_KEY_P8, { mode: 0o600 })
@@ -92,23 +95,51 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
     run('security', ['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', password, keychain])
     run('security', ['list-keychains', '-d', 'user', '-s', keychain, ...original])
     const identity = developerIdentity(run('security', ['find-identity', '-v', '-p', 'codesigning', keychain]))
-    fs.chmodSync(file, 0o755)
-    run('codesign', ['--force', '--sign', identity, '--keychain', keychain, '--options', 'runtime', '--timestamp', '--identifier', 'dev.fastvibe.apifuck', file])
-    run('codesign', ['--verify', '--strict', '--verbose=2', file])
-    run('ditto', ['-c', '-k', '--keepParent', file, archive])
-    const response = run('xcrun', ['notarytool', 'submit', archive, ...credentials, '--wait', '--timeout', '30m', '--output-format', 'json', '--no-progress'])
-    fs.writeFileSync(path.join(diagnostics, 'result.json'), response)
-    const result = JSON.parse(response)
-    if (result.status !== 'Accepted') {
-      if (typeof result.id === 'string') {
-        try { run('xcrun', ['notarytool', 'log', result.id, ...credentials, path.join(diagnostics, 'log.json')]) }
-        catch { /* The original rejection remains the release-blocking error. */ }
+    const sign = (target) => run('codesign', ['--force', '--sign', identity, '--keychain', keychain, '--options', 'runtime', '--timestamp', '--identifier', bundleIdentifier, target])
+    const verify = (target) => run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', target])
+    const notarize = (target, name) => {
+      const response = run('xcrun', ['notarytool', 'submit', target, ...credentials, '--wait', '--timeout', '30m', '--output-format', 'json', '--no-progress'])
+      fs.writeFileSync(path.join(diagnostics, `${name}-result.json`), response)
+      const result = JSON.parse(response)
+      if (result.status !== 'Accepted') {
+        if (typeof result.id === 'string') {
+          try { run('xcrun', ['notarytool', 'log', result.id, ...credentials, path.join(diagnostics, `${name}-log.json`)]) }
+          catch { /* Keep the original rejection. */ }
+        }
+        throw new Error(`Apple notarization was not Accepted for ${name} (${result.status ?? 'unknown'}); see notarization diagnostics`)
       }
-      throw new Error(`Apple notarization was not Accepted (${result.status ?? 'unknown'}); see notarization diagnostics`)
     }
-    run('codesign', ['--verify', '--strict', '--verbose=2', file])
-    for (const asset of [file, archive]) fs.writeFileSync(`${asset}.sha256`, `${digest(asset)}  ${path.basename(asset)}\n`)
-    console.log('macOS Developer ID signature verified; Apple notarization Accepted')
+    const staple = (target) => {
+      run('xcrun', ['stapler', 'staple', target])
+      run('xcrun', ['stapler', 'validate', target])
+    }
+    fs.chmodSync(file, 0o755)
+    sign(file)
+    verify(file)
+    // One submission covers both the legacy standalone executable and the new app.
+    const submission = path.join(directory, 'submission')
+    fs.mkdirSync(submission)
+    fs.copyFileSync(file, path.join(submission, path.basename(file)))
+    const app = createApp({ root, binary: file, directory: submission, run })
+    sign(app)
+    verify(app)
+    const submissionArchive = path.join(directory, 'notarization.zip')
+    run('ditto', ['-c', '-k', '--keepParent', submission, submissionArchive])
+    notarize(submissionArchive, 'app')
+    staple(app)
+    verify(app)
+    run('ditto', ['-c', '-k', '--keepParent', file, archive])
+    // Match the whole-app archive used by Rust bundle updaters, including Tauri.
+    createBundleArchive({ app, destination: bundleArchive, run })
+    createDmg({ app, destination: dmg, directory, run })
+    sign(dmg)
+    verify(dmg)
+    notarize(dmg, 'dmg')
+    staple(dmg)
+    verify(dmg)
+    // No publishable hashes until both notarizations and all staple checks pass.
+    for (const asset of assets) fs.writeFileSync(`${asset}.sha256`, `${digest(asset)}  ${path.basename(asset)}\n`)
+    console.log('macOS app and DMG signatures verified; Apple notarization Accepted; tickets stapled')
   } finally {
     cleanup(env, run)
   }

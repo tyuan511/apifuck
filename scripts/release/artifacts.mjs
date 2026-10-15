@@ -9,7 +9,9 @@ export function assetName(target) {
   return `apifuck-desktop-${target}${target.includes('windows') ? '.exe' : ''}`
 }
 export const macosArchive = `${assetName('aarch64-apple-darwin')}.zip`
-export const releaseAssetNames = [...targets.map(assetName), macosArchive]
+export const macosBundleArchive = `${assetName('aarch64-apple-darwin')}.app.tar.gz`
+export const macosDmg = `${assetName('aarch64-apple-darwin')}.dmg`
+export const releaseAssetNames = [...targets.map(assetName), macosArchive, macosBundleArchive, macosDmg]
 export function digest(file) {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 }

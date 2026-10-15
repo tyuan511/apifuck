@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { digest, releaseAssetNames, verifyArtifacts, verifyUploadedAssets } from './artifacts.mjs'
+import { digest, releaseAssetNames, macosDmg, macosBundleArchive, verifyArtifacts, verifyUploadedAssets } from './artifacts.mjs'
 
 test('release cannot publish with missing, corrupt or incomplete platform assets', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apifuck-assets-'))
@@ -21,6 +21,16 @@ test('release cannot publish with missing, corrupt or incomplete platform assets
   fs.rmSync(archive)
   assert.throws(() => verifyArtifacts(root))
   fs.writeFileSync(archive, archiveBytes)
+  for (const name of [macosDmg, macosBundleArchive]) {
+    const file = path.join(root, name)
+    const bytes = fs.readFileSync(file)
+    fs.rmSync(file)
+    assert.throws(() => verifyArtifacts(root))
+    fs.writeFileSync(file, bytes)
+    fs.appendFileSync(file, 'corrupt')
+    assert.throws(() => verifyArtifacts(root), /Checksum mismatch/)
+    fs.writeFileSync(file, bytes)
+  }
   assert.equal(fs.readFileSync(path.join(root, 'SHA256SUMS'), 'utf8').trim().split('\n').length, releaseAssetNames.length)
   const release = { assets: assets.map(a => ({ name: a.name, size: a.size, state: 'uploaded', digest: `sha256:${a.sha256}` })) }
   verifyUploadedAssets(release, assets)

@@ -24,21 +24,21 @@ Native builds are distributed through [GitHub Releases](https://github.com/tyuan
 <!-- release-downloads:start -->
 | Platform | Latest stable build |
 | --- | --- |
-| macOS Apple Silicon | [Download ZIP](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-aarch64-apple-darwin.zip) |
+| macOS Apple Silicon | [Download](https://github.com/tyuan511/apifuck/releases/latest) |
 | Windows x86_64 | [Download EXE](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-pc-windows-msvc.exe) |
 | Linux x86_64 | [Download binary](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-unknown-linux-gnu) |
 
 These links resolve to matching assets in the latest stable release. If native assets are not yet available there, run from source below. Older versions are listed in [Releases](https://github.com/tyuan511/apifuck/releases).
 <!-- release-downloads:end -->
 
-On macOS, extract the ZIP and run the executable. On Windows, run the `.exe`. On Linux, make the downloaded binary executable first:
+On macOS, open the DMG and drag `ApiFuck.app` into Applications before launching it. If you installed the earlier standalone v0.1.0 build, download this DMG manually: automatic updates only select newer version numbers. On Windows, run the `.exe`. On Linux, make the downloaded binary executable first:
 
 ```sh
 chmod +x apifuck-desktop-x86_64-unknown-linux-gnu
 ./apifuck-desktop-x86_64-unknown-linux-gnu
 ```
 
-Builds are standalone executables, without an `.app`, DMG, or installer. Intel Mac and Linux ARM64 assets are not currently produced. See the [development guide](docs/development.md) for Linux system dependencies.
+The macOS release workflow produces a signed and notarized `.app` inside a DMG, plus a whole-app archive for updates. Windows and Linux retain standalone executables. Intel Mac and Linux ARM64 assets are not currently produced. See the [development guide](docs/development.md) for Linux system dependencies.
 
 The workspace version lives in [Cargo.toml](Cargo.toml); source code in this repository does not imply a published release. [Historical release notes](docs/release) describe their original versions, whose architecture and packaging may differ from the current native application.
 

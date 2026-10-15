@@ -12,6 +12,15 @@ const release = () => ({
 test("offers exact native binaries from the verified repository", () => {
   assert.equal(Object.keys(nativeAssets(release())).length, 3);
 });
+test("prefers the native DMG while keeping standalone ZIP releases downloadable", () => {
+  const data = release();
+  const name = "apifuck-desktop-aarch64-apple-darwin.zip";
+  const zip = { name, size: 1024, browser_download_url: `https://github.com/tyuan511/apifuck/releases/download/v0.1.0/${name}` };
+  data.assets.unshift(zip);
+  assert.ok(nativeAssets(data).mac.url.endsWith(".dmg"));
+  data.assets = data.assets.filter((asset) => !asset.name.endsWith(".dmg"));
+  assert.ok(nativeAssets(data).mac.url.endsWith(".zip"));
+});
 test("never offers historical installers, drafts, prereleases or empty assets", () => {
   assert.deepEqual(
     nativeAssets({
