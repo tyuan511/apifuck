@@ -1,0 +1,17 @@
+{
+  "name": "apifuck-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/serve.mjs",
+    "check": "node --check src/site.js && node --check src/theme.js && node --check scripts/build.mjs && node --check scripts/serve.mjs && node --test scripts/*.test.mjs",
+    "test:browser": "node scripts/check-browser.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

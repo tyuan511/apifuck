@@ -1,0 +1,9 @@
+*
+!src/
+!src/**
+!public/
+!public/**
+!scripts/
+!scripts/build.mjs
+!deploy/
+!deploy/nginx.conf
