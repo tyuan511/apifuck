@@ -1,0 +1,37 @@
+info:
+  name: 02 · 创建用户
+  type: http
+  seq: 2
+  description: 创建真实的内存记录，自动保存 created_user_id。后续详情、更新、删除请求引用这个变量。
+http:
+  method: POST
+  url: "{{base_url}}/users"
+  body:
+    type: json
+    data: |-
+      {
+        "name": "{{new_user_name}}",
+        "email": "{{new_user_email}}",
+        "role": "developer",
+        "city": "Hangzhou"
+      }
+  auth: inherit
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        bru.setEnvVar('created_user_id', String(res.body.id));
+        bru.setVar('created_user_name', res.body.name);
+    - type: tests
+      code: |-
+        test('HTTP 201', () => expect(res.status).to.equal(201));
+        test('Created ID saved',()=>expect(bru.getEnvVar('created_user_id')).to.equal(String(res.body.id)));
+        test('Created name',()=>expect(res.body.name).to.equal('Alex Chen'));
+docs: |
+  # 02 · 创建用户
+
+  创建真实的内存记录，自动保存 created_user_id。后续详情、更新、删除请求引用这个变量。
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

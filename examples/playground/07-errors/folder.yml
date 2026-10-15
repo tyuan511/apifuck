@@ -1,0 +1,14 @@
+info:
+  name: 响应与边界
+  type: folder
+  seq: 7
+  description: 预期错误、重定向、延迟和取消
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 07-errors
+      description: 目录级继承请求头
+docs: |-
+  # 响应与边界
+
+  预期错误、重定向、延迟和取消。本目录中的请求均已填好，发送后可以查看 Tests。

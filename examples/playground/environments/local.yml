@@ -1,0 +1,45 @@
+name: local
+description: 本地 Demo 服务。启动器自动填入可用端口，无需编辑 URL。
+variables:
+  - name: base_url
+    value: http://127.0.0.1:8787
+    description: HTTP 服务地址
+  - name: ws_url
+    value: ws://127.0.0.1:8787/socket
+    description: WebSocket 地址
+  - name: email
+    value: demo@apifuck.dev
+    description: 本地演示值
+  - name: password
+    value: demo123
+    description: 本地演示值
+  - name: username
+    value: demo
+    description: 本地演示值
+  - name: token
+    value: demo-token-apifuck
+    description: 预置可用 Token；登录请求会自动更新
+  - name: api_key
+    value: af_demo_local_2026
+    description: 本地演示值
+  - name: user_id
+    value: "1"
+    description: 本地演示值
+  - name: created_user_id
+    value: "3"
+    description: 创建用户后自动写回，用于详情、更新、删除
+  - name: new_user_name
+    value: Alex Chen
+    description: 本地演示值
+  - name: new_user_email
+    value: alex@example.test
+    description: 本地演示值
+  - name: page_size
+    value: "3"
+    description: 本地演示值
+  - name: trace_id
+    value: demo-preview
+    description: 用于代码预览；实际请求由脚本覆盖
+  - name: optional_debug
+    value: "true"
+    description: 本地演示值

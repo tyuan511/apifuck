@@ -1,0 +1,28 @@
+info:
+  name: 03 · 查看创建的用户
+  type: http
+  seq: 3
+  description: 03 · 查看创建的用户
+http:
+  method: GET
+  url: "{{base_url}}/users/:id"
+  params:
+    - name: id
+      value: "{{created_user_id}}"
+      type: path
+      description: 来自创建请求的响应；初始值 3 也可直接查看
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('User ID',()=>expect(String(res.body.id)).to.equal(bru.getEnvVar('created_user_id')));
+docs: |
+  # 03 · 查看创建的用户
+
+  03 · 查看创建的用户
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

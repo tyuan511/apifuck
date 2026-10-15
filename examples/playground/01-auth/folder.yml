@@ -1,0 +1,17 @@
+info:
+  name: 认证
+  type: folder
+  seq: 1
+  description: 登录、Bearer、Basic、API Key 与错误认证
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 01-auth
+      description: 目录级继承请求头
+  auth:
+    type: bearer
+    token: "{{token}}"
+docs: |-
+  # 认证
+
+  登录、Bearer、Basic、API Key 与错误认证。本目录中的请求均已填好，发送后可以查看 Tests。

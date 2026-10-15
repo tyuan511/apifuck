@@ -1,0 +1,3 @@
+https://raw.githubusercontent.com/opencollection-dev/opencollection/main/packages/oc-schema/src/opencollection.schema.json
+Retrieved: 2026-10-15
+SHA256: b9cd299f4d2345036b48a94fc5675393b1f1f10b58403ed2b6288f6e609579e6

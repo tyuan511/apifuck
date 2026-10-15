@@ -1,0 +1,14 @@
+info:
+  name: 参数与请求头
+  type: folder
+  seq: 3
+  description: Query、Path、重复键、编码与禁用项
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 03-params
+      description: 目录级继承请求头
+docs: |-
+  # 参数与请求头
+
+  Query、Path、重复键、编码与禁用项。本目录中的请求均已填好，发送后可以查看 Tests。

@@ -1,0 +1,14 @@
+opencollection: 1.0.0
+info:
+  name: ApiFuck 示例
+bundled: false
+request:
+  headers:
+    - name: Accept
+      value: application/json
+  variables:
+    - name: client_name
+      value: apifuck
+extensions:
+  apifuck:
+    version: 1

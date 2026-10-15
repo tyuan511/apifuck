@@ -1,0 +1,28 @@
+info:
+  name: Path 参数
+  type: http
+  seq: 2
+  description: Path 参数
+http:
+  method: GET
+  url: "{{base_url}}/users/:userId"
+  params:
+    - name: userId
+      value: "{{user_id}}"
+      type: path
+      description: 查看 URL 和 Path 表格中的值
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Path resolved',()=>expect(res.body.id).to.equal(1));
+docs: |
+  # Path 参数
+
+  Path 参数
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

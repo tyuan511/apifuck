@@ -1,208 +1,134 @@
 name: Release
-
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
-
+    inputs:
+      tag:
+        description: Existing v<semver> tag to build or resume a draft release
+        required: true
 permissions:
   contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
-  create-release-draft:
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-    outputs:
-      release-id: ${{ steps.release.outputs.release_id }}
-
+  validate:
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@1.95
+      - name: Require matching version, lockfile and release notes
+        run: node scripts/release/validate-release.mjs "$RELEASE_TAG"
+      - name: Test release tooling
+        run: node --test scripts/release/*.test.mjs
 
-      - name: Resolve version from tag
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_NOTES_PATH=docs/release/${VERSION}.md" >> "$GITHUB_ENV"
-
-      - name: Create or update GitHub release draft
-        id: release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ ! -f "${RELEASE_NOTES_PATH}" ]; then
-            echo "Missing release notes file: ${RELEASE_NOTES_PATH}" >&2
-            exit 1
-          fi
-
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release edit "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes-file "${RELEASE_NOTES_PATH}" \
-              --draft
-          else
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
-              --notes-file "${RELEASE_NOTES_PATH}" \
-              --draft \
-              --verify-tag
-          fi
-
-          RELEASE_ID="$(gh release view "${GITHUB_REF_NAME}" --json databaseId --jq '.databaseId')"
-          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
-
-  publish-tauri:
-    needs: create-release-draft
-    permissions:
-      contents: write
+  build:
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: ''
-          - platform: ubuntu-22.04
-            args: ''
-          - platform: windows-latest
-            args: ''
-    runs-on: ${{ matrix.platform }}
-
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Linux libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Resolve version from tag
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_NOTES_PATH=docs/release/${VERSION}.md" >> "$GITHUB_ENV"
-
-      - name: Sync package versions from tag
-        shell: bash
-        run: |
-          bun run release:sync-version -- "${RELEASE_VERSION}" --verify-release-notes
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build and publish Tauri release
-        uses: tauri-apps/tauri-action@v0.6.2
+          sudo apt-get install -y clang libasound2-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libssl-dev pkg-config libfontconfig1-dev libudev-dev
+      - name: Require Apple signing and notarization credentials
+        if: runner.os == 'macOS'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/release/macos-sign.mjs check
+      - uses: dtolnay/rust-toolchain@1.95
         with:
-          releaseId: ${{ needs.create-release-draft.outputs.release-id }}
-          tagName: ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: false
-          tauriScript: bun tauri
-          args: ${{ matrix.args }}
+          components: rustfmt, clippy
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - run: cargo fmt --all --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo build --release --locked -p apifuck-desktop --target "${{ matrix.target }}"
+      - name: Stage binary and checksum
+        run: node scripts/release/artifacts.mjs stage "${{ matrix.target }}"
+      - name: Sign and notarize macOS distribution
+        if: runner.os == 'macOS'
+        timeout-minutes: 40
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/release/macos-sign.mjs
+      - name: Remove temporary Apple signing credentials
+        if: always() && runner.os == 'macOS'
+        run: node scripts/release/macos-sign.mjs cleanup
+      - name: Upload notarization diagnostics on failure
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-notarization-diagnostics
+          path: ${{ runner.temp }}/apifuck-notarization/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 7
 
-  bump-version:
-    needs: publish-tauri
-    runs-on: ubuntu-22.04
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
-
     steps:
-      - name: Checkout main branch
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
         with:
-          bun-version: latest
-
-      - name: Resolve version from tag
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "RELEASE_NOTES_PATH=docs/release/${VERSION}.md" >> "$GITHUB_ENV"
-
-      - name: Sync version files on main
-        shell: bash
-        run: |
-          bun run release:sync-version -- "${RELEASE_VERSION}"
-
-      - name: Sync README download links from release assets
-        shell: bash
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish only after all builds and checksum checks succeed
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          node scripts/release/update-readme-downloads.mjs "${RELEASE_VERSION}" --repo "${GITHUB_REPOSITORY}"
-
-      - name: Commit and push version bump
-        shell: bash
-        run: |
-          FILES_TO_CHECK=(package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json README.md "${RELEASE_NOTES_PATH}")
-          if [ -f README_en.md ]; then
-            FILES_TO_CHECK+=(README_en.md)
-          fi
-
-          if git diff --quiet -- "${FILES_TO_CHECK[@]}"; then
-            echo "No version bump needed"
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${FILES_TO_CHECK[@]}"
-          git commit -m "chore: bump version to ${RELEASE_VERSION}"
-          git push origin HEAD:main
-
-  publish-release:
-    needs:
-      - publish-tauri
-      - bump-version
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Publish GitHub release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
+        run: node scripts/release/publish.mjs "$RELEASE_TAG" release-assets

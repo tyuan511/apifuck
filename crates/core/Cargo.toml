@@ -1,0 +1,30 @@
+[package]
+name = "apifuck-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "stream", "gzip", "brotli", "deflate", "socks"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+rquickjs = "0.11"
+regex = "1"
+url = "2"
+base64 = "0.22"
+jsonschema = { version = "0.33", default-features = false }
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+shell-words = "1"
+yaml-edit = "0.3.2"
+
+semver = "1"
+sha2 = "0.10"
+self-replace = "1"
+
+[dev-dependencies]

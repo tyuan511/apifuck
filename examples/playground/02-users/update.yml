@@ -1,0 +1,35 @@
+info:
+  name: 04 · 更新用户
+  type: http
+  seq: 4
+  description: 04 · 更新用户
+http:
+  method: PATCH
+  url: "{{base_url}}/users/:id"
+  params:
+    - name: id
+      value: "{{created_user_id}}"
+      type: path
+  body:
+    type: json
+    data: |-
+      {
+        "name": "Alex Chen · Updated",
+        "role": "admin",
+        "active": true
+      }
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Updated role',()=>expect(res.body.role).to.equal('admin'));
+docs: |
+  # 04 · 更新用户
+
+  04 · 更新用户
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

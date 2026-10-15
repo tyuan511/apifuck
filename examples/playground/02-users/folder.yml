@@ -1,0 +1,14 @@
+info:
+  name: 用户工作流
+  type: folder
+  seq: 2
+  description: 完整的 Create → Read → Update → Delete
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 02-users
+      description: 目录级继承请求头
+docs: |-
+  # 用户工作流
+
+  完整的 Create → Read → Update → Delete。本目录中的请求均已填好，发送后可以查看 Tests。

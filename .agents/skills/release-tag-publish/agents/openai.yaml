@@ -1,4 +1,4 @@
 interface:
   display_name: "Release Tag Publish"
-  short_description: "Safely prepare notes and push release tags"
-  default_prompt: "Use $release-tag-publish to fetch remote tags, prepare release notes, commit release changes to main, and publish a requested version."
+  short_description: "Check, version, document and publish ApiFuck releases"
+  default_prompt: "Use $release-tag-publish to check the release candidate, generate its version and notes, publish its tag, and verify the GitHub Release."

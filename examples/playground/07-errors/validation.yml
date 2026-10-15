@@ -1,0 +1,30 @@
+info:
+  name: 422 · 校验失败
+  type: http
+  seq: 2
+  description: 422 · 校验失败
+http:
+  method: POST
+  url: "{{base_url}}/users"
+  body:
+    type: json
+    data: |-
+      {
+        "name": "",
+        "email": "not-an-email"
+      }
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 422', () => expect(res.status).to.equal(422));
+        test('Validation error',()=>expect(res.body.error.code).to.equal('VALIDATION_ERROR'));
+docs: |
+  # 422 · 校验失败
+
+  422 · 校验失败
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

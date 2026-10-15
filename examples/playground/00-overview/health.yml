@@ -1,0 +1,25 @@
+info:
+  name: 服务健康检查
+  type: http
+  seq: 1
+  description: 第一条建议发送的请求。预期 200，验证本地服务、继承请求头和 JSON Schema。
+http:
+  method: GET
+  url: "{{base_url}}/health"
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Demo service', () => expect(res.body.service).to.equal('apifuck-demo'));
+        test('Trace header', () => expect(res.getHeader('x-trace-id')).to.match(/^demo-\d+$/));
+        test('Response schema', () => expect(res.body).to.have.jsonSchema({type:'object',required:['service','status','capabilities'],properties:{status:{const:'ok'},capabilities:{type:'array',items:{type:'string'}}}}));
+docs: |
+  # 服务健康检查
+
+  第一条建议发送的请求。预期 200，验证本地服务、继承请求头和 JSON Schema。
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

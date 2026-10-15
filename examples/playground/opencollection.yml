@@ -1,0 +1,41 @@
+opencollection: 1.0.0
+info:
+  name: ApiFuck Playground
+  summary: 本地 API 调试实验室 · 完整请求、响应与测试场景
+bundled: false
+request:
+  headers:
+    - name: Accept
+      value: application/json
+      description: 默认接收 JSON；SSE 请求会覆盖此项
+    - name: X-Client
+      value: "{{client_name}}"
+      description: 项目级继承请求头
+    - name: X-Trace-Id
+      value: "{{trace_id}}"
+      description: 每次发送前由脚本生成，并在响应头中返回
+  variables:
+    - name: client_name
+      value: apifuck-native
+      description: 项目级客户端标识
+    - name: locale
+      value: zh-CN
+      description: 项目级语言设置
+  scripts:
+    - type: before-request
+      code: bru.setVar('trace_id', 'demo-' + Date.now());
+extensions:
+  apifuck:
+    version: 1
+    requests:
+      04-payloads/upload.yml:
+        multipartFileNames:
+          "1": apifuck-logo.png
+docs: |-
+  # ApiFuck Playground
+
+  使用 `node scripts/demo.mjs` 同时启动本地服务与原生客户端。所有 URL、认证、正文、变量和断言均已填写。
+
+  建议按目录顺序发送请求。WebSocket 请手动连接和发送消息。
+
+  增删改查按 Create → Read → Update → Delete 顺序；使用 Utilities / Reset 恢复初始三位用户。所有账号与密钥均为本地演示数据。

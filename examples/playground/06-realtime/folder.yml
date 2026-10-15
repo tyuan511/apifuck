@@ -1,0 +1,14 @@
+info:
+  name: 实时连接
+  type: folder
+  seq: 6
+  description: SSE 增量事件和 WebSocket 回声
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 06-realtime
+      description: 目录级继承请求头
+docs: |-
+  # 实时连接
+
+  SSE 增量事件和 WebSocket 回声。本目录中的请求均已填好，发送后可以查看 Tests。

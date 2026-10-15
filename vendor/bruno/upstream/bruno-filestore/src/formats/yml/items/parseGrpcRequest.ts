@@ -1,0 +1,145 @@
+import type { Item as BrunoItem } from '@usebruno/schema-types/collection/item';
+import type { GrpcRequest as BrunoGrpcRequest } from '@usebruno/schema-types/requests/grpc';
+import type { GrpcRequest, GrpcMetadata, GrpcMessageVariant } from '@opencollection/types/requests/grpc';
+import type { KeyValue as BrunoKeyValue } from '@usebruno/schema-types/common/key-value';
+import { toBrunoAuth } from '../common/auth';
+import { toBrunoVariables } from '../common/variables';
+import { toBrunoScripts } from '../common/scripts';
+import { toBrunoAssertions } from '../common/assertions';
+import { isNonEmptyString, uuid, ensureString } from '../../../utils';
+
+const toBrunoGrpcMetadata = (metadata: GrpcMetadata[] | null | undefined): BrunoKeyValue[] | undefined => {
+  if (!metadata?.length) {
+    return undefined;
+  }
+
+  const brunoMetadata = metadata.map((meta: GrpcMetadata): BrunoKeyValue => {
+    const brunoMeta: BrunoKeyValue = {
+      uid: uuid(),
+      name: ensureString(meta.name),
+      value: ensureString(meta.value),
+      enabled: meta.disabled !== true
+    };
+
+    if (meta.description) {
+      const desc = typeof meta.description === 'string' ? meta.description : (meta.description as any)?.content || '';
+      if (desc.trim().length) {
+        brunoMeta.description = desc;
+      }
+    }
+
+    return brunoMeta;
+  });
+
+  return brunoMetadata.length ? brunoMetadata : undefined;
+};
+
+const parseGrpcRequest = (ocRequest: GrpcRequest): BrunoItem => {
+  const info = ocRequest.info;
+  const grpc = ocRequest.grpc;
+  const runtime = ocRequest.runtime;
+
+  const brunoRequest: BrunoGrpcRequest = {
+    url: ensureString(grpc?.url),
+    method: ensureString(grpc?.method),
+    methodType: grpc?.methodType || '',
+    protoPath: grpc?.protoFilePath || null,
+    headers: toBrunoGrpcMetadata(grpc?.metadata) || [],
+    auth: toBrunoAuth(grpc?.auth),
+    body: {
+      mode: 'grpc',
+      grpc: []
+    },
+    script: {
+      beforeCallStart: null,
+      beforeMessageSend: null,
+      afterMessageReceive: null,
+      afterCallEnd: null
+    },
+    vars: {
+      req: [],
+      res: []
+    },
+    assertions: [],
+    tests: null,
+    docs: null
+  };
+
+  // message
+  const rawMessage = grpc?.message;
+  if (Array.isArray(rawMessage)) {
+    brunoRequest.body.grpc = (rawMessage as GrpcMessageVariant[]).map(({ title, message }, index) => ({
+      name: title || `message ${index + 1}`,
+      content: ensureString(message)
+    }));
+  } else if (isNonEmptyString(rawMessage)) {
+    brunoRequest.body.grpc = [{
+      name: '',
+      content: rawMessage as string
+    }];
+  }
+
+  // scripts
+  const scripts = toBrunoScripts(runtime?.scripts);
+  if (scripts?.script && brunoRequest.script) {
+    if (scripts.script.beforeCallStart) {
+      brunoRequest.script.beforeCallStart = scripts.script.beforeCallStart;
+    }
+    if (scripts.script.beforeMessageSend) {
+      brunoRequest.script.beforeMessageSend = scripts.script.beforeMessageSend;
+    }
+    if (scripts.script.afterMessageReceive) {
+      brunoRequest.script.afterMessageReceive = scripts.script.afterMessageReceive;
+    }
+    if (scripts.script.afterCallEnd) {
+      brunoRequest.script.afterCallEnd = scripts.script.afterCallEnd;
+    }
+  }
+  if (scripts?.tests) {
+    brunoRequest.tests = scripts.tests;
+  }
+
+  // variables
+  const variables = toBrunoVariables(runtime?.variables);
+  brunoRequest.vars = variables;
+
+  // assertions
+  const assertions = toBrunoAssertions(runtime?.assertions);
+  if (assertions) {
+    brunoRequest.assertions = assertions;
+  }
+
+  // docs
+  if (ocRequest.docs) {
+    brunoRequest.docs = ocRequest.docs;
+  }
+
+  // bruno item
+  const brunoItem: BrunoItem = {
+    uid: uuid(),
+    type: 'grpc-request',
+    seq: info?.seq || 1,
+    name: ensureString(info?.name, 'Untitled Request'),
+    tags: info?.tags || [],
+    request: brunoRequest,
+    settings: {},
+    fileContent: null,
+    root: null,
+    items: [],
+    examples: [],
+    filename: null,
+    pathname: null
+  };
+
+  // description
+  if (info?.description) {
+    const desc = typeof info.description === 'string' ? info.description : (info.description as any)?.content || '';
+    if (desc.trim().length) {
+      brunoItem.description = desc;
+    }
+  }
+
+  return brunoItem;
+};
+
+export default parseGrpcRequest;

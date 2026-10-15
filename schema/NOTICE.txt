@@ -1,0 +1,7 @@
+OpenCollection JSON Schema
+Source and content hash: SOURCE.txt
+Author: Bruno Software Inc.
+Upstream package: @opencollection/schema (package metadata version 0.14.0)
+License declared by upstream package: MIT
+https://github.com/opencollection-dev/opencollection/blob/main/packages/oc-schema/package.json
+This snapshot is unmodified. The upstream repository did not provide a separate LICENSE file at retrieval time.

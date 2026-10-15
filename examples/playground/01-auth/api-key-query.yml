@@ -1,0 +1,27 @@
+info:
+  name: API Key · Query
+  type: http
+  seq: 5
+  description: API Key · Query
+http:
+  method: GET
+  url: "{{base_url}}/auth/api-key"
+  auth:
+    type: apikey
+    key: api_key
+    value: "{{api_key}}"
+    placement: query
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Query placement',()=>expect(res.body.placement).to.equal('query'));
+docs: |
+  # API Key · Query
+
+  API Key · Query
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

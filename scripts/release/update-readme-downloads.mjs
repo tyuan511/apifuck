@@ -34,7 +34,7 @@ function parseArgs(argv) {
 
 function buildHeaders() {
   const headers = {
-    Accept: 'application/vnd.github+json',
+    'Accept': 'application/vnd.github+json',
     'User-Agent': 'apifuck-release-readme-sync',
   }
 
@@ -102,9 +102,9 @@ function buildReleasePageUrl(repo, tagName) {
 
 async function resolveAssets(repo, tagName) {
   const requiredMatchers = {
-    macos: /\.dmg$/i,
-    windows: /-setup\.exe$/i,
-    linux: /\.AppImage$/i,
+    macos: /^apifuck-desktop-aarch64-apple-darwin\.zip$/,
+    windows: /^apifuck-desktop-x86_64-pc-windows-msvc\.exe$/,
+    linux: /^apifuck-desktop-x86_64-unknown-linux-gnu$/,
   }
 
   for (let attempt = 1; attempt <= 12; attempt += 1) {
@@ -140,7 +140,7 @@ async function resolveAssets(repo, tagName) {
     }
   }
 
-  fail(`Release ${tagName} is missing one or more required assets (.dmg, -setup.exe, .AppImage).`)
+  fail(`Release ${tagName} is missing one or more required native desktop binaries.`)
 }
 
 function replaceBetweenMarkers(content, startMarker, endMarker, replacement) {

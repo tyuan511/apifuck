@@ -1,0 +1,29 @@
+info:
+  name: Text · 多行文本
+  type: http
+  seq: 6
+  description: Text · 多行文本
+http:
+  method: POST
+  url: "{{base_url}}/echo"
+  body:
+    type: text
+    data: |
+      ApiFuck Playground
+      Client: {{client_name}}
+      Unicode: 你好，世界 ⚡
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Text content type',()=>expect(res.body.contentType).to.include('text/plain'));
+docs: |
+  # Text · 多行文本
+
+  Text · 多行文本
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

@@ -1,0 +1,2 @@
+[alias]
+demo = "run --quiet --locked -p apifuck-demo --example launch --"

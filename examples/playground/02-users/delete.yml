@@ -1,0 +1,25 @@
+info:
+  name: 05 · 删除用户
+  type: http
+  seq: 5
+  description: 删除创建的记录，返回 204 空响应。再次执行这个用户工作流时先运行 Create。
+http:
+  method: DELETE
+  url: "{{base_url}}/users/:id"
+  params:
+    - name: id
+      value: "{{created_user_id}}"
+      type: path
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: test('HTTP 204', () => expect(res.status).to.equal(204));
+docs: |
+  # 05 · 删除用户
+
+  删除创建的记录，返回 204 空响应。再次执行这个用户工作流时先运行 Create。
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

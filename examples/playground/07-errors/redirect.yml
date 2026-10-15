@@ -1,0 +1,26 @@
+info:
+  name: 302 → 200 · 重定向
+  type: http
+  seq: 4
+  description: 302 → 200 · 重定向
+http:
+  method: GET
+  url: "{{base_url}}/redirect"
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Redirect target',()=>expect(res.body.service).to.equal('apifuck-demo'));
+settings:
+  followRedirects: true
+  maxRedirects: 5
+docs: |
+  # 302 → 200 · 重定向
+
+  302 → 200 · 重定向
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

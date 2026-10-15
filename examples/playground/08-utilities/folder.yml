@@ -1,0 +1,14 @@
+info:
+  name: 工具
+  type: folder
+  seq: 8
+  description: 恢复演示数据
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 08-utilities
+      description: 目录级继承请求头
+docs: |-
+  # 工具
+
+  恢复演示数据。本目录中的请求均已填好，发送后可以查看 Tests。

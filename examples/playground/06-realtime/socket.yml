@@ -1,0 +1,28 @@
+info:
+  name: WebSocket · JSON 回声
+  type: websocket
+  seq: 2
+  description: 连接后有欢迎消息，发送文本或 JSON 会原样回传
+websocket:
+  url: "{{ws_url}}?channel=playground"
+  auth: inherit
+  headers:
+    - name: X-Demo-Client
+      value: "{{client_name}}"
+  message:
+    type: json
+    data: |-
+      {
+        "event": "ping",
+        "message": "你好，ApiFuck ⚡",
+        "channel": "playground"
+      }
+settings:
+  timeout: 10000
+  keepAliveInterval: 15000
+docs: |-
+  # WebSocket 回声
+
+  1. 点击 Connect，等待 connected 欢迎消息。
+  2. 点击 Send message，收到相同 JSON。
+  3. 点击 Cancel 断开。

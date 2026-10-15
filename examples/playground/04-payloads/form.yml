@@ -1,0 +1,37 @@
+info:
+  name: URL Encoded · 表单
+  type: http
+  seq: 2
+  description: URL Encoded · 表单
+http:
+  method: POST
+  url: "{{base_url}}/echo"
+  body:
+    type: form-urlencoded
+    data:
+      - name: email
+        value: "{{email}}"
+        description: 环境变量
+      - name: display_name
+        value: 测试用户
+        description: 中文编码
+      - name: tag
+        value: rust
+      - name: tag
+        value: api
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Form fields',()=>expect(res.body.form).to.have.lengthOf(4));
+        test('Form encoding',()=>expect(res.body.form.find(p=>p.name==='display_name').value).to.equal('测试用户'));
+docs: |
+  # URL Encoded · 表单
+
+  URL Encoded · 表单
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

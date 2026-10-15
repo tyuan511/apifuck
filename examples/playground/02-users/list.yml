@@ -1,0 +1,38 @@
+info:
+  name: 01 · 用户列表与分页
+  type: http
+  seq: 1
+  description: 01 · 用户列表与分页
+http:
+  method: GET
+  url: "{{base_url}}/users"
+  params:
+    - name: page
+      value: "1"
+      type: query
+      description: 页码
+    - name: limit
+      value: "{{page_size}}"
+      type: query
+      description: 每页数量
+    - name: role
+      value: developer
+      type: query
+      description: 可选角色过滤，默认禁用
+      disabled: true
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Users list',()=>expect(res.body.users).to.be.an('array'));
+        test('Pagination',()=>expect(res.body.pagination.limit).to.equal(3));
+docs: |
+  # 01 · 用户列表与分页
+
+  01 · 用户列表与分页
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

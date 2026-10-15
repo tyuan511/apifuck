@@ -1,0 +1,37 @@
+info:
+  name: Multipart · 上传现有 Logo
+  type: http
+  seq: 3
+  description: Multipart · 上传现有 Logo
+http:
+  method: POST
+  url: "{{base_url}}/upload"
+  body:
+    type: multipart-form
+    data:
+      - name: description
+        type: text
+        value: ApiFuck original logo
+        description: 附带的文本字段
+      - name: avatar
+        type: file
+        value: ../assets/apifuck.png
+        contentType: image/png
+        description: 现有 ApiFuck logo，不需要选择额外文件
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 201', () => expect(res.status).to.equal(201));
+        test('Uploaded file',()=>expect(res.body.files[0].filename).to.equal('apifuck-logo.png'));
+        test('PNG content type',()=>expect(res.body.files[0].contentType).to.equal('image/png'));
+        test('File size',()=>expect(res.body.files[0].size).to.be.greaterThan(0));
+docs: |
+  # Multipart · 上传现有 Logo
+
+  Multipart · 上传现有 Logo
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

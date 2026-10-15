@@ -1,0 +1,28 @@
+info:
+  name: XML · 原始正文
+  type: http
+  seq: 5
+  description: XML · 原始正文
+http:
+  method: POST
+  url: "{{base_url}}/echo"
+  body:
+    type: xml
+    data: |-
+      <?xml version="1.0" encoding="UTF-8"?>
+      <request><client>{{client_name}}</client><message>你好</message></request>
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('XML preserved',()=>expect(res.body.body).to.include('<message>你好</message>'));
+docs: |
+  # XML · 原始正文
+
+  XML · 原始正文
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

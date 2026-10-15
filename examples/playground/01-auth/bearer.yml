@@ -1,0 +1,23 @@
+info:
+  name: Bearer · 继承目录认证
+  type: http
+  seq: 2
+  description: Bearer · 继承目录认证
+http:
+  method: GET
+  url: "{{base_url}}/auth/bearer"
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Authenticated',()=>expect(res.body.authenticated).to.equal(true));
+docs: |
+  # Bearer · 继承目录认证
+
+  Bearer · 继承目录认证
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

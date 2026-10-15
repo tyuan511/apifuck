@@ -1,0 +1,38 @@
+info:
+  name: 登录并保存 Token
+  type: http
+  seq: 1
+  description: 使用 demo@apifuck.dev / demo123 登录。响应中的 access_token 自动写入 local 环境。
+http:
+  method: POST
+  url: "{{base_url}}/auth/login"
+  body:
+    type: json
+    data: |-
+      {
+        "email": "{{email}}",
+        "password": "{{password}}"
+      }
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Token saved',()=>expect(bru.getEnvVar('token')).to.equal(res.body.access_token));
+  actions:
+    - type: set-variable
+      phase: after-response
+      selector:
+        expression: access_token
+        method: jsonq
+      variable:
+        name: token
+        scope: environment
+docs: |
+  # 登录并保存 Token
+
+  使用 demo@apifuck.dev / demo123 登录。响应中的 access_token 自动写入 local 环境。
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

@@ -1,0 +1,9 @@
+info:
+  name: WebSocket 回声
+  type: websocket
+  seq: 4
+websocket:
+  url: ws://127.0.0.1:8787/socket
+  message:
+    type: json
+    data: '{"hello":"world"}'

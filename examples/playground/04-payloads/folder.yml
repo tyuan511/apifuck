@@ -1,0 +1,14 @@
+info:
+  name: 正文与文件
+  type: folder
+  seq: 4
+  description: JSON、表单、Multipart、二进制、XML 与文本
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 04-payloads
+      description: 目录级继承请求头
+docs: |-
+  # 正文与文件
+
+  JSON、表单、Multipart、二进制、XML 与文本。本目录中的请求均已填好，发送后可以查看 Tests。

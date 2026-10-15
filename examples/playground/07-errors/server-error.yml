@@ -1,0 +1,23 @@
+info:
+  name: 500 · 服务器错误
+  type: http
+  seq: 3
+  description: 500 · 服务器错误
+http:
+  method: GET
+  url: "{{base_url}}/status/500"
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 500', () => expect(res.status).to.equal(500));
+        test('Expected error',()=>expect(res.body.expected).to.equal(true));
+docs: |
+  # 500 · 服务器错误
+
+  500 · 服务器错误
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

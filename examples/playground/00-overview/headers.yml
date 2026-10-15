@@ -1,0 +1,33 @@
+info:
+  name: 检查继承的请求头
+  type: http
+  seq: 2
+  description: 检查继承的请求头
+http:
+  method: GET
+  url: "{{base_url}}/echo"
+  headers:
+    - name: X-Example
+      value: Hello from ApiFuck
+      description: 请求级自定义头
+    - name: X-Debug
+      value: "{{optional_debug}}"
+      disabled: true
+      description: 默认禁用，启用后可在响应中观察
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Inherited client header',()=>expect(res.body.headers['x-client']).to.equal('apifuck-native'));
+        test('Request header',()=>expect(res.body.headers['x-example']).to.equal('Hello from ApiFuck'));
+        test('Disabled header omitted',()=>expect(res.body.headers).not.to.have.property('x-debug'));
+docs: |
+  # 检查继承的请求头
+
+  检查继承的请求头
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

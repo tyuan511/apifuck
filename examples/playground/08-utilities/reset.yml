@@ -1,0 +1,25 @@
+info:
+  name: 恢复初始 Demo 数据
+  type: http
+  seq: 1
+  description: 重置内存用户数据，并将 created_user_id 恢复为 3。可重新执行全部场景。
+http:
+  method: POST
+  url: "{{base_url}}/reset"
+  auth: inherit
+runtime:
+  scripts:
+    - type: after-response
+      code: bru.setEnvVar('created_user_id','3');
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Reset',()=>expect(res.body.reset).to.equal(true));
+docs: |
+  # 恢复初始 Demo 数据
+
+  重置内存用户数据，并将 created_user_id 恢复为 3。可重新执行全部场景。
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

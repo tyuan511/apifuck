@@ -1,0 +1,43 @@
+info:
+  name: 重复 Query 与中文编码
+  type: http
+  seq: 1
+  description: 重复 Query 与中文编码
+http:
+  method: GET
+  url: "{{base_url}}/echo"
+  params:
+    - name: q
+      value: API 调试工具
+      type: query
+      description: 含中文与空格
+    - name: tag
+      value: rust
+      type: query
+      description: 重复的键 1
+    - name: tag
+      value: gpui
+      type: query
+      description: 重复的键 2
+    - name: debug
+      value: "{{optional_debug}}"
+      type: query
+      description: 禁用项不发送
+      disabled: true
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Duplicate query keys',()=>expect(res.body.query.filter(p=>p.name==='tag')).to.have.lengthOf(2));
+        test('Unicode query',()=>expect(res.body.query.find(p=>p.name==='q').value).to.equal('API 调试工具'));
+        test('Disabled query omitted',()=>expect(res.body.query.some(p=>p.name==='debug')).to.equal(false));
+docs: |
+  # 重复 Query 与中文编码
+
+  重复 Query 与中文编码
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

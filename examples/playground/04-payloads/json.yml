@@ -1,0 +1,54 @@
+info:
+  name: JSON · 嵌套对象与脚本变量
+  type: http
+  seq: 1
+  description: JSON · 嵌套对象与脚本变量
+http:
+  method: POST
+  url: "{{base_url}}/echo"
+  body:
+    type: json
+    data: |-
+      {
+        "title": "{{request_label}}",
+        "message": "你好，ApiFuck ⚡",
+        "traceId": "{{trace_id}}",
+        "options": {
+          "stream": false,
+          "retries": 3
+        },
+        "tags": [
+          "rust",
+          "gpui"
+        ],
+        "items": [
+          {
+            "id": 1,
+            "enabled": true
+          },
+          {
+            "id": 2,
+            "enabled": false
+          }
+        ]
+      }
+  auth: inherit
+runtime:
+  variables:
+    - name: request_label
+      value: Native API Playground
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Nested JSON',()=>expect(res.body.body.options.retries).to.equal(3));
+        test('Unicode body',()=>expect(res.body.body.message).to.equal('你好，ApiFuck ⚡'));
+        test('Script variable',()=>expect(res.body.body.traceId).to.match(/^demo-/));
+docs: |
+  # JSON · 嵌套对象与脚本变量
+
+  JSON · 嵌套对象与脚本变量
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

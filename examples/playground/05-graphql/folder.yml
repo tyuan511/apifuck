@@ -1,0 +1,14 @@
+info:
+  name: GraphQL
+  type: folder
+  seq: 5
+  description: 真实 Schema、Query 与 Variables
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 05-graphql
+      description: 目录级继承请求头
+docs: |-
+  # GraphQL
+
+  真实 Schema、Query 与 Variables。本目录中的请求均已填好，发送后可以查看 Tests。

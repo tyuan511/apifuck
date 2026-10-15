@@ -1,48 +1,114 @@
-# Auto Update
+# 发布与自动更新
 
-This project now uses Tauri v2 updater with GitHub Releases as the update source.
+版本以根目录 `Cargo.toml` 的 `[workspace.package].version` 为准，所有 crate 继承此版本，`Cargo.lock` 一起提交。推送 `v<semver>` tag 会触发 `.github/workflows/release.yml`；仅修改版本号或推送 main 不会发布。
 
-macOS is configured to use ad-hoc signing via `bundle.macOS.signingIdentity = "-"`. This works without an Apple Developer certificate, but users may still need to allow the app manually in Privacy & Security on first launch.
+## 发布流程
 
-## 1. Generate signing keys
+使用仓库 skill `$release-tag-publish`，例如“发布下一个 patch 版本”或“发布 0.1.0”。它先检查代码和远端版本，再编写发布说明、同步版本、提交并推送 main、创建带注释的 tag，最后核对 CI 和公开 Release。只要求准备发布文件时不会自动推送。
 
-Run this once on a trusted machine:
+版本生成辅助命令（只打印，不写文件；先 fetch 远端 tags）：
 
-```bash
-bunx tauri signer generate --password
+```sh
+git fetch origin main --tags
+git ls-remote --tags origin
+node scripts/release/next-version.mjs auto
+node scripts/release/next-version.mjs patch
+# 也支持 minor、major、具体版本号
 ```
 
-Save the generated private key in the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`, save its password in `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and replace the `pubkey` placeholder in `src-tauri/tauri.conf.json` with the generated public key.
+`auto` 优先保留尚未发布且高于已有 tag 的 workspace 版本，否则生成下一稳定版本。写好 `docs/release/<version>.md` 后执行：
 
-For this repository, keep the local key files under `.secrets/` so they stay inside the project folder but remain ignored by git:
-
-```bash
-.secrets/updater.key
-.secrets/updater.key.pub
+```sh
+node scripts/release/sync-version.mjs 0.1.0 --verify-release-notes
+node scripts/release/validate-release.mjs v0.1.0
+cargo fmt --all --check
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo build --release --locked -p apifuck-desktop
+node --test scripts/release/*.test.mjs
 ```
 
-## 2. Publish a release
+版本同步失败会还原 Cargo.toml 和 Cargo.lock。检查通过、发布说明与最终变更一致后，将发布提交推送至 main，再创建并推送对应 annotated tag。不要覆盖已有公开版本或移动已有 tag。
 
-1. Commit the code you want to release.
-2. Create and push a Git tag like `v0.1.1`.
+## GitHub Actions
 
-GitHub Actions will read the version from the pushed tag, sync it into `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` inside the CI workspace, then build platform installers, sign updater artifacts, and upload `latest.json` plus installers to the GitHub Release page.
+1. **Validate**：tag 必须与 workspace 版本一致，锁文件有效，每个 workspace crate 版本相同，且存在非空的版本说明；运行发布脚本测试。
+2. **Build**：macOS Apple Silicon、Linux x86_64、Windows x86_64 分别运行格式、测试和 Clippy 检查，再用明确的 Rust target 构建 Release 二进制。macOS 使用临时 keychain 导入 Developer ID Application 证书，启用 Hardened Runtime 和可信时间戳签名，生成 ZIP 并提交 Apple 公证；必须收到 `Accepted`，才生成最终校验值并保存 Actions artifacts。
+3. **Publish**：只有三个构建全部成功才进入。验证完整附件及哈希，创建或继续草稿 Release，上传二进制、macOS ZIP 与 `SHA256SUMS`，再次核对 GitHub 附件的大小和 digest 后公开。已公开版本拒绝覆盖；失败时不公开不完整的草稿。
 
-After the release job succeeds, CI also checks out `main`, updates `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` to the tagged version, and pushes a commit like `chore: bump version to 0.1.1` back to the main branch.
+`v0.2.0-beta.1` 一类 tag 会发布为 prerelease，不会成为 latest，客户端也不会自动安装。晚发布的旧稳定版本不会替换更高版本的 latest。暂时性失败可通过 Actions 重跑，或手动运行 Release workflow 并指定原 tag；源码有修复时使用新的版本和 tag。
 
-GitHub Release notes come from `docs/release/<version>.md`, for example `docs/release/0.1.1.md`. If that file does not exist when the tag is pushed, the release workflow fails on purpose.
+GitHub 发布权限使用自动提供的 `GITHUB_TOKEN`，只有 Publish job 有 `contents: write`；不需要 GitHub 个人 token。macOS 签名与公证另外需要下述 Apple 凭据。工作流从 tag checkout，不修改 main，README 使用稳定的 latest 下载链接。分支保护不会阻止 Release job 写 README，因为它不会写 README。
 
-Do not include a top-level title like `# ApiFuck v0.1.1` in the release note file, because GitHub Release already has its own title.
+## 发布附件
 
-The version sync logic is centralized in `scripts/release/sync-version.mjs`, so both CI jobs use the same implementation.
+| 平台 | 二进制附件 |
+| --- | --- |
+| macOS Apple Silicon | `apifuck-desktop-aarch64-apple-darwin` |
+| Linux x86_64 | `apifuck-desktop-x86_64-unknown-linux-gnu` |
+| Windows x86_64 | `apifuck-desktop-x86_64-pc-windows-msvc.exe` |
 
-## 3. Update behavior in app
+macOS 另附 `apifuck-desktop-aarch64-apple-darwin.zip`，供用户下载并保留可执行权限；其中是同一个经过 Developer ID 签名并通过 Apple 公证的独立程序。原始 macOS 二进制继续用于现有自动更新器。`SHA256SUMS` 覆盖三个原始程序和 macOS ZIP，所有哈希都在签名和公证完成后生成。
 
-The app checks once after startup. When a newer version is available, it shows a toast with an install action. After download and install complete, the app relaunches automatically.
+当前不制作 `.app`、DMG 或安装器。Apple 会给独立二进制创建公证票据，但独立二进制和 ZIP 不能 staple，因此不宣称离线 Gatekeeper 首次验证可用；这与未签名或未公证不同。参见 [Apple 自定义公证流程](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)。Linux 原始文件下载后需要设置可执行权限。Intel Mac、Linux ARM64 等目标当前没有发布附件，不会误用其他架构的更新。
 
-## 4. Notes
+## macOS 签名凭据
 
-- The updater endpoint is `https://github.com/tyuan511/apifuck/releases/latest/download/latest.json`.
-- `bundle.createUpdaterArtifacts` must stay enabled.
-- macOS uses ad-hoc signing, not Developer ID signing or notarization.
-- Auto update works for desktop targets only.
+ApiFuck 的代码签名标识为 `dev.fastvibe.apifuck`。
+
+在仓库的 Settings → Secrets and variables → Actions 添加以下 **Repository secrets**，名称与 FastVibe 保持一致：
+
+| Secret | 内容 |
+| --- | --- |
+| `APPLE_CERT_P12` | Developer ID Application 证书及其私钥导出为 `.p12` 后的 Base64；不是 Apple Development 或 Developer ID Installer 证书 |
+| `APPLE_CERT_PASSWORD` | 导出 `.p12` 时设置的非空密码 |
+| `APPLE_API_KEY_P8` | App Store Connect **Team API key** 的完整 `.p8` PEM 文本，不是 Base64，也不是本地路径 |
+| `APPLE_API_KEY_ID` | 该 API key 的 Key ID |
+| `APPLE_API_ISSUER` | 该 Team API key 的 Issuer ID（UUID） |
+
+Apple 账号需已开通 Developer Program，证书有效且包含私钥，API key 有公证权限。P12 内必须恰好有一个有效 Developer ID Application 签名身份，脚本会自动选取，无需另填签名身份或 Team ID。当前脚本使用 Team API key；Individual API key 的认证参数不同，不适用这份配置。
+
+使用 GitHub CLI 设置凭据的示例（文件保留在本地，不提交进 Git）：
+
+```sh
+base64 -i DeveloperIDApplication.p12 > certificate.p12.base64
+gh secret set APPLE_CERT_P12 --repo tyuan511/apifuck < certificate.p12.base64
+gh secret set APPLE_CERT_PASSWORD --repo tyuan511/apifuck
+gh secret set APPLE_API_KEY_P8 --repo tyuan511/apifuck < AuthKey_YOUR_KEY_ID.p8
+gh secret set APPLE_API_KEY_ID --repo tyuan511/apifuck
+gh secret set APPLE_API_ISSUER --repo tyuan511/apifuck
+```
+
+不带输入重定向的命令会交互式询问值。旧 `TAURI_SIGNING_PRIVATE_KEY` 是旧更新协议的签名密钥，不能替代 Apple Developer ID 证书或公证 API key。
+
+流程会在编译前检查凭据是否齐全，缺少任何项都停止 macOS 发布，不自动降级为无签名产物。私钥文件只写入 runner 临时目录（文件权限 0600），临时 keychain 使用随机密码；正常完成、失败及取消后的 always-cleanup 步骤都会清理文件并恢复 keychain 搜索列表。
+
+公证等待上限 30 分钟，签名步骤上限 40 分钟。拒绝或未完成都会阻止 Release；能取得请求 ID 时尝试下载 Apple 诊断日志，失败工作流的 `macos-notarization-diagnostics` artifact 保留 7 天。凭据文件不进入任何 artifact。超时后 Apple 可能仍在处理，请先查看该请求状态；不要把未完成当成通过。
+
+旧 Tauri 版使用另一套更新协议；首次切换到原生版需要手动下载，本自动更新链路用于原生版本之间升级。
+
+## 更新交互
+
+更新流程参考 FastVibe 本地项目的 `use-app-update`、`sidebar-update-button` 和 `update-dialog`：侧栏和设置中的面板使用同一个更新状态。
+
+- Release 构建在启动 3 秒后静默检查，随后每 10 分钟检查；“关于与更新”里的“自动检查更新”可关闭，保存设置后生效。开发构建不自动检查更新，仍可手动检查。
+- 后台检查不会打开弹窗、自动下载或中断当前操作；发现更新后侧栏显示“更新”。无新版本或网络失败时保持安静，已有可用版本不会被后台失败清掉。
+- 手动“检查更新”打开一个更新面板，展示检查状态、新版本说明、“稍后”和“立即更新”。关闭面板不会取消下载，重新打开会继续显示相同进度。
+- 下载开始先显示 spinner，收到字节后显示百分比与已下载/总大小；侧栏同步显示进度。
+- 超过 60 秒的旧提醒在下载前复查。如果版本变化或撤回，先展示最新状态，重新等待确认，不悄悄替换用户已确认的版本。
+- 下载并校验完成后显示“重启并安装”，可以继续工作；只有用户点击才保存所有草稿、校验并安装、再次保存最新草稿并重启。保存失败会阻止安装/重启并显示 toast。
+- 重复点击不会创建并行下载或并行安装。网络、校验、权限等失败使用统一 toast，并可在面板重试。下载缓存在当前进程拥有的临时文件里；退出且未选择安装时会清理，下次需要重新下载。
+
+## 校验与安装
+
+更新元数据来自本仓库 GitHub Release。跳过草稿、预发布、同版及旧版，只选择当前架构的精确附件名；下载 URL 必须精确对应此仓库、此 tag 和此附件。SHA-256 digest 和声明大小缺失或非法时拒绝更新。
+
+下载通过 HTTPS 流式写入临时文件，限制大小并校验 SHA-256；失败自动清理文件，避免一次性把整个附件放入内存。安装前再次校验后用 `self-replace` 替换当前可执行文件。只读目录或在 macOS 磁盘映像中运行时会提示移至可写目录。SHA-256 不是独立数字签名，信任来源仍是 HTTPS 和仓库的发布权限。
+
+协议依据：[GitHub Releases REST API](https://docs.github.com/en/rest/releases/releases)、[GitHub CLI Release](https://cli.github.com/manual/gh_release_edit)。
+
+## 验证边界
+
+本地自动化测试使用合成 GitHub 元数据、回环 HTTP 服务、模拟 gh 和模拟 Apple 命令，验证版本选择、进度/大小/哈希检查、临时文件清理、签名后哈希更新、公证失败清理和发布门禁；不会发布真实 Release，也不会替换正在运行的程序。状态测试验证下载中的状态不会被检查覆盖，以及过期版本需要重新确认。
+
+真实 Apple 签名与公证只有在上述凭据配置后才能验证；本地模拟测试不代表 Apple 已接受该程序。实际 GitHub 托管 runner、目标平台窗口和安装后重启需要发布候选版本验证。手工验收：查看设置中的更新说明，开始下载后关闭并重开面板确认进度连续，下载完成选择“稍后”继续编辑，再点击“重启并安装”，核对新版本和草稿恢复；网络失败及只读安装位置应显示 toast。遵守仓库规定，不以 Computer Use 验证。

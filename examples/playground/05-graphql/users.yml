@@ -1,0 +1,23 @@
+info:
+  name: 用户列表与服务状态
+  type: graphql
+  seq: 2
+  description: 真实 GraphQL Schema 的查询，不是固定响应模拟
+graphql:
+  method: POST
+  url: "{{base_url}}/graphql"
+  auth: inherit
+  body:
+    query: query { health users { id name email role } }
+    variables: "{}"
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('GraphQL status',()=>expect(res.body.data.health).to.equal('ok'));
+        test('GraphQL users',()=>expect(res.body.data.users).to.be.an('array'));
+docs: |-
+  # GraphQL
+
+  Query 和 Variables 均已填写。服务使用真实 GraphQL 执行引擎，支持字段选择、参数与校验。

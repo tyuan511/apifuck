@@ -1,0 +1,19 @@
+info:
+  name: 创建用户
+  type: http
+  seq: 2
+http:
+  method: POST
+  url: '{{base_url}}/users'
+  auth: inherit
+  body:
+    type: json
+    data: |-
+      {"name":"{{client_name}}"}
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        if (api.response.status === 201) {
+          api.env.set('last_user_id', api.response.json().id);
+        }

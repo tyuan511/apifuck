@@ -1,0 +1,14 @@
+info:
+  name: 开始使用
+  type: folder
+  seq: 0
+  description: 健康状态与继承请求头
+request:
+  headers:
+    - name: X-Demo-Section
+      value: 00-overview
+      description: 目录级继承请求头
+docs: |-
+  # 开始使用
+
+  健康状态与继承请求头。本目录中的请求均已填好，发送后可以查看 Tests。

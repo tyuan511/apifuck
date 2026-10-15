@@ -1,0 +1,27 @@
+info:
+  name: API Key · Header
+  type: http
+  seq: 4
+  description: API Key · Header
+http:
+  method: GET
+  url: "{{base_url}}/auth/api-key"
+  auth:
+    type: apikey
+    key: X-API-Key
+    value: "{{api_key}}"
+    placement: header
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Header placement',()=>expect(res.body.placement).to.equal('header'));
+docs: |
+  # API Key · Header
+
+  API Key · Header
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

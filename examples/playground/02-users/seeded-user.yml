@@ -1,0 +1,23 @@
+info:
+  name: 06 · 查看固定示例用户
+  type: http
+  seq: 6
+  description: 06 · 查看固定示例用户
+http:
+  method: GET
+  url: "{{base_url}}/users/{{user_id}}"
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Seeded user',()=>expect(res.body.name).to.equal('Ada Lovelace'));
+docs: |
+  # 06 · 查看固定示例用户
+
+  06 · 查看固定示例用户
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

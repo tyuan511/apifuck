@@ -1,0 +1,30 @@
+info:
+  name: Binary · 二进制文件
+  type: http
+  seq: 4
+  description: Binary · 二进制文件
+http:
+  method: POST
+  url: "{{base_url}}/echo"
+  body:
+    type: file
+    data:
+      - filePath: ../assets/sample.bin
+        contentType: application/octet-stream
+        selected: true
+        description: 256 字节的固定二进制样本
+  auth: inherit
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('Binary size',()=>expect(res.body.byteLength).to.equal(256));
+docs: |
+  # Binary · 二进制文件
+
+  Binary · 二进制文件
+
+  - 环境：local（启动器会自动选择）
+  - 目标：本地 ApiFuck Demo API
+  - 发送后打开 Tests 查看断言，Headers 查看 X-Trace-Id。

@@ -1,0 +1,23 @@
+[package]
+name = "apifuck-demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+apifuck-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
+async-graphql = { version = "7", default-features = false }
+futures-util = "0.3"
+base64 = "0.22"
+url = "2"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart"] }
+tokio-tungstenite = "0.28"
+serde_yaml.workspace = true
+tempfile = "3"

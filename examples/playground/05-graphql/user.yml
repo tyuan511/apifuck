@@ -1,0 +1,22 @@
+info:
+  name: 用户查询与 Variables
+  type: graphql
+  seq: 1
+  description: 真实 GraphQL Schema 的查询，不是固定响应模拟
+graphql:
+  method: POST
+  url: "{{base_url}}/graphql"
+  auth: inherit
+  body:
+    query: "query GetUser($id: Int!) { user(id: $id) { id name email role active profile { city languages } } }"
+    variables: '{"id": {{user_id}}}'
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test('HTTP 200', () => expect(res.status).to.equal(200));
+        test('GraphQL user',()=>expect(res.body.data.user.id).to.equal(1));
+docs: |-
+  # GraphQL
+
+  Query 和 Variables 均已填写。服务使用真实 GraphQL 执行引擎，支持字段选择、参数与校验。
