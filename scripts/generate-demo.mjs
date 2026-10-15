@@ -1,10 +1,10 @@
-// Developer utility: regenerate checked-in fixtures after installing vendor/bruno dependencies.
+// Developer utility: regenerate checked-in fixtures after installing scripts/javascript dependencies.
 import { mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const here=dirname(fileURLToPath(import.meta.url));
-const require=createRequire(resolve(here,'../vendor/bruno/package.json'));
+const require=createRequire(resolve(here,'./javascript/package.json'));
 const YAML=require('yaml');
 const root=resolve(here,'../examples/playground');
 function save(path,value){const full=resolve(root,path);mkdirSync(dirname(full),{recursive:true});writeFileSync(full,YAML.stringify(value,{lineWidth:0,defaultStringType:'PLAIN'}));}

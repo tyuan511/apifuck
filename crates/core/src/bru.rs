@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-const BRIDGE_SOURCE: &str = include_str!("../../../vendor/bruno/bridge.bundle.js");
+const BRIDGE_SOURCE: &str = include_str!("../resources/javascript/bridge.bundle.js");
 struct Converter {
     context: rquickjs::Context,
     runtime: rquickjs::Runtime,

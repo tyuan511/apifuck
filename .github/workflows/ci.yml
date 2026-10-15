@@ -43,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: node --check scripts/demo.mjs
       - run: node --check scripts/generate-demo.mjs
+      - run: node --check scripts/javascript/build.mjs
       - run: for script in scripts/release/*.mjs; do node --check "$script"; done
       - run: node --test scripts/release/*.test.mjs
       - run: node scripts/demo.mjs --check

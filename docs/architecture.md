@@ -82,7 +82,7 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 
 ## 资源、测试和分发
 
-`assets/` 中的品牌素材、Lucide 图标以及 `vendor/bruno/` 下的转换器和运行时 bundle 编译嵌入。修改 JavaScript bundle 才需要 Bun；普通 Rust 构建和应用运行无需 JavaScript 工具链。
+`assets/` 中的品牌素材、Lucide 图标以及 `crates/core/resources/javascript/` 下的转换器和运行时 bundle 编译嵌入。修改 JavaScript bundle 才需要 Bun；普通 Rust 构建和应用运行无需 JavaScript 工具链。
 
 核心与 Demo 集成测试通过回环服务验证行为；桌面单元测试验证草稿、导航、变量、语言服务等模型。CI 配置覆盖 macOS/Linux/Windows。发布输出独立可执行文件，不包含签名安装器。
 

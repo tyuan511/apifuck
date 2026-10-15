@@ -14,13 +14,13 @@ The root Cargo workspace contains:
 - `crates/desktop/`: GPUI Kit UI. `workbench.rs` coordinates projects, navigation, tabs, drafts and settings; `document_tab.rs` owns document editing and execution state; forms, tables, variable inputs, response rendering, updates and editor services live in dedicated modules.
 - `crates/demo/`: loopback Playground API, workspace preparation and integration tests. The `launch` example forwards `cargo demo` to `scripts/demo.mjs`.
 
-Shared assets are in `assets/`, schema snapshots in `schema/`, examples in `examples/`, and embedded converters/runtime bundles in `vendor/bruno/`. `scripts/release/` implements versioning, release validation and artifact publication. See [docs/architecture.md](docs/architecture.md) for the module map.
+Shared assets are in `assets/`, schema snapshots in `schema/`, examples in `examples/`, and embedded converters/runtime bundles in `crates/core/resources/javascript/`. `scripts/release/` implements versioning, release validation and artifact publication. See [docs/architecture.md](docs/architecture.md) for the module map.
 
 ## Toolchain and Commands
 
 Run commands from the repository root. `rust-toolchain.toml` selects Rust 1.95; GPUI Kit is pinned in `crates/desktop/Cargo.toml`. Commit `Cargo.lock` and use `--locked` for verification.
 
-Node.js 22+ is needed for Demo and release scripts, not ordinary Cargo builds or the running application. Bun is only needed to install/rebuild the vendored JavaScript dependencies. Do not rebuild bundles for unrelated UI or documentation work.
+Node.js 22+ is needed for Demo and release scripts, not ordinary Cargo builds or the running application. Bun is only needed to install/rebuild the embedded JavaScript dependencies in `scripts/javascript/`. Do not rebuild bundles for unrelated UI or documentation work.
 
 Verification commands:
 

@@ -106,7 +106,7 @@ function test(name, fn) {{try{{const pending=fn();if(pending && typeof pending.t
 "#
     );
     context.with(|ctx| -> Result<()> {
-        ctx.eval::<(),_>(include_str!("../../../vendor/bruno/runtime.bundle.js"))?;
+        ctx.eval::<(),_>(include_str!("../resources/javascript/runtime.bundle.js"))?;
         ctx.eval::<(), _>(bootstrap).map_err(|e| anyhow!("脚本初始化失败：{e}"))?;
         let source = format!("JSON.stringify((() => {{ try {{ (() => {{\n{code}\n}})(); return {{request:state.request,response:state.response,env:state.env,vars:state.vars,mutations:changes,logs:output,tests:results,runtimeChanges}}; }} catch(e) {{return {{error:String(e) + String(e.stack || '')}};}} }})())");
         let output: String = ctx.eval(source).map_err(|e| anyhow!("脚本执行失败或超过 2 秒限制：{e}"))?;

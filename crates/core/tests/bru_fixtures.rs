@@ -1,4 +1,4 @@
-//! Public fixtures from Bruno commit 23fcb633; MIT notice: vendor/bruno/LICENSE.
+//! Public fixtures from Bruno commit 23fcb633; MIT notice: crates/core/resources/javascript/LICENSE.
 use apifuck_core::bru;
 use serde_json::Value;
 #[test]

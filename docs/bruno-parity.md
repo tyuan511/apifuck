@@ -4,9 +4,9 @@ ApiFuck 保持 OpenCollection YAML 为主存储，复用固定版本的 Bruno �
 
 ## 转换基线
 
-本地 vendored 代码固定于 usebruno/bruno 提交 `23fcb63383afdfa16df0da61476a6051930ada5b`，来源、许可和重建步骤见 [vendor/bruno/NOTICE.md](../vendor/bruno/NOTICE.md)。该基线是固定快照，不代表上游最新版本或当前商业产品的能力范围。
+转换 bundle 基于 usebruno/bruno 提交 `23fcb63383afdfa16df0da61476a6051930ada5b`，来源、许可和重建步骤见 [JavaScript 资源说明](../crates/core/resources/javascript/NOTICE.md)。该基线是固定快照，不代表上游最新版本或当前商业产品的能力范围。
 
-`upstream/` 保留解析和序列化所需代码，`bridge.ts` 提供转换入口，bundle 由 QuickJS 执行。应用没有复制 Bruno UI/品牌，也没有给转换器暴露网络或文件系统接口；导入文档不会执行其脚本。
+仓库不保存 Bruno 上游源码快照；`scripts/javascript/bridge.ts` 提供转换入口，重建脚本按固定提交临时获取解析和序列化源码，生成的 bundle 由 QuickJS 执行。应用没有复制 Bruno UI/品牌，也没有给转换器暴露网络或文件系统接口；导入文档不会执行其脚本。
 
 本地修补保留响应变量的 request 作用域；缺省 seq 按 Bruno 的 1 归一化，显式 seq（包括 0）保留。公开 fixture 测试覆盖 request、annotations、custom-method、settings、complex-auth 等 Bru → YAML → Bru → YAML 语义往返。
 

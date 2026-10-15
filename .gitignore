@@ -4,6 +4,7 @@
 
 # Development-only dependencies for bundled converters
 node_modules/
+/scripts/javascript/.cache/
 
 # Local files and signing keys
 .idea/
