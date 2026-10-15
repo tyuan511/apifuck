@@ -3203,7 +3203,7 @@ fn remap_workspace_paths(
                     .map(|suffix| {
                         (
                             key.clone(),
-                            to.join(suffix).to_string_lossy().into_owned(),
+                            collection::portable_path(&to.join(suffix)),
                             value.clone(),
                         )
                     })
@@ -3232,7 +3232,7 @@ fn remap_workspace_paths(
                 .map(|suffix| {
                     (
                         key.clone(),
-                        format!("{prefix}{}", to.join(suffix).display()),
+                        format!("{prefix}{}", collection::portable_path(&to.join(suffix))),
                     )
                 })
         })
