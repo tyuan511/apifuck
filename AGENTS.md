@@ -4,7 +4,7 @@
 
 ApiFuck is a native Rust desktop application. Treat the current on-disk code as the source of truth and preserve existing user changes. Do not restore the retired Tauri/React application or introduce a frontend build pipeline based on historical release notes.
 
-Read [README.md](README.md) for the product, [docs/architecture.md](docs/architecture.md) for module boundaries, and the focused documents linked there before changing related behavior. Keep documentation in sync with shipped code; distinguish implemented core APIs, desktop features, and planned work. Native MCP integration is planned; no standalone CLI product is maintained.
+Read [README.md](README.md) for the product, [docs/architecture.md](docs/architecture.md) for module boundaries, and the focused documents linked there before changing related behavior. Keep documentation in sync with shipped code; distinguish implemented core APIs, desktop features, and planned work. Native MCP is available through Settings; see `docs/mcp.md`. No standalone CLI product is maintained.
 
 ## Workspace and Responsibilities
 

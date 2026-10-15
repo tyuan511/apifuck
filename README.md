@@ -116,11 +116,17 @@ Use Cmd on macOS and Ctrl on other platforms.
 | Quit | Cmd/Ctrl+Q |
 | Trigger code editor completion | Ctrl+Space |
 
+## MCP and AI agents
+
+Open **Settings → MCP** to enable the native MCP server and copy setup instructions for **Claude Code, Codex, OpenCode, or Pi**. The service is off by default, listens only on loopback, and uses token authentication. When enabled, it starts with the application; keep the desktop running while using it.
+
+Agents can manage OpenCollection documents and environments, execute HTTP/GraphQL/SSE/WebSocket requests, cancel jobs, run collections, and import/export requests. MCP reuses native storage and execution rules and protects unsaved drafts and conflicting external edits. See the [MCP guide](docs/mcp.md) for tools and setup.
+
 ## Current limitations
 
 Bru import and selected script API compatibility do not imply full Bruno client compatibility. gRPC, advanced authentication (OAuth, AWS, Digest, and others), full asynchronous scripting, Node modules, external secrets, dotenv, mTLS, a cookie jar, persistent request history, and side-by-side project workspaces are not currently available. See [execution rules](docs/execution.md) and [Bruno compatibility](docs/bruno-parity.md).
 
-The collection runner is available in the core library and headless tests, with no desktop entry point yet. Native MCP integration is planned. There is no standalone CLI product; Demo commands are development tools.
+The collection runner is available through the core library, MCP, and headless tests; there is no dedicated desktop runner panel. There is no standalone CLI product; Demo commands are development tools.
 
 ## Development and documentation
 
@@ -128,6 +134,7 @@ The detailed guides below are currently written in Chinese.
 
 | Guide | Contents |
 | --- | --- |
+| [MCP integration](docs/mcp.md) | Native service, four agent configurations, tools, and execution boundaries |
 | [Architecture](docs/architecture.md) | Crate boundaries, modules, and editing/execution/diagnostic flows |
 | [Workspace interactions](docs/postman-layout.md) | Navigation, forms, variable hints, settings, and manual acceptance checks |
 | [Storage](docs/storage.md) | OpenCollection, drafts, environment overrides, and atomic writes |

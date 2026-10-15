@@ -52,6 +52,10 @@ pub struct Workbench {
     tab_scroll: ScrollHandle,
     state: WorkspaceState,
     runtime: Arc<tokio::runtime::Runtime>,
+    mcp: Option<Arc<apifuck_core::mcp::Service>>,
+    mcp_error: Option<String>,
+    _mcp_task: Option<Task<()>>,
+    project_loading: bool,
     focus: FocusHandle,
     search: Entity<InputState>,
     environment_search: Entity<InputState>,
@@ -153,6 +157,9 @@ impl Workbench {
                 .unwrap_or(true)
         });
         let quit = cx.on_app_quit(|this, cx| {
+            if let Some(mcp) = &this.mcp {
+                mcp.shutdown();
+            }
             if let Err(e) = this.persist(cx) {
                 eprintln!(
                     "{}",
@@ -237,7 +244,17 @@ impl Workbench {
                     UpdateEvent::Installed => cx.restart(),
                 }
             });
+        let (mcp, mut mcp_receiver, mcp_error) = match apifuck_core::mcp::Config::path()
+            .and_then(|path| apifuck_core::mcp::Service::new(path, runtime.handle().clone()))
+        {
+            Ok((service, receiver)) => (Some(service), Some(receiver), None),
+            Err(error) => (None, None, Some(format!("{error:#}"))),
+        };
         let mut this = Self {
+            mcp,
+            mcp_error,
+            _mcp_task: None,
+            project_loading: false,
             collection: None,
             tabs: vec![],
             active: 0,
@@ -273,6 +290,23 @@ impl Workbench {
             ],
             _poll: poll,
         };
+        if let Some(mut receiver) = mcp_receiver.take() {
+            this._mcp_task = Some(cx.spawn_in(window, async move |this, cx| {
+                while let Some(call) = receiver.recv().await {
+                    if this
+                        .update_in(cx, |this, window, cx| this.handle_mcp(call, window, cx))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }));
+        }
+        if let Some(service) = &this.mcp
+            && service.status().config.enabled
+        {
+            drop(service.configure(true));
+        }
         for error in preferences_error.into_iter().chain(recent_error) {
             this.notify_error(error, window, cx);
         }
@@ -302,6 +336,7 @@ impl Workbench {
             window,
             cx,
         );
+        self.project_loading = true;
         let task = cx.background_spawn(async move {
             let collection = Collection::open(path)?;
             let state = WorkspaceState::load(collection.root())?;
@@ -309,85 +344,223 @@ impl Workbench {
         });
         cx.spawn_in(window, async move |this, cx| {
             let result = task.await;
-            let _ = this.update_in(cx, |this, window, cx| match result {
-                Ok((collection, mut state)) => {
-                    if let Err(error) = this.persist(cx) {
-                        this.notify_error(format!("{error:#}"), window, cx);
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.project_loading = false;
+                match result {
+                    Ok((collection, state)) => {
+                        if let Err(error) = this.install_collection(collection, state, window, cx) {
+                            this.notify_error(format!("{error:#}"), window, cx);
+                        }
+                    }
+                    Err(e) => {
+                        this.notify_error(format!("{e:#}"), window, cx);
                         cx.notify();
-                        return;
                     }
-                    if this
-                        .collection
-                        .as_ref()
-                        .is_some_and(|current| current.root() == collection.root())
-                    {
-                        state = this.state.clone();
-                    }
-                    this.tab_subscriptions.clear();
-                    this.tabs.clear();
-                    this.tab_scroll = ScrollHandle::new();
-                    this.active = 0;
-                    this.state = state;
-                    if let Some(preferences) = &this.preferences {
-                        preferences.apply_to(&mut this.state);
-                    }
-                    this.show_settings = false;
-                    for (input, key) in [
-                        (&this.search, "search"),
-                        (&this.environment_search, "environmentSearch"),
-                    ] {
-                        let value = this
-                            .state
-                            .ui_drafts
-                            .get(key)
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_owned();
-                        input.update(cx, |input, cx| input.set_value(value, window, cx));
-                    }
-
-                    this.saved_state.clear();
-                    crate::appearance::apply(
-                        &this.state.appearance,
-                        &this.state.accent,
-                        window,
-                        cx,
-                    );
-                    this.collection = Some(collection);
-                    this.tree_selection.clear();
-                    this.rebuild_tree(cx);
-                    let paths = this.state.tabs.clone();
-                    for path in paths {
-                        this.open_document_inner(&path, false, window, cx);
-                    }
-                    if let Some(active) = &this.state.active
-                        && let Some(ix) = this.tabs.iter().position(|t| {
-                            t.read(cx).document().path().to_string_lossy() == active.as_str()
-                        })
-                    {
-                        this.active = ix;
-                        this.tab_scroll.scroll_to_item(ix);
-                    }
-                    this.sync_active_sidebar(window, cx);
-                    let project = this.collection.as_ref().unwrap();
-                    this.recent_projects.record(
-                        project.root().to_owned(),
-                        project.project().name().to_owned(),
-                    );
-                    if let Err(e) = settings::app_state_path()
-                        .and_then(|path| this.recent_projects.save_to(&path))
-                    {
-                        this.notify_error(e.to_string(), window, cx);
-                    }
-                    cx.notify();
-                }
-                Err(e) => {
-                    this.notify_error(format!("{e:#}"), window, cx);
-                    cx.notify();
                 }
             });
         })
         .detach();
+    }
+    fn install_collection(
+        &mut self,
+        collection: Collection,
+        mut state: WorkspaceState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        self.persist(cx)?;
+        if self
+            .collection
+            .as_ref()
+            .is_some_and(|current| current.root() == collection.root())
+        {
+            state = self.state.clone();
+        }
+        self.tab_subscriptions.clear();
+        self.tabs.clear();
+        self.tab_scroll = ScrollHandle::new();
+        self.active = 0;
+        self.state = state;
+        if let Some(preferences) = &self.preferences {
+            preferences.apply_to(&mut self.state);
+        }
+        self.show_settings = false;
+        for (input, key) in [
+            (&self.search, "search"),
+            (&self.environment_search, "environmentSearch"),
+        ] {
+            let value = self
+                .state
+                .ui_drafts
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
+            input.update(cx, |input, cx| input.set_value(value, window, cx));
+        }
+
+        self.saved_state.clear();
+        crate::appearance::apply(&self.state.appearance, &self.state.accent, window, cx);
+        self.collection = Some(collection);
+        self.tree_selection.clear();
+        self.rebuild_tree(cx);
+        let paths = self.state.tabs.clone();
+        for path in paths {
+            self.open_document_inner(&path, false, window, cx);
+        }
+        if let Some(active) = &self.state.active
+            && let Some(ix) = self
+                .tabs
+                .iter()
+                .position(|t| t.read(cx).document().path().to_string_lossy() == active.as_str())
+        {
+            self.active = ix;
+            self.tab_scroll.scroll_to_item(ix);
+        }
+        self.sync_active_sidebar(window, cx);
+        let project = self.collection.as_ref().unwrap();
+        self.recent_projects.record(
+            project.root().to_owned(),
+            project.project().name().to_owned(),
+        );
+        if let Err(e) =
+            settings::app_state_path().and_then(|path| self.recent_projects.save_to(&path))
+        {
+            self.notify_error(e.to_string(), window, cx);
+        }
+        cx.notify();
+        Ok(())
+    }
+    fn handle_mcp(
+        &mut self,
+        call: apifuck_core::mcp::Call,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let result = (|| -> Result<serde_json::Value> {
+            let service = self.mcp.clone().context("MCP is unavailable")?;
+            anyhow::ensure!(
+                service.accepts(&call),
+                "MCP call expired or service stopped"
+            );
+            anyhow::ensure!(
+                !self.project_loading,
+                "Desktop is opening a project; retry after it finishes"
+            );
+            let mutates = apifuck_core::mcp::mutates_workspace(&call.name);
+            if mutates {
+                self.persist(cx)?;
+            }
+            let mut context = apifuck_core::mcp::Workspace {
+                root: self.collection.as_ref().map(|c| c.root().to_owned()),
+                environment: self.state.environment.clone(),
+                network: self.state.network.clone(),
+                has_drafts: !self.state.drafts.is_empty()
+                    || self
+                        .state
+                        .editor_drafts
+                        .values()
+                        .any(|v| v["dirty"].as_bool().unwrap_or(false))
+                    || self.tabs.iter().any(|t| t.read(cx).is_dirty()),
+                busy: self.tabs.iter().any(|t| t.read(cx).is_running()),
+            };
+            let old_root = context.root.clone();
+            let moved = if call.name == "move_document" {
+                let collection = self.collection.as_ref().context("No project")?;
+                let doc = collection.find(call.arguments["selector"].as_str().unwrap_or(""))?;
+                let target = PathBuf::from(call.arguments["target"].as_str().unwrap_or(""));
+                Some(if doc.kind() == apifuck_core::DocumentKind::Folder {
+                    (
+                        doc.path().parent().unwrap().to_owned(),
+                        target.parent().context("Invalid target")?.to_owned(),
+                    )
+                } else {
+                    (doc.path().to_owned(), target)
+                })
+            } else {
+                None
+            };
+            let result = service.call(&call.name, &call.arguments, &mut context)?;
+            if old_root != context.root {
+                let collection = Collection::open(context.root.context("No project")?)?;
+                let state = WorkspaceState::load(collection.root())?;
+                self.install_collection(collection, state, window, cx)?;
+            } else if mutates {
+                let collection = Collection::open(context.root.context("No project")?)?;
+                self.state.environment = context
+                    .environment
+                    .filter(|name| collection.environment_names().contains(name));
+                if let Some((from, to)) = &moved {
+                    let remap = |path: &str| {
+                        PathBuf::from(path)
+                            .strip_prefix(from)
+                            .ok()
+                            .map(|suffix| collection::portable_path(&to.join(suffix)))
+                            .unwrap_or_else(|| path.into())
+                    };
+                    self.state.drafts = std::mem::take(&mut self.state.drafts)
+                        .into_iter()
+                        .map(|(path, draft)| (remap(&path), draft))
+                        .collect();
+                    self.state.editor_drafts = std::mem::take(&mut self.state.editor_drafts)
+                        .into_iter()
+                        .map(|(path, draft)| (remap(&path), draft))
+                        .collect();
+                    self.state.collapsed_folders =
+                        std::mem::take(&mut self.state.collapsed_folders)
+                            .into_iter()
+                            .map(|path| remap(&path))
+                            .collect();
+                }
+                let mut retained = Vec::new();
+                let mut removed = Vec::new();
+                for (index, tab) in self.tabs.iter().enumerate() {
+                    let previous = tab.read(cx).document();
+                    let path = moved
+                        .as_ref()
+                        .and_then(|(from, to)| {
+                            previous
+                                .path()
+                                .strip_prefix(from)
+                                .ok()
+                                .map(|suffix| to.join(suffix))
+                        })
+                        .unwrap_or_else(|| previous.path().to_owned());
+                    if let Ok(document) = collection.find(&collection::portable_path(&path)) {
+                        if document.source() != previous.source()
+                            || document.path() != previous.path()
+                        {
+                            tab.update(cx, |tab, cx| tab.reload(document.clone(), window, cx));
+                        }
+                        retained.push(tab.clone());
+                    } else {
+                        removed.push(index);
+                        self.tab_subscriptions.remove(&tab.entity_id());
+                        self.state
+                            .drafts
+                            .remove(&collection::portable_path(previous.path()));
+                        self.state
+                            .editor_drafts
+                            .remove(&collection::portable_path(previous.path()));
+                    }
+                }
+                let mut remaining = self.tabs.len();
+                for index in removed.into_iter().rev() {
+                    remaining -= 1;
+                    self.active = active_after_close(self.active, index, remaining);
+                }
+                self.tabs = retained;
+                self.collection = Some(collection);
+                self.rebuild_tree(cx);
+                self.sync_active_sidebar(window, cx);
+                self.persist(cx)?;
+                cx.notify();
+            }
+            Ok(result)
+        })();
+        let _ = call
+            .reply
+            .send(result.map_err(|error| format!("{error:#}")));
     }
     fn choose_project(&mut self, create: bool, window: &mut Window, cx: &mut Context<Self>) {
         let choice = cx.prompt_for_paths(PathPromptOptions {
@@ -1509,6 +1682,8 @@ impl Workbench {
                     self.preferences
                         .clone()
                         .unwrap_or_else(|| AppPreferences::from_workspace(&self.state)),
+                    self.mcp.clone(),
+                    self.mcp_error.clone(),
                     window,
                     cx,
                 )

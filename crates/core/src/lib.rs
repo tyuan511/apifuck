@@ -5,6 +5,7 @@ pub mod collection;
 pub mod editing;
 pub mod engine;
 pub mod exchange;
+pub mod mcp;
 pub mod runner;
 pub mod scripts;
 pub mod settings;

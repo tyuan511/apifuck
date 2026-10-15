@@ -79,10 +79,11 @@ variables:
 | --- | --- |
 | `~/.apifuck-native/preferences.json` | 已应用的语言、主题、强调色、默认请求布局和网络设置 |
 | `~/.apifuck-native/settings-draft.json` | 设置页面未提交的原始输入 |
+| `~/.apifuck-native/mcp.json` | MCP 即时开关、端口和访问令牌，独立于设置草稿 |
 | `~/.apifuck-native/recent.json` | 最近项目的显示名称和路径，去重后最多 10 项 |
 
-设置草稿跨分类、返回工作区和重启恢复，点击保存后才应用。首次没有设备偏好时可沿用旧工作区中的配置，保存设备偏好后优先使用设备配置；请求明确指定的网络选项仍按执行规则覆盖默认值。
+外观与网络等设置草稿跨分类、返回工作区和重启恢复，点击保存后才应用。MCP 开关单独立即生效。首次没有设备偏好时可沿用旧工作区中的配置，保存设备偏好后优先使用设备配置；请求明确指定的网络选项仍按执行规则覆盖默认值。
 
 最近项目兼容读取旧版单路径记录，启动恢复最近一次成功打开的项目。用户目录名称保持稳定，不随源码目录或项目移动而改变。
 
-程序化读写使用 `Collection::open`、`Document::parse` 等核心 API。当前没有独立 CLI 或原生 MCP 服务；无界面验证使用 `cargo demo --check`。
+程序化读写使用 `Collection::open`、`Document::parse` 等核心 API。原生 MCP 通过同一核心 API 操作保存的 YAML，见 [mcp.md](mcp.md)。当前没有独立 CLI 产品；无界面验证使用 Cargo 测试和 `cargo demo --check`。

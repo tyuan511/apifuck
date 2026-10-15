@@ -27,4 +27,6 @@ semver = "1"
 sha2 = "0.10"
 self-replace = "1"
 
+axum = "0.8"
+
 [dev-dependencies]

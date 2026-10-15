@@ -9,13 +9,13 @@ GPUI desktop ───────────────┐
                            v
                     apifuck-core
                            ^
-Demo 集成测试 / 未来 MCP ───┘
+Demo 集成测试 / 原生 MCP ───┘
 
 apifuck-demo → 回环 HTTP / GraphQL / SSE / WebSocket 服务
 cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 ```
 
-`core` 不依赖 GPUI。`demo` 是开发和测试服务，不是桌面的生产后端；桌面直接通过核心发送请求。MCP 接入尚未实现，图中的 MCP 表示预留复用方向。
+`core` 不依赖 GPUI。`demo` 是开发和测试服务，不是桌面的生产后端；桌面直接通过核心发送请求。MCP 的 HTTP 传输和工具实现在核心的 `mcp/`，通过通道将操作交给 GPUI 工作区调度，复用相同存储和执行 API。
 
 ## 核心模块
 
@@ -33,6 +33,7 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 | `runner.rs` | 顺序集合运行、迭代、延迟、取消、失败停止、跨请求运行变量 |
 | `bru.rs` | 嵌入式 Bru/OpenCollection 转换 |
 | `exchange.rs`、`codegen.rs` | cURL 导入、代码导出，复用执行准备与 URL 解析 |
+| `mcp/` | 本机鉴权 HTTP MCP、工具与任务、四种 Agent 配置；不依赖 GPUI |
 | `update.rs` | Release 筛选、版本比较、发布说明、下载校验和程序替换 |
 
 主要公共入口从 `lib.rs` 导出：`Collection`、`Document`、`prepare`、`execute`、`Event`、`Response` 和 `NetworkSettings`。各专用模块提供更细的 API。
@@ -50,6 +51,7 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 | `variable_input.rs` | 普通输入框的变量 badge、值提示、浮动候选面板，以及 JSON 编辑器的变量高亮与悬停 |
 | `response_view.rs`、`export_view.rs` | 响应与流消息、测试报告、代码预览 |
 | `settings_view.rs`、`network_editor.rs` | 应用设置分类、设置草稿、网络参数编辑 |
+| `mcp_view.rs` | 原生设置中的 MCP 即时开关、状态、四种教程及配置复制 |
 | `update_view.rs` | 更新检查、下载进度、重试与安装阶段的界面状态 |
 | `languages.rs`、`syntax.rs` | 格式化、语法解析、高亮与模板范围 |
 | `language_server.rs`、`editor_tools.rs` | 内置 LSP、版本化诊断、编辑器生命周期和后台格式化 |
@@ -72,7 +74,7 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 
 桌面把文档交给核心准备并执行。核心合并环境、本机覆盖和项目/目录/请求配置，执行前置脚本、展开变量、规范化 URL，再建立网络请求。响应事件回到文档标签和响应面板；结束后完成响应脚本、断言、测试及允许的环境写回。
 
-代码导出和集合运行器复用核心规则。静态 tooltip 使用 `engine::preview_variables` 与 `interpolate`，不会运行脚本；不能将脚本运行后的值伪装为静态预览。完整语义见 [execution.md](execution.md)。
+代码导出、集合运行器和 MCP 请求复用核心规则。静态 tooltip 使用 `engine::preview_variables` 与 `interpolate`，不会运行脚本；不能将脚本运行后的值伪装为静态预览。完整语义见 [execution.md](execution.md)。
 
 ## 编辑器服务
 
@@ -87,3 +89,5 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 核心与 Demo 集成测试通过回环服务验证行为；桌面单元测试验证草稿、导航、变量、语言服务等模型。CI 配置覆盖 macOS/Linux/Windows。发布输出独立可执行文件，不包含签名安装器。
 
 开发命令见 [development.md](development.md)，发布门禁与校验见 [auto-update.md](auto-update.md)。
+
+MCP 接入和工具范围见 [mcp.md](mcp.md)。

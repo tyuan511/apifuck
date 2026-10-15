@@ -116,16 +116,23 @@ macOS 使用 Cmd，其余平台使用 Ctrl。
 | 退出 | Cmd/Ctrl+Q |
 | 代码编辑器手动补全 | Ctrl+Space |
 
+## MCP 与 AI Agent
+
+侧栏 **设置 → MCP** 提供原生服务开关和 **Claude Code、Codex、OpenCode、Pi** 四种可复制的接入教程。服务默认关闭，仅监听本机并使用令牌鉴权；开启后随应用启动，使用时保持桌面应用运行。
+
+Agent 可管理 OpenCollection 文档与环境，执行 HTTP/GraphQL/SSE/WebSocket、取消任务、运行集合及导入导出。MCP 复用原生存储与执行规则，保护未保存草稿和外部修改。完整工具清单与接入方式见 [MCP 文档](docs/mcp.md)。
+
 ## 当前边界
 
 Bruno 导入和部分脚本 API 兼容不等于完整 Bruno 客户端兼容。当前未提供 gRPC、高级认证（OAuth、AWS、Digest 等）、完整异步脚本/Node 模块、外部 Secret、dotenv、mTLS、Cookie jar、持久化请求历史或多项目并列工作区。详见 [执行规则](docs/execution.md) 与 [兼容性记录](docs/bruno-parity.md)。
 
-集合运行器仅在核心库和无界面测试中使用，桌面入口尚未提供。原生 MCP 接入仍是规划；仓库没有独立 CLI 产品。Demo 命令是开发辅助工具。
+集合运行器可通过核心库、MCP 和无界面测试使用，桌面没有独立运行器面板。仓库没有独立 CLI 产品；Demo 命令是开发辅助工具。
 
 ## 开发与文档
 
 | 文档 | 内容 |
 | --- | --- |
+| [MCP 接入](docs/mcp.md) | 原生服务、四种 Agent 配置、工具与执行边界 |
 | [架构说明](docs/architecture.md) | crate 边界、模块职责、编辑/执行/诊断数据流 |
 | [工作区交互](docs/postman-layout.md) | 导航、表单、变量提示、设置及人工验收 |
 | [存储说明](docs/storage.md) | OpenCollection、草稿、环境覆盖与原子写入 |

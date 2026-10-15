@@ -1,6 +1,6 @@
 # 请求执行与脚本
 
-本页描述当前 Rust 核心的执行语义。桌面发送、代码导出、集合运行器和无界面测试复用同一核心；执行入口见 [架构说明](architecture.md)。
+本页描述当前 Rust 核心的执行语义。桌面发送、MCP、代码导出、集合运行器和无界面测试复用同一核心；执行入口见 [架构说明](architecture.md)。
 
 ## 执行规则
 
@@ -63,7 +63,7 @@ HTTP JSON Body 和 GraphQL Variables JSON 编辑器对完整模板使用主题�
 
 ## 集合运行器与执行边界
 
-`runner::run` 在核心库中提供顺序执行、目录筛选、迭代、延迟、取消和失败停止，并在请求间共享运行变量。它执行 HTTP/GraphQL，将 WebSocket 记为 skipped；桌面目前没有集合运行器入口。
+`runner::run` 在核心库中提供顺序执行、目录筛选、迭代、延迟、取消和失败停止，并在请求间共享运行变量。它执行 HTTP/GraphQL，将 WebSocket 记为 skipped；可通过 MCP 的 `run_collection` 调用；桌面目前没有独立的集合运行器面板。
 
 已支持 Basic、Bearer、API Key，以及显式无认证与继承。Digest、NTLM、WSSE、OAuth1/2、AWS SigV4 尚未实现执行支持；表单或导入器能保留某种配置，不代表可以发送。
 

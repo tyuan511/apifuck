@@ -10,6 +10,7 @@ mod icons;
 mod key_value_editor;
 mod language_server;
 mod languages;
+mod mcp_view;
 mod network_editor;
 mod request_form;
 mod response_view;

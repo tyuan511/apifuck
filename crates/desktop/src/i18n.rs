@@ -118,12 +118,16 @@ mod tests {
 
     #[test]
     fn catalog_covers_ui_literals() {
+        for agent in apifuck_core::mcp::guides::Agent::ALL {
+            assert!(english().contains_key(agent.instruction()));
+        }
         for source in [
             include_str!("main.rs"),
             include_str!("workbench.rs"),
             include_str!("update_view.rs"),
             include_str!("document_tab.rs"),
             include_str!("settings_view.rs"),
+            include_str!("mcp_view.rs"),
             include_str!("network_editor.rs"),
             include_str!("request_form.rs"),
             include_str!("key_value_editor.rs"),

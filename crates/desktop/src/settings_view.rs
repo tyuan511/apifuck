@@ -93,6 +93,7 @@ enum Category {
     Appearance,
     Network,
     Proxy,
+    Mcp,
     About,
 }
 impl Category {
@@ -101,6 +102,7 @@ impl Category {
             Self::Appearance => tr("外观与语言"),
             Self::Network => tr("网络请求"),
             Self::Proxy => tr("代理"),
+            Self::Mcp => "MCP",
             Self::About => tr("关于与更新"),
         }
     }
@@ -109,6 +111,7 @@ impl Category {
             Self::Appearance => AppIcon::Palette,
             Self::Network => AppIcon::Network,
             Self::Proxy => AppIcon::Globe,
+            Self::Mcp => AppIcon::Network,
             Self::About => AppIcon::Info,
         }
     }
@@ -117,6 +120,7 @@ impl Category {
             Self::Appearance => tr("调整主题与强调色，让工作台符合你的使用习惯。"),
             Self::Network => tr("设置所有项目共用的请求超时、重定向和安全选项。"),
             Self::Proxy => tr("配置应用发送请求时使用的代理服务器。"),
+            Self::Mcp => tr("通过 MCP 让 Agent 操作当前原生工作区。"),
             Self::About => tr("查看应用版本并检查可用更新。"),
         }
     }
@@ -132,13 +136,21 @@ pub struct SettingsView {
     accent: String,
     request_layout: RequestLayout,
     network: Entity<NetworkEditor>,
+    mcp: Entity<crate::mcp_view::McpView>,
     notes: String,
     auto_check_updates: bool,
     _network_subscription: Subscription,
 }
 impl EventEmitter<SettingsEvent> for SettingsView {}
 impl SettingsView {
-    pub fn new(preferences: AppPreferences, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        preferences: AppPreferences,
+        service: Option<std::sync::Arc<apifuck_core::mcp::Service>>,
+        mcp_error: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mcp = cx.new(|cx| crate::mcp_view::McpView::new(service, mcp_error, window, cx));
         let network = cx.new(|cx| NetworkEditor::new(preferences.network, window, cx));
         let subscription = cx.observe(&network, |_, _, cx| cx.notify());
         let mut this = Self {
@@ -160,6 +172,7 @@ impl SettingsView {
                 preferences.accent
             },
             network,
+            mcp,
             request_layout: preferences.request_layout,
             notes: tr("正在加载版本介绍…").into(),
             auto_check_updates: preferences.auto_check_updates,
@@ -242,6 +255,7 @@ impl Render for SettingsView {
                     Category::Appearance,
                     Category::Network,
                     Category::Proxy,
+                    Category::Mcp,
                     Category::About,
                 ]
                 .into_iter()
@@ -286,6 +300,7 @@ impl Render for SettingsView {
                 }),
             );
         let detail = match self.category {
+            Category::Mcp => self.mcp.clone().into_any_element(),
             Category::Appearance => div()
                 .flex()
                 .flex_col()
@@ -583,7 +598,11 @@ impl Render for SettingsView {
                                     .min_w_0()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(tr("设置保存在此设备，切换分类不会丢失输入。")),
+                                    .child(if self.category == Category::Mcp {
+                                        tr("MCP 开关立即生效，无需点击保存设置。")
+                                    } else {
+                                        tr("设置保存在此设备，切换分类不会丢失输入。")
+                                    }),
                             )
                             .child(
                                 Button::new("save-settings")
