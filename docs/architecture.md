@@ -70,6 +70,8 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 
 存储位置和外部修改规则见 [storage.md](storage.md)。
 
+OpenCollection 校验器保留内嵌 Schema 的 Draft-07 声明，按文档类型首次使用时编译并缓存；打开空项目不会提前构建全部类型。MCP 参数校验器同样按工具首次使用时编译并复用，传输层与工作区入口仍分别执行参数校验。`crates/core/tests/validation_allocations.rs` 在独立测试进程中检查初始化保留堆分配和重复 MCP 调用的分配上限；它不代表桌面 RSS 或图形资源占用。
+
 ## 请求和变量
 
 桌面把文档交给核心准备并执行。核心合并环境、本机覆盖和项目/目录/请求配置，执行前置脚本、展开变量、规范化 URL，再建立网络请求。响应事件回到文档标签和响应面板；结束后完成响应脚本、断言、测试及允许的环境写回。

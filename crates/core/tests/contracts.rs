@@ -378,6 +378,41 @@ fn schema_roundtrip_and_conflict_detection() {
     );
 }
 #[test]
+fn cached_document_schemas_still_reject_invalid_nested_values() {
+    use apifuck_core::DocumentKind;
+
+    for (template, kind, field) in [
+        ("folder", DocumentKind::Folder, "info"),
+        ("environment", DocumentKind::Environment, "name"),
+        ("http", DocumentKind::Http, "info"),
+        ("graphql", DocumentKind::Graphql, "info"),
+        ("websocket", DocumentKind::WebSocket, "info"),
+        ("http", DocumentKind::Other, "info"),
+    ] {
+        let valid: Value =
+            serde_yaml::from_str(&collection::template(template, template).unwrap()).unwrap();
+        let mut invalid = valid.clone();
+        invalid[field] = json!(42);
+        for _ in 0..2 {
+            collection::validate(&valid, kind).unwrap();
+            assert!(collection::validate(&invalid, kind).is_err(), "{kind:?}");
+        }
+    }
+
+    let mut folder = json!({"info":{"name":"outer"},"items":[{
+        "info":{"name":"inner"},"items":[{
+            "info":{"name":"request","type":"http"},
+            "http":{"method":"GET","url":"https://example.com"}
+        }]
+    }]});
+    collection::validate(&folder, DocumentKind::Folder).unwrap();
+    folder["items"][0]["items"][0]["http"]["method"] = json!(42);
+    assert!(collection::validate(&folder, DocumentKind::Folder).is_err());
+    let root = json!({"opencollection":"1.0.0","info":{"name":"Test"},"request":{"headers":[{"name":"X-Test","value":42}]}});
+    assert!(collection::validate(&root, DocumentKind::Collection).is_err());
+}
+
+#[test]
 fn typed_variables_cycles_and_environments() {
     let (_dir, c) = project();
     c.add(

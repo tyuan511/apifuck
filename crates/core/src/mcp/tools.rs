@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use std::sync::OnceLock;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 pub fn list() -> &'static [Value] {
     static TOOLS: OnceLock<Vec<Value>> = OnceLock::new();
@@ -43,11 +43,32 @@ pub fn list() -> &'static [Value] {
 }
 
 pub fn validate(name: &str, arguments: &Value) -> anyhow::Result<()> {
-    let tool = list()
-        .iter()
-        .find(|t| t["name"] == name)
+    struct ToolSchema {
+        schema: &'static Value,
+        validator: OnceLock<jsonschema::Validator>,
+    }
+    static SCHEMAS: OnceLock<BTreeMap<&'static str, ToolSchema>> = OnceLock::new();
+    let schemas = SCHEMAS.get_or_init(|| {
+        list()
+            .iter()
+            .map(|tool| {
+                (
+                    tool["name"].as_str().expect("built-in tool name"),
+                    ToolSchema {
+                        schema: &tool["inputSchema"],
+                        validator: OnceLock::new(),
+                    },
+                )
+            })
+            .collect()
+    });
+    let tool = schemas
+        .get(name)
         .ok_or_else(|| anyhow::anyhow!("Unknown MCP tool: {name}"))?;
-    jsonschema::validator_for(&tool["inputSchema"])?
+    tool.validator
+        .get_or_init(|| {
+            jsonschema::validator_for(tool.schema).expect("built-in MCP tool schema is valid")
+        })
         .validate(arguments)
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
@@ -69,4 +90,40 @@ pub fn mutates_workspace(name: &str) -> bool {
             | "import_curl"
             | "import_document"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_tool_schemas_validate_each_call_and_keep_tool_constraints_separate() {
+        for _ in 0..2 {
+            for (name, valid, invalid) in [
+                ("get_workspace", json!({}), json!({"unexpected":true})),
+                ("get_job", json!({"id":"job"}), json!({"id":""})),
+                ("set_environment", json!({"environment":null}), json!({})),
+                (
+                    "create_request",
+                    json!({"name":"Test","protocol":"http"}),
+                    json!({"name":"Test","protocol":"unknown"}),
+                ),
+                (
+                    "run_collection",
+                    json!({"iterations":1}),
+                    json!({"iterations":10001}),
+                ),
+            ] {
+                validate(name, &valid).unwrap();
+                assert!(validate(name, &invalid).is_err(), "{name}");
+                assert!(validate(name, &json!(null)).is_err(), "{name}");
+            }
+        }
+        assert!(
+            validate("unknown", &json!({}))
+                .unwrap_err()
+                .to_string()
+                .contains("Unknown MCP tool")
+        );
+    }
 }

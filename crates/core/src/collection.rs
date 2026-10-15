@@ -2,7 +2,6 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
     fs,
     io::Write,
     path::{Component, Path, PathBuf},
@@ -101,42 +100,39 @@ impl Document {
     }
 }
 
-pub fn validate(value: &Value, kind: DocumentKind) -> Result<()> {
-    static VALIDATORS: OnceLock<BTreeMap<&'static str, jsonschema::Validator>> = OnceLock::new();
-    let validators = VALIDATORS.get_or_init(|| {
-        [
-            "root",
-            "Folder",
-            "Environment",
-            "HttpRequest",
-            "GraphQLRequest",
-            "WebSocketRequest",
-            "Item",
-        ]
-        .into_iter()
-        .map(|name| {
-            let mut schema: Value = serde_json::from_str(SCHEMA).expect("embedded schema");
-            if name != "root" {
-                schema =
-                    json!({"$defs": schema["$defs"].clone(), "$ref": format!("#/$defs/{name}")});
-            }
-            (
-                name,
-                jsonschema::validator_for(&schema).expect("embedded schema is valid"),
-            )
-        })
-        .collect()
-    });
-    let name = match kind {
-        DocumentKind::Collection => "root",
-        DocumentKind::Folder => "Folder",
-        DocumentKind::Environment => "Environment",
-        DocumentKind::Http => "HttpRequest",
-        DocumentKind::Graphql => "GraphQLRequest",
-        DocumentKind::WebSocket => "WebSocketRequest",
-        DocumentKind::Other => "Item",
+fn validator(kind: DocumentKind) -> &'static jsonschema::Validator {
+    static COLLECTION: OnceLock<jsonschema::Validator> = OnceLock::new();
+    static FOLDER: OnceLock<jsonschema::Validator> = OnceLock::new();
+    static ENVIRONMENT: OnceLock<jsonschema::Validator> = OnceLock::new();
+    static HTTP: OnceLock<jsonschema::Validator> = OnceLock::new();
+    static GRAPHQL: OnceLock<jsonschema::Validator> = OnceLock::new();
+    static WEBSOCKET: OnceLock<jsonschema::Validator> = OnceLock::new();
+    static ITEM: OnceLock<jsonschema::Validator> = OnceLock::new();
+    let (name, cache) = match kind {
+        DocumentKind::Collection => ("root", &COLLECTION),
+        DocumentKind::Folder => ("Folder", &FOLDER),
+        DocumentKind::Environment => ("Environment", &ENVIRONMENT),
+        DocumentKind::Http => ("HttpRequest", &HTTP),
+        DocumentKind::Graphql => ("GraphQLRequest", &GRAPHQL),
+        DocumentKind::WebSocket => ("WebSocketRequest", &WEBSOCKET),
+        DocumentKind::Other => ("Item", &ITEM),
     };
-    let errors: Vec<String> = validators[name]
+    cache.get_or_init(|| {
+        let mut schema: Value = serde_json::from_str(SCHEMA).expect("embedded schema");
+        if name != "root" {
+            // Keep the source dialect: omitting it selects a newer draft and
+            // expands a large, process-wide meta-schema validation cache.
+            let draft = schema["$schema"].take();
+            let definitions = schema["$defs"].take();
+            schema =
+                json!({"$schema": draft, "$defs": definitions, "$ref": format!("#/$defs/{name}")});
+        }
+        jsonschema::validator_for(&schema).expect("embedded schema is valid")
+    })
+}
+
+pub fn validate(value: &Value, kind: DocumentKind) -> Result<()> {
+    let errors: Vec<String> = validator(kind)
         .iter_errors(value)
         .take(8)
         .map(|e| format!("{}: {}", e.instance_path, e))
