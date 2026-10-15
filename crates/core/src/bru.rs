@@ -3,7 +3,7 @@ use anyhow::{Context, Result, anyhow, ensure};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 const BRIDGE_SOURCE: &str = include_str!("../resources/javascript/bridge.bundle.js");
@@ -70,7 +70,58 @@ impl Converter {
         Ok(output)
     }
 }
-thread_local! {static CONVERTER:RefCell<Option<Converter>>=const{RefCell::new(None)};}
+struct Conversion {
+    source: String,
+    kind: String,
+    direction: String,
+    response: mpsc::SyncSender<Result<String>>,
+}
+struct ConverterWorker {
+    sender: mpsc::Sender<Conversion>,
+}
+impl ConverterWorker {
+    fn new() -> Result<Self> {
+        let (sender, receiver) = mpsc::channel::<Conversion>();
+        std::thread::Builder::new()
+            .name("apifuck-bru".into())
+            // QuickJS initialization can exhaust a Windows/Tokio caller's stack.
+            // Keep the VM and its cache on this larger stack for their entire life.
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || {
+                let mut converter = None;
+                for request in receiver {
+                    let result = (|| {
+                        if converter.is_none() {
+                            converter = Some(Converter::new()?);
+                        }
+                        converter.as_ref().unwrap().convert(
+                            &request.source,
+                            &request.kind,
+                            &request.direction,
+                        )
+                    })();
+                    let _ = request.response.send(result);
+                }
+            })
+            .context("无法创建 Bru 转换线程")?;
+        Ok(Self { sender })
+    }
+    fn convert(&self, source: &str, kind: &str, direction: &str) -> Result<String> {
+        let (response, receiver) = mpsc::sync_channel(1);
+        self.sender
+            .send(Conversion {
+                source: source.into(),
+                kind: kind.into(),
+                direction: direction.into(),
+                response,
+            })
+            .map_err(|_| anyhow!("Bru 转换线程已停止"))?;
+        receiver.recv().context("Bru 转换线程异常退出")?
+    }
+}
+// Each calling thread retains its own cached converter. Dropping its sender
+// closes the worker's receive loop; no QuickJS runtime/value crosses threads.
+thread_local! {static CONVERTER:RefCell<Option<ConverterWorker>>=const{RefCell::new(None)};}
 pub fn convert(source: &str, kind: &str, direction: &str) -> Result<String> {
     ensure!(
         matches!(kind, "request" | "folder" | "environment"),
@@ -80,7 +131,7 @@ pub fn convert(source: &str, kind: &str, direction: &str) -> Result<String> {
     CONVERTER.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_none() {
-            *slot = Some(Converter::new()?);
+            *slot = Some(ConverterWorker::new()?);
         }
         slot.as_ref().unwrap().convert(source, kind, direction)
     })
@@ -106,5 +157,28 @@ mod tests {
         let yaml = convert("vars {\n  host: localhost\n}\n", "environment", "import").unwrap();
         assert!(yaml.contains("localhost"));
         assert!(convert("this is not a request", "request", "import").is_err());
+    }
+
+    #[test]
+    fn conversion_on_small_caller_stacks_recovers_after_invalid_input() {
+        let callers: Vec<_> = (0..2)
+            .map(|index| {
+                std::thread::Builder::new()
+                    .stack_size(256 * 1024)
+                    .spawn(move || {
+                        let source = format!("vars {{\n  host: caller-{index}\n}}\n");
+                        let yaml = convert(&source, "environment", "import").unwrap();
+                        assert!(yaml.contains(&format!("caller-{index}")));
+                        assert!(convert("invalid request", "request", "import").is_err());
+                        let exported = convert(&yaml, "environment", "export").unwrap();
+                        let restored = convert(&exported, "environment", "import").unwrap();
+                        assert_eq!(yaml, restored);
+                    })
+                    .unwrap()
+            })
+            .collect();
+        for caller in callers {
+            caller.join().unwrap();
+        }
     }
 }

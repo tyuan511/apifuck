@@ -10,6 +10,8 @@ ApiFuck 保持 OpenCollection YAML 为主存储，复用固定版本的 Bruno �
 
 本地修补保留响应变量的 request 作用域；缺省 seq 按 Bruno 的 1 归一化，显式 seq（包括 0）保留。公开 fixture 测试覆盖 request、annotations、custom-method、settings、complex-auth 等 Bru → YAML → Bru → YAML 语义往返。
 
+每个调用线程复用一个拥有 16 MiB 原生栈的专用转换线程，QuickJS 上下文只在该线程创建、执行和销毁，避免 Windows 或后台任务的小栈在初始化时溢出。调用间仅传递文本和结果；调用线程结束后，缓存转换线程随通道关闭而退出。
+
 ## 当前状态
 
 | 范围 | 已实现 | 仍未实现或有限制 |
