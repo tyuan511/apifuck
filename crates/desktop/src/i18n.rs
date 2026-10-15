@@ -133,7 +133,6 @@ mod tests {
             include_str!("key_value_editor.rs"),
             include_str!("variable_input.rs"),
             include_str!("editor_tools.rs"),
-            include_str!("export_view.rs"),
         ] {
             for fragment in source.split("tr(\"").skip(1) {
                 let key = fragment.split('"').next().unwrap();

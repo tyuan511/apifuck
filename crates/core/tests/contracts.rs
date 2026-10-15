@@ -63,6 +63,260 @@ fn ok(body: &str) -> Vec<u8> {
     format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).into_bytes()
 }
 
+fn assert_sent_headers_match_wire(head: &apifuck_core::RequestHead, wire: &[u8]) {
+    let end = wire
+        .windows(4)
+        .position(|part| part == b"\r\n\r\n")
+        .unwrap();
+    let text = String::from_utf8_lossy(&wire[..end]);
+    let mut actual: Vec<_> = text
+        .lines()
+        .skip(1)
+        .map(|line| {
+            let (name, value) = line.split_once(':').unwrap();
+            (name.to_ascii_lowercase(), value.trim().to_owned())
+        })
+        .collect();
+    let mut recorded = head.headers.clone();
+    actual.sort();
+    recorded.sort();
+    assert_eq!(recorded, actual);
+    assert!(text.starts_with(&format!("{} ", head.method)));
+}
+
+#[tokio::test]
+async fn sent_headers_include_inheritance_auth_scripts_duplicates_and_transport_defaults() {
+    let (_dir, c) = project();
+    let root = json!({"opencollection":"1.0.0","info":{"name":"Tests"},"request":{
+        "headers":[{"name":"X-Root","value":"inherited"},{"name":"X-Disabled","value":"parent"}],
+        "auth":{"type":"bearer","token":"{{token}}"}
+    }});
+    c.save(c.project(), &serde_yaml::to_string(&root).unwrap())
+        .unwrap();
+    c.add(
+        Path::new("environments/dev.yml"),
+        "name: dev\nvariables:\n  - name: token\n    value: resolved\n",
+    )
+    .unwrap();
+    let (url, wire) = server(ok("{}")).await;
+    let doc = request(
+        &c,
+        &url,
+        json!({"http":{
+        "url":url,"method":"POST","auth":"inherit",
+        "headers":[{"name":"X-Duplicate","value":"one"},{"name":"X-Duplicate","value":"two"},{"name":"X-Disabled","value":"no","disabled":true}],
+        "body":{"type":"json","data":"{\"value\":1}"}
+    },"runtime":{"scripts":[{"type":"before-request","code":"req.setHeader('X-Script', 'from-script');"}]}}),
+    );
+    let c = Collection::open(c.root()).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    execute(
+        prepare(&c, &doc, Some("dev"), NetworkSettings::default()).unwrap(),
+        Some(tx),
+    )
+    .await
+    .unwrap();
+    let Event::Request { request: head } = rx.recv().await.unwrap() else {
+        panic!("request headers must precede response events");
+    };
+    assert_sent_headers_match_wire(&head, &wire.await.unwrap());
+    for pair in [
+        ("authorization", "Bearer resolved"),
+        ("x-root", "inherited"),
+        ("x-script", "from-script"),
+        ("x-duplicate", "one"),
+        ("x-duplicate", "two"),
+        ("content-type", "application/json"),
+        ("accept", "*/*"),
+    ] {
+        assert!(
+            head.headers.contains(&(pair.0.into(), pair.1.into())),
+            "{pair:?}"
+        );
+    }
+    assert!(!head.headers.iter().any(|(name, _)| name == "x-disabled"));
+    assert_eq!(
+        std::fs::read_to_string(c.root().join(doc.path())).unwrap(),
+        doc.source()
+    );
+}
+
+#[tokio::test]
+async fn sent_headers_match_wire_for_body_modes_and_empty_requests() {
+    for (method, body) in [
+        ("GET", Value::Null),
+        ("POST", Value::Null),
+        ("POST", json!({"type":"text","data":""})),
+        ("POST", json!({"type":"text","data":"hello 世界"})),
+        (
+            "POST",
+            json!({"type":"form-urlencoded","data":[{"name":"key","value":"value"}]}),
+        ),
+        (
+            "POST",
+            json!({"type":"multipart-form","data":[{"name":"file","type":"file","value":"upload.bin"},{"name":"note","type":"text","value":"hello"}]}),
+        ),
+        (
+            "PUT",
+            json!({"type":"file","data":[{"filePath":"upload.bin","contentType":"application/octet-stream","selected":true}]}),
+        ),
+    ] {
+        let (_dir, c) = project();
+        std::fs::write(c.root().join("upload.bin"), [0, 1, 255]).unwrap();
+        let (url, wire) = server(ok("{}")).await;
+        let mut http = json!({"method":method,"url":url});
+        if !body.is_null() {
+            http["body"] = body;
+        }
+        let doc = request(&c, &url, json!({"http":http}));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        execute(
+            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
+            Some(tx),
+        )
+        .await
+        .unwrap();
+        let Event::Request { request: head } = rx.recv().await.unwrap() else {
+            panic!("missing sent headers");
+        };
+        assert_sent_headers_match_wire(&head, &wire.await.unwrap());
+    }
+}
+
+#[tokio::test]
+async fn sent_headers_preserve_overrides_range_and_explicit_proxy_auth() {
+    for headers in [
+        json!([{"name":"Host","value":"custom.test"},{"name":"Accept","value":"application/json"},{"name":"Accept-Encoding","value":"identity"}]),
+        json!([{"name":"Range","value":"bytes=0-2"}]),
+        json!([{"name":"Transfer-Encoding","value":"gzip"}]),
+    ] {
+        let (_dir, c) = project();
+        let (url, wire) = server(ok("{}")).await;
+        let doc = request(
+            &c,
+            &url,
+            json!({"http":{"method":"POST","url":url,"headers":headers,"body":{"type":"text","data":"hello"}}}),
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        execute(
+            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
+            Some(tx),
+        )
+        .await
+        .unwrap();
+        let Event::Request { request: head } = rx.recv().await.unwrap() else {
+            panic!("missing sent headers");
+        };
+        assert_sent_headers_match_wire(&head, &wire.await.unwrap());
+    }
+    let (_dir, c) = project();
+    let (proxy, wire) = server(ok("{}")).await;
+    let proxy = proxy.replacen("http://", "http://test:pa%2Bss@", 1);
+    let doc = request(&c, "http://target.invalid/resource", json!({}));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut network = NetworkSettings::default();
+    network.proxy = Some(proxy);
+    execute(prepare(&c, &doc, None, network).unwrap(), Some(tx))
+        .await
+        .unwrap();
+    let Event::Request { request: head } = rx.recv().await.unwrap() else {
+        panic!("missing proxied headers");
+    };
+    assert_sent_headers_match_wire(&head, &wire.await.unwrap());
+    assert!(
+        head.headers
+            .iter()
+            .any(|(name, _)| name == "proxy-authorization")
+    );
+}
+
+#[tokio::test]
+async fn redirected_sent_headers_match_each_hop_and_drop_cross_origin_credentials() {
+    for status in [302, 307] {
+        let (_dir, c) = project();
+        let (final_url, final_wire) = server(ok("{}")).await;
+        let (url, first_wire) = server(format!("HTTP/1.1 {status} Redirect\r\nLocation: {final_url}/done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes()).await;
+        let doc = request(
+            &c,
+            &url,
+            json!({"http":{"method":"POST","url":url,"auth":{"type":"bearer","token":"private"},"headers":[{"name":"Cookie","value":"local"}],"body":{"type":"json","data":"{}"}}}),
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        execute(
+            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
+            Some(tx),
+        )
+        .await
+        .unwrap();
+        let mut sent = vec![];
+        while let Some(event) = rx.recv().await {
+            if let Event::Request { request } = event {
+                sent.push(request);
+            }
+        }
+        assert_eq!(sent.len(), 2);
+        assert_sent_headers_match_wire(&sent[0], &first_wire.await.unwrap());
+        assert_sent_headers_match_wire(&sent[1], &final_wire.await.unwrap());
+        assert_eq!(sent[1].url, format!("{final_url}/done"));
+        assert_eq!(sent[1].method, if status == 302 { "GET" } else { "POST" });
+        assert!(
+            !sent[1]
+                .headers
+                .iter()
+                .any(|(name, _)| name == "authorization" || name == "cookie")
+        );
+        if status == 302 {
+            assert!(
+                !sent[1]
+                    .headers
+                    .iter()
+                    .any(|(name, _)| name == "content-type" || name == "content-length")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn sent_header_events_respect_redirect_limits_and_connection_failures() {
+    for (follow, limit) in [(false, 10), (true, 0)] {
+        let (_dir, c) = project();
+        let (url, wire) = server(b"HTTP/1.1 302 Found\r\nLocation: http://target.invalid/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()).await;
+        let doc = request(&c, &url, json!({}));
+        let mut network = NetworkSettings::default();
+        network.follow_redirects = follow;
+        network.max_redirects = limit;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let result = execute(prepare(&c, &doc, None, network).unwrap(), Some(tx)).await;
+        if follow {
+            assert!(result.is_err());
+        } else {
+            assert_eq!(result.unwrap().status, 302);
+        }
+        let Event::Request { request: head } = rx.recv().await.unwrap() else {
+            panic!("missing initial sent headers");
+        };
+        assert_sent_headers_match_wire(&head, &wire.await.unwrap());
+        while let Ok(event) = rx.try_recv() {
+            assert!(!matches!(event, Event::Request { .. }));
+        }
+    }
+    let (_dir, c) = project();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let doc = request(&c, &url, json!({}));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    assert!(
+        execute(
+            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
+            Some(tx)
+        )
+        .await
+        .is_err()
+    );
+    assert!(rx.try_recv().is_err());
+}
+
 #[test]
 fn schema_roundtrip_and_conflict_detection() {
     let (_dir, c) = project();
@@ -225,12 +479,18 @@ async fn stream_cancellation_is_prompt_and_has_partial_events() {
     let cancel = ex.cancellation();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let run = tokio::spawn(execute(ex, Some(tx)));
+    let mut saw_sent_headers = false;
     loop {
         let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .unwrap()
             .unwrap();
+        if let Event::Request { request } = &event {
+            saw_sent_headers = true;
+            assert!(request.headers.iter().any(|(name, _)| name == "host"));
+        }
         if matches!(event, Event::Chunk { .. }) {
+            assert!(saw_sent_headers);
             break;
         }
     }
@@ -243,13 +503,25 @@ async fn stream_cancellation_is_prompt_and_has_partial_events() {
     server.abort();
 }
 #[tokio::test]
+// The WebSocket callback's error type is fixed by tungstenite's API.
+#[allow(clippy::result_large_err)]
 async fn websocket_roundtrip() {
     let (_dir, c) = project();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
+    let (head_tx, head_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (socket, _) = listener.accept().await.unwrap();
-        let mut ws = tokio_tungstenite::accept_async(socket).await.unwrap();
+        let mut ws = tokio_tungstenite::accept_hdr_async(
+            socket,
+            move |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                  response| {
+                head_tx.send(request.headers().clone()).unwrap();
+                Ok(response)
+            },
+        )
+        .await
+        .unwrap();
         let text = ws.next().await.unwrap().unwrap();
         ws.send(text).await.unwrap();
         while let Some(message) = ws.next().await {
@@ -265,6 +537,20 @@ async fn websocket_roundtrip() {
     let (events, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let run = tokio::spawn(websocket::connect(ex, commands, events));
     assert!(matches!(rx.recv().await.unwrap(), Event::Connected));
+    let Event::Request { request: head } = rx.recv().await.unwrap() else {
+        panic!("missing WebSocket handshake headers");
+    };
+    let mut actual: Vec<_> = head_rx
+        .await
+        .unwrap()
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.to_str().unwrap().to_owned()))
+        .collect();
+    actual.sort();
+    let mut recorded = head.headers;
+    recorded.sort();
+    assert_eq!(recorded, actual);
+    assert!(recorded.iter().any(|(name, _)| name == "sec-websocket-key"));
     tx.send(websocket::Command::Send("你好".into())).unwrap();
     loop {
         match tokio::time::timeout(Duration::from_secs(2), rx.recv())
@@ -514,14 +800,19 @@ async fn graphql_uses_json_transport_and_preserves_variables() {
             &serde_yaml::to_string(&value).unwrap(),
         )
         .unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let response = execute(
         prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
+        Some(tx),
     )
     .await
     .unwrap();
     assert_eq!(response.status, 200);
     let sent = String::from_utf8(server.await.unwrap()).unwrap();
+    let Event::Request { request: head } = rx.recv().await.unwrap() else {
+        panic!("missing GraphQL request headers");
+    };
+    assert_sent_headers_match_wire(&head, sent.as_bytes());
     let body: Value = serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body["variables"]["id"], 7);
     assert!(body["query"].as_str().unwrap().contains("query User"));

@@ -14,5 +14,5 @@ pub mod update;
 pub mod url_editor;
 pub mod websocket;
 pub use collection::{Collection, Document, DocumentKind};
-pub use engine::{Event, Execution, Response, execute, prepare};
+pub use engine::{Event, Execution, RequestHead, Response, execute, prepare};
 pub use settings::NetworkSettings;

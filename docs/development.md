@@ -72,6 +72,12 @@ cargo test --locked -p apifuck-demo --test playground
 
 CI 的 `rust` job 在 macOS 14、Ubuntu 24.04、Windows 2022 上执行格式、测试、Clippy 和构建；`scripts` job 在 Ubuntu 上检查 Node 脚本、发布测试及 headless Demo。配置在 [.github/workflows/ci.yml](../.github/workflows/ci.yml)。配置覆盖某平台不代表某次运行已经通过该平台验证。
 
+仅修改 `website/**` 或 `.github/workflows/website.yml` 的 push/PR 不触发这套 CI，由 Website 工作流检查；混合修改仍运行完整 CI，手动触发不受路径过滤影响。若以后设置分支保护，不要把路径过滤后不会启动的工作流作为纯网站 PR 的必需检查。
+
+三平台 `rust` job 与 Release 构建使用相同的 `desktop-v1-<target>` 缓存命名空间，保留 Rust Cache 的平台、工具链及依赖哈希隔离。只有成功的 main CI 写入此缓存：未完整命中时，完成常规检查后，额外用与发布相同的 `--release --target` 命令预热依赖；完整命中时跳过预热。首次运行或依赖变化后的 main CI 因此会较慢，后续发布可读取 main 的缓存。PR 和 Release 只读取，不抢先写入缺少 Release 依赖的缓存；失败或取消的预热不保存。`scripts` job 继续使用独立缓存。
+
+缓存主要保留依赖编译产物，不能免除应用自身的编译、链接、测试及 Apple 公证。发布前应等待对应 main CI 完成预热；立即推送 tag 仍可能遇到冷缓存。已经推送的 tag 和正在运行的工作流不会自动使用后续配置修改。
+
 ## 更新嵌入依赖与示例
 
 运行必需的 bundle 和许可证保存在 `crates/core/resources/javascript/`，普通 Cargo 构建离线读取这些资源，不下载 Bruno 源码。开发入口与锁文件位于 `scripts/javascript/`；需要重建时，在该目录运行 `bun install --frozen-lockfile --ignore-scripts` 和 `bun run build`。重建需要 Git 和网络，会临时获取固定提交的 Bruno 转换源码、应用作用域修补，并在结束后清理源码。审查 bundle 和许可变更，并运行 Bru fixture 往返及脚本测试。

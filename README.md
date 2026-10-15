@@ -76,7 +76,7 @@ The [Playground](examples/playground/README.md) includes 32 ready-to-send reques
 | Editor assistance | Syntax highlighting, background formatting, built-in LSP syntax diagnostics, and offline script API completion and hover help |
 | Protocols and responses | HTTP, GraphQL, incremental SSE with cancellation, WebSocket messaging; status, timing, size, headers, body, timeline, and test results |
 | Scripts and tests | Synchronous QuickJS hooks, Chai, AJV JSON Schema, declarative assertions, response variable extraction, and local environment writeback |
-| Import and export | Paste cURL into the URL bar; convert Bru requests, environments, and folders; preview and copy cURL, JavaScript, Python, and Go code |
+| Import and export | Paste cURL into the URL bar; convert Bru requests, environments, and folders; generate and copy cURL, JavaScript, Python, and Go code |
 | Desktop preferences | Recover raw drafts; English and Simplified Chinese; light/dark/system themes; six accent colors; network/proxy settings; in-app updates |
 
 Use the project menu to open or create projects, access recent projects, and import `.bru` files. Collection variables and authentication belong in the settings button beside the collection sidebar title. Application preferences live in the Settings page; the project menu has no project-settings or project-delete actions.

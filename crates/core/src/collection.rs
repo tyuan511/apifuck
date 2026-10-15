@@ -348,6 +348,113 @@ impl Collection {
         temp.persist_noclobber(&absolute).map_err(|e| e.error)?;
         Ok(document)
     }
+    /// Duplicate a document or an entire folder into a new sibling identity.
+    /// Folder assets and comments are preserved; local state is handled by the caller.
+    pub fn duplicate(&self, document: &Document, source: &str) -> Result<Document> {
+        ensure!(
+            document.kind != DocumentKind::Collection,
+            "不能复制项目根文件"
+        );
+        let folder = document.kind == DocumentKind::Folder;
+        let from = if folder {
+            document.path.parent().context("目录无效")?
+        } else {
+            document.path()
+        };
+        let parent = from.parent().context("目录无效")?;
+        let to = parent.join(if folder {
+            format!("folder_{}", uuid::Uuid::new_v4())
+        } else {
+            format!("copy_{}.yml", uuid::Uuid::new_v4())
+        });
+        let target = if folder {
+            to.join(document.path.file_name().unwrap())
+        } else {
+            to.clone()
+        };
+        let parsed = Document::parse(target.clone(), source.to_owned())?;
+        ensure!(parsed.kind == document.kind, "复制不能改变文档类型");
+        // Check the source even when the caller supplies a local draft.
+        ensure!(
+            fs::read_to_string(self.safe_path(document.path())?)? == document.source,
+            "文件已被外部修改"
+        );
+        let mut root = self.project().value.clone();
+        if let Some(requests) = root
+            .pointer_mut("/extensions/apifuck/requests")
+            .and_then(Value::as_object_mut)
+        {
+            let copies: Vec<_> = requests
+                .iter()
+                .filter_map(|(key, value)| {
+                    Path::new(key)
+                        .strip_prefix(from)
+                        .ok()
+                        .map(|suffix| (portable_path(&to.join(suffix)), value.clone()))
+                })
+                .collect();
+            requests.extend(copies);
+        }
+        let root_update = (root != self.project().value)
+            .then(|| crate::editing::update(self.project().source(), &root))
+            .transpose()?;
+        if root_update.is_some() {
+            ensure!(
+                fs::read_to_string(self.root.join(self.project().path()))? == self.project().source,
+                "项目配置已被外部修改"
+            );
+        }
+        let absolute = self.safe_path(&to)?;
+        if folder {
+            fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+                for entry in fs::read_dir(from)? {
+                    let entry = entry?;
+                    let name = entry.file_name();
+                    if name == ".apifuck" || name == ".git" || name == "node_modules" {
+                        continue;
+                    }
+                    let ty = entry.file_type()?;
+                    ensure!(
+                        !ty.is_symlink(),
+                        "复制目录不支持符号链接：{}",
+                        entry.path().display()
+                    );
+                    let target = to.join(name);
+                    if ty.is_dir() {
+                        fs::create_dir(&target)?;
+                        copy_tree(&entry.path(), &target)?;
+                    } else {
+                        ensure!(ty.is_file(), "复制目录只支持普通文件");
+                        fs::copy(entry.path(), target)?;
+                    }
+                }
+                Ok(())
+            }
+            let staging = tempfile::tempdir_in(absolute.parent().context("目录无效")?)?;
+            copy_tree(&self.safe_path(from)?, staging.path())?;
+            atomic_write(
+                &staging.path().join(document.path.file_name().unwrap()),
+                source,
+            )?;
+            // Validate all copied documents before publishing the directory.
+            scan(staging.path(), staging.path(), &mut Vec::new())?;
+            ensure!(!absolute.exists(), "目标已存在");
+            fs::rename(staging.path(), &absolute)?;
+        } else {
+            self.add(&target, source)?;
+        }
+        if let Some(text) = root_update
+            && let Err(error) = self.save(self.project(), &text)
+        {
+            if folder {
+                fs::remove_dir_all(&absolute)?;
+            } else {
+                fs::remove_file(&absolute)?;
+            }
+            return Err(error);
+        }
+        Ok(parsed)
+    }
     pub fn rename(&self, document: &Document, target: &Path) -> Result<()> {
         ensure!(
             document.kind != DocumentKind::Collection,
@@ -745,6 +852,106 @@ pub fn portable_path(path: &Path) -> String {
 #[cfg(test)]
 mod named_creation_tests {
     use super::*;
+
+    #[test]
+    fn duplicate_folder_preserves_nested_documents_assets_and_request_options() {
+        let root = tempfile::tempdir().unwrap();
+        let c = Collection::create(root.path(), "Test").unwrap();
+        let folder = c
+            .add(
+                Path::new("api/folder.yaml"),
+                &(template("folder", "API").unwrap() + "# folder comment\n"),
+            )
+            .unwrap();
+        c.add(
+            Path::new("api/nested/folder.yml"),
+            &template("folder", "Nested").unwrap(),
+        )
+        .unwrap();
+        let source = template("graphql", "Query").unwrap() + "# request comment\n";
+        c.add(Path::new("api/nested/query.yml"), &source).unwrap();
+        fs::write(root.path().join("api/payload.json"), "{\"upload\":true}").unwrap();
+        fs::create_dir(root.path().join("api/.apifuck")).unwrap();
+        fs::write(root.path().join("api/.apifuck/private"), "local state").unwrap();
+        let mut value = c.project().value().clone();
+        value["extensions"]["apifuck"]["requests"] =
+            json!({"api/nested/query.yml": {"timeout": 123}});
+        c.save(
+            c.project(),
+            &crate::editing::update(c.project().source(), &value).unwrap(),
+        )
+        .unwrap();
+        let c = Collection::open(root.path()).unwrap();
+        let copy = c.duplicate(&folder, folder.source()).unwrap();
+        let parent = copy.path().parent().unwrap();
+        assert_ne!(parent, Path::new("api"));
+        assert_eq!(copy.kind(), DocumentKind::Folder);
+        assert_eq!(copy.path().file_name().unwrap(), "folder.yaml");
+        assert_eq!(
+            fs::read_to_string(root.path().join(parent).join("nested/query.yml")).unwrap(),
+            source
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join(parent).join("payload.json")).unwrap(),
+            "{\"upload\":true}"
+        );
+        assert!(!root.path().join(parent).join(".apifuck").exists());
+        let reopened = Collection::open(root.path()).unwrap();
+        assert_eq!(
+            reopened.project().value()["extensions"]["apifuck"]["requests"]
+                [portable_path(&parent.join("nested/query.yml"))]["timeout"],
+            123
+        );
+        assert_eq!(
+            reopened.find("api/nested/query.yml").unwrap().source(),
+            source
+        );
+        assert_eq!(
+            reopened.find(&portable_path(copy.path())).unwrap().source(),
+            folder.source()
+        );
+    }
+
+    #[test]
+    fn duplicate_request_uses_draft_and_rejects_invalid_or_stale_sources() {
+        let root = tempfile::tempdir().unwrap();
+        let c = Collection::create(root.path(), "Test").unwrap();
+        for protocol in ["http", "graphql", "websocket"] {
+            let doc = c
+                .create_request(Path::new(""), protocol, "Original")
+                .unwrap();
+            let draft = doc.source().replace("Original", "Edited");
+            let copy = c.duplicate(&doc, &draft).unwrap();
+            assert_eq!(copy.kind(), doc.kind());
+            assert_eq!(copy.name(), "Edited");
+            assert_eq!(
+                fs::read_to_string(root.path().join(doc.path())).unwrap(),
+                doc.source()
+            );
+            assert!(c.duplicate(&doc, "info: [").is_err());
+            fs::write(root.path().join(doc.path()), draft).unwrap();
+            assert!(c.duplicate(&doc, doc.source()).is_err());
+        }
+        assert!(c.duplicate(c.project(), c.project().source()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn duplicate_folder_with_symlink_fails_without_publishing_partial_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let c = Collection::create(root.path(), "Test").unwrap();
+        let folder = c.create_folder(Path::new(""), "Folder").unwrap();
+        std::os::unix::fs::symlink(
+            root.path(),
+            root.path()
+                .join(folder.path().parent().unwrap())
+                .join("link"),
+        )
+        .unwrap();
+        let before = fs::read_dir(root.path()).unwrap().count();
+        assert!(c.duplicate(&folder, folder.source()).is_err());
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), before);
+    }
 
     #[test]
     fn folder_names_are_metadata_and_nested_folders_keep_their_scope() {

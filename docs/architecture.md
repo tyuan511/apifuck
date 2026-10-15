@@ -49,7 +49,7 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 | `document_tab.rs` | 单文档草稿、编辑分区、URL、发送/取消和响应状态 |
 | `request_form.rs`、`key_value_editor.rs` | 认证、正文、GraphQL、参数/变量/请求头/断言等表单与表格 |
 | `variable_input.rs` | 普通输入框的变量 badge、值提示、浮动候选面板，以及 JSON 编辑器的变量高亮与悬停 |
-| `response_view.rs`、`export_view.rs` | 响应与流消息、测试报告、代码预览 |
+| `response_view.rs` | 响应与流消息、测试报告 |
 | `settings_view.rs`、`network_editor.rs` | 应用设置分类、设置草稿、网络参数编辑 |
 | `mcp_view.rs` | 原生设置中的 MCP 即时开关、状态、四种教程及配置复制 |
 | `update_view.rs` | 更新检查、下载进度、重试与安装阶段的界面状态 |

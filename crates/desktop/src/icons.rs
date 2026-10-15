@@ -1,6 +1,8 @@
 //! One Lucide vocabulary for actions, menus, and editors.
 pub use gpui_kit::assets::IconName as AppIcon;
 
+pub const HISTORY: &str = "icons/history.svg";
+
 pub fn document_kind(kind: &str) -> AppIcon {
     match kind {
         "folder" => AppIcon::FolderPlus,

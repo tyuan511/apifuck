@@ -78,8 +78,9 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ matrix.target }}
-          cache-on-failure: true
+          # Read the debug + release dependencies warmed by CI on main.
+          shared-key: desktop-v1-${{ matrix.target }}
+          save-if: false
       - run: cargo fmt --all --check
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings

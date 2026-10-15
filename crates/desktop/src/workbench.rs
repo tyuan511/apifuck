@@ -10,12 +10,12 @@ use apifuck_core::{
     settings::{self, WorkspaceState},
 };
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, IconName, Selectable, Sizable, WindowExt,
+    ActiveTheme, Disableable, Icon, IconName, Placement, Selectable, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     dialog::DialogButtonProps,
     input::{Input, InputEvent, InputState},
     list::ListItem,
-    menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
+    menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     notification::Notification,
     resizable::{h_resizable, resizable_panel},
     tab::{Tab, TabBar},
@@ -331,11 +331,6 @@ impl Workbench {
             );
             return;
         }
-        crate::feedback::show(
-            Notification::info(tr("正在读取项目…").to_owned()),
-            window,
-            cx,
-        );
         self.project_loading = true;
         let task = cx.background_spawn(async move {
             let collection = Collection::open(path)?;
@@ -859,6 +854,12 @@ impl Workbench {
                     collection.safe_path(std::path::Path::new(folder))?.is_dir(),
                     "目录不存在"
                 );
+                if let Some(document) = collection.documents().iter().find(|doc| {
+                    doc.kind() == apifuck_core::DocumentKind::Folder
+                        && doc.path().parent() == Some(std::path::Path::new(folder))
+                }) {
+                    return Ok(document.path().to_string_lossy().into_owned());
+                }
                 let target = std::path::Path::new(folder).join("folder.yml");
                 let name = std::path::Path::new(folder)
                     .file_name()
@@ -1227,10 +1228,18 @@ impl Workbench {
             .unwrap_or_default()
     }
     fn new_request_tab(&mut self, kind: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_request_in(kind, self.creation_parent(cx), window, cx);
+    }
+    fn new_request_in(
+        &mut self,
+        kind: &str,
+        parent: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(collection) = &self.collection else {
             return;
         };
-        let parent = self.creation_parent(cx);
         let base = match kind {
             "graphql" => tr("未命名 GraphQL 请求"),
             "websocket" => tr("未命名 WebSocket 请求"),
@@ -1264,10 +1273,22 @@ impl Workbench {
             self.new_request_tab(kind, window, cx);
             return;
         }
+        self.new_document_in(kind, self.creation_parent(cx), window, cx);
+    }
+    fn new_document_in(
+        &mut self,
+        kind: &'static str,
+        parent: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(kind, "http" | "graphql" | "websocket") {
+            self.new_request_in(kind, parent, window, cx);
+            return;
+        }
         if self.collection.is_none() || !matches!(kind, "folder" | "environment") {
             return;
         }
-        let parent = self.creation_parent(cx);
         // Name drafts are separate from the old file-path input drafts.
         let draft_key = format!("new-name:{kind}");
         let name = self.draft_input(draft_key.clone(), "", window, cx);
@@ -1277,12 +1298,14 @@ impl Workbench {
             tr("目录名称")
         };
         name.update(cx, |input, cx| input.set_placeholder(label, window, cx));
+        let root = self.collection.as_ref().map(|c| c.root().to_owned());
         let handle = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, _| {
             let input = name.clone();
             let handle = handle.clone();
             let draft_key = draft_key.clone();
             let parent = parent.clone();
+            let root = root.clone();
             dialog
                 .title(if kind == "environment" {
                     tr("新建环境")
@@ -1302,6 +1325,11 @@ impl Workbench {
                     handle
                         .update(cx, |this, cx| {
                             let result = (|| {
+                                anyhow::ensure!(
+                                    this.collection.as_ref().map(|c| c.root()) == root.as_deref(),
+                                    "{}",
+                                    tr("项目已切换，请重新操作")
+                                );
                                 let collection =
                                     this.collection.as_ref().context(tr("请先打开项目"))?;
                                 if kind == "environment" {
@@ -1348,6 +1376,7 @@ impl Workbench {
             return;
         };
         let doc = tab.read(cx).document().clone();
+        let root = self.collection.as_ref().map(|c| c.root().to_owned());
         let draft_key = format!("rename:{}", doc.path().display());
         let path = self.draft_input(draft_key.clone(), &doc.path().to_string_lossy(), window, cx);
         let handle = cx.entity().downgrade();
@@ -1355,6 +1384,7 @@ impl Workbench {
             let input = path.clone();
             let handle = handle.clone();
             let doc = doc.clone();
+            let root = root.clone();
             let draft_key = draft_key.clone();
             dialog
                 .title(tr("移动或重命名文档"))
@@ -1370,6 +1400,12 @@ impl Workbench {
                     handle
                         .update(cx, |this, cx| {
                             let result = (|| -> Result<()> {
+                                anyhow::ensure!(
+                                    this.collection.as_ref().map(|c| c.root()) == root.as_deref(),
+                                    "{}",
+                                    tr("项目已切换，请重新操作")
+                                );
+                                this.persist(cx)?;
                                 let c = this.collection.as_ref().context(tr("项目未打开"))?;
                                 let folder = doc.kind() == apifuck_core::DocumentKind::Folder;
                                 let from = if folder {
@@ -1382,6 +1418,16 @@ impl Workbench {
                                 } else {
                                     target.as_path()
                                 };
+                                anyhow::ensure!(
+                                    !this.tabs.iter().any(|t| t
+                                        .read(cx)
+                                        .document()
+                                        .path()
+                                        .starts_with(from)
+                                        && t.read(cx).is_running()),
+                                    "{}",
+                                    tr("请先停止此文件夹或接口中正在运行的请求")
+                                );
                                 let snapshots: Vec<_> = this
                                     .tabs
                                     .iter()
@@ -1412,7 +1458,10 @@ impl Workbench {
                                     this.watch_tab(&entity, window, cx);
                                     this.tabs[ix] = entity;
                                 }
+                                remap_workspace_paths(&mut this.state, from, to, false);
                                 this.collection = Some(c);
+                                this.rebuild_tree(cx);
+                                this.sync_active_sidebar(window, cx);
                                 this.state.ui_drafts.remove(&draft_key);
                                 this.persist(cx)?;
                                 Ok(())
@@ -1434,38 +1483,85 @@ impl Workbench {
         });
     }
     fn duplicate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let (Some(c), Some(tab)) = (&self.collection, self.active()) {
+        let result = (|| -> Result<String> {
+            self.persist(cx)?;
+            let c = self.collection.as_ref().context(tr("项目未打开"))?;
+            let tab = self.active().context(tr("请先打开文档"))?;
             let doc = tab.read(cx).document();
-            let mut path = doc.path().to_owned();
-            let stem = path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            let mut n = 1;
-            loop {
-                path.set_file_name(format!("{stem}-copy-{n}.yml"));
-                if !c.root().join(&path).exists() {
-                    break;
-                }
-                n += 1;
+            let copy = c.duplicate(doc, &tab.read(cx).draft(cx)?)?;
+            let folder = doc.kind() == apifuck_core::DocumentKind::Folder;
+            let from = if folder {
+                doc.path().parent().unwrap()
+            } else {
+                doc.path()
+            };
+            let to = if folder {
+                copy.path().parent().unwrap()
+            } else {
+                copy.path()
+            };
+            remap_workspace_paths(&mut self.state, from, to, true);
+            Ok(copy.path().to_string_lossy().into_owned())
+        })();
+        match result {
+            Ok(path) => {
+                self.refresh(window, cx);
+                self.open_document(&path, window, cx);
+                self.autosave(window, cx);
+                self.notify_success(tr("已创建副本").into(), window, cx);
             }
-            let result = tab
-                .read(cx)
-                .draft(cx)
-                .and_then(|source| c.add(&path, &source));
-            match result {
-                Ok(_) => {
-                    self.refresh(window, cx);
-                    self.open_document(&path.to_string_lossy(), window, cx);
-                    self.notify_success(tr("已创建副本").into(), window, cx);
-                }
-                Err(e) => self.notify_error(format!("{e:#}"), window, cx),
-            }
+            Err(e) => self.notify_error(format!("{e:#}"), window, cx),
         }
-        cx.notify();
     }
     fn trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(c), Some(tab)) = (&self.collection, self.active()) else {
+            return;
+        };
+        let doc = tab.read(cx).document().clone();
+        let root = c.root().to_owned();
+        let handle = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let doc = doc.clone();
+            let root = root.clone();
+            let handle = handle.clone();
+            dialog
+                .title(tr("移到废纸篓？"))
+                .child(doc.name().to_owned())
+                .child(if doc.kind() == apifuck_core::DocumentKind::Folder {
+                    tr("文件夹及其中的接口将一起移入项目废纸篓。")
+                } else {
+                    tr("接口将移入项目废纸篓，可从文件夹恢复。")
+                })
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(tr("移到废纸篓"))
+                        .cancel_text(tr("取消"))
+                        .show_cancel(true),
+                )
+                .on_ok(move |_, window, cx| {
+                    handle
+                        .update(cx, |this, cx| {
+                            if this.collection.as_ref().is_none_or(|c| c.root() != root) {
+                                return false;
+                            }
+                            this.open_document(&doc.path().to_string_lossy(), window, cx);
+                            if this
+                                .active()
+                                .is_none_or(|tab| tab.read(cx).document().path() != doc.path())
+                            {
+                                return false;
+                            }
+                            this.trash_active(window, cx)
+                        })
+                        .unwrap_or(true)
+                })
+        });
+    }
+    fn trash_active(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if let Err(error) = self.persist(cx) {
+            self.notify_error(format!("{error:#}"), window, cx);
+            return false;
+        }
         if let (Some(c), Some(tab)) = (&self.collection, self.active()) {
             let path = tab
                 .read(cx)
@@ -1473,6 +1569,24 @@ impl Workbench {
                 .path()
                 .to_string_lossy()
                 .into_owned();
+            let doc = tab.read(cx).document();
+            let scope = if doc.kind() == apifuck_core::DocumentKind::Folder {
+                doc.path().parent().unwrap()
+            } else {
+                doc.path()
+            };
+            if self
+                .tabs
+                .iter()
+                .any(|t| t.read(cx).document().path().starts_with(scope) && t.read(cx).is_running())
+            {
+                self.notify_error(
+                    tr("请先停止此文件夹或接口中正在运行的请求").into(),
+                    window,
+                    cx,
+                );
+                return false;
+            }
             match c.trash(tab.read(cx).document()) {
                 Ok(()) => {
                     let prefix =
@@ -1484,12 +1598,9 @@ impl Workbench {
                     self.tabs
                         .retain(|t| !t.read(cx).document().path().starts_with(&prefix));
                     self.active = self.active.min(self.tabs.len().saturating_sub(1));
-                    self.state
-                        .drafts
-                        .retain(|key, _| !std::path::Path::new(key).starts_with(&prefix));
-                    self.state
-                        .editor_drafts
-                        .retain(|key, _| !std::path::Path::new(key).starts_with(&prefix));
+                    self.tab_subscriptions
+                        .retain(|id, _| self.tabs.iter().any(|tab| tab.entity_id() == *id));
+                    // Retain local drafts so manually restored files recover unsaved work.
                     self.notify_success(
                         tr("文档已移至项目 .apifuck/trash，可从文件夹恢复").into(),
                         window,
@@ -1497,11 +1608,53 @@ impl Workbench {
                     );
                     self.refresh(window, cx);
                     self.sync_active_sidebar(window, cx);
+                    self.autosave(window, cx);
+                    return true;
                 }
                 Err(e) => self.notify_error(format!("{e:#}"), window, cx),
             }
         }
         cx.notify();
+        false
+    }
+    fn tree_action(
+        &mut self,
+        path: &str,
+        action: TreeAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let TreeAction::New(kind) = action {
+            let parent = tree_creation_parent(path);
+            self.new_document_in(kind, parent, window, cx);
+            return;
+        }
+        self.open_document(path, window, cx);
+        // A failed open must never apply a destructive action to the previous active tab.
+        let Some(tab) = self.active() else {
+            return;
+        };
+        let document = tab.read(cx).document();
+        let matches = if let Some(folder) = path.strip_prefix("folder:") {
+            document.kind() == apifuck_core::DocumentKind::Folder
+                && document.path().parent() == Some(std::path::Path::new(folder))
+        } else {
+            document.path() == std::path::Path::new(path)
+        };
+        if !matches {
+            return;
+        }
+        match action {
+            TreeAction::Open => {}
+            TreeAction::Rename => tab.update(cx, |tab, cx| tab.focus_name(window, cx)),
+            TreeAction::Duplicate => self.duplicate(window, cx),
+            TreeAction::Move => self.rename(window, cx),
+            TreeAction::Reload => self.reload_tab(window, cx),
+            TreeAction::Trash => self.trash(window, cx),
+            TreeAction::Export(language) => self.export(language, window, cx),
+            TreeAction::Bru => self.export_bru(window, cx),
+            TreeAction::New(_) => unreachable!(),
+        }
     }
     fn reorder_tree(
         &mut self,
@@ -1542,33 +1695,25 @@ impl Workbench {
     }
     fn export(&mut self, language: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let (Some(collection), Some(tab)) = (&self.collection, self.active()) {
-            let codes: Vec<(&'static str, Result<String, String>)> =
-                ["curl", "javascript", "python", "go"]
-                    .into_iter()
-                    .map(|language| {
-                        let code = tab
-                            .update(cx, |tab, cx| {
-                                tab.export(
-                                    collection,
-                                    self.state.environment.as_deref(),
-                                    self.state.network.clone(),
-                                    language,
-                                    window,
-                                    cx,
-                                )
-                            })
-                            .map_err(|error| format!("{error:#}"));
-                        (language, code)
-                    })
-                    .collect();
-            if let Some((_, Ok(code))) = codes.iter().find(|(name, _)| *name == language) {
-                cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
-            }
-            let view =
-                cx.new(|cx| crate::export_view::ExportView::new(codes, language, window, cx));
-            window.open_dialog(cx, move |dialog, _, _| {
-                dialog.title(tr("生成代码")).w(px(800.)).child(view.clone())
+            let result = tab.update(cx, |tab, cx| {
+                tab.export(
+                    collection,
+                    self.state.environment.as_deref(),
+                    self.state.network.clone(),
+                    language,
+                    window,
+                    cx,
+                )
             });
+            match result {
+                Ok(code) => crate::feedback::copy(
+                    code,
+                    tr("已复制 {language} 代码").replace("{language}", language),
+                    window,
+                    cx,
+                ),
+                Err(error) => self.notify_error(format!("{error:#}"), window, cx),
+            }
         }
     }
     fn import_bru(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1665,8 +1810,7 @@ impl Workbench {
             let result = task.await;
             let _ = this.update_in(cx, |this, window, cx| match result {
                 Ok(source) => {
-                    cx.write_to_clipboard(ClipboardItem::new_string(source));
-                    this.notify_success(tr("已复制 Bru 源码").into(), window, cx);
+                    crate::feedback::copy(source, tr("已复制 Bru 源码").into(), window, cx);
                 }
                 Err(e) => {
                     this.notify_error(format!("{e:#}"), window, cx);
@@ -1709,7 +1853,7 @@ impl Workbench {
                                     });
                                     for tab in &this.tabs {
                                         tab.update(cx, |tab, cx| {
-                                            tab.set_request_layout(preferences.request_layout, cx);
+                                            tab.set_default_layout(preferences.request_layout, cx);
                                             tab.refresh_locale(window, cx);
                                         });
                                     }
@@ -2046,8 +2190,6 @@ impl Render for Workbench {
                             let drop_path = row_path.clone();
                             let click_handle = tree_handle.clone();
                             let drop_handle = tree_handle.clone();
-                            let toggle_handle = tree_handle.clone();
-                            let toggle_path = row_path.clone();
                             let expanded = entry.is_expanded();
                             let drag = crate::tab_drag::DraggedRequest {
                                 path: PathBuf::from(&row_path),
@@ -2063,7 +2205,18 @@ impl Render for Workbench {
                                     cx.stop_propagation();
                                     let _ = click_handle.update(cx, |this, cx| {
                                         this.tree_selection = click_path.clone();
-                                        this.open_document(&click_path, window, cx);
+                                        if folder {
+                                            if expanded {
+                                                this.state
+                                                    .collapsed_folders
+                                                    .insert(click_path.clone());
+                                            } else {
+                                                this.state.collapsed_folders.remove(&click_path);
+                                            }
+                                            this.rebuild_tree(cx);
+                                        } else {
+                                            this.open_document(&click_path, window, cx);
+                                        }
                                         let selected = this.tree_selection.clone();
                                         this.tree.update(cx, |tree, cx| {
                                             tree.set_selected_index(
@@ -2112,40 +2265,11 @@ impl Render for Workbench {
                                         })
                                         .when(folder, |row| {
                                             row.child(
-                                                Button::new(SharedString::from(format!(
-                                                    "toggle:{toggle_path}"
-                                                )))
-                                                .ghost()
-                                                .xsmall()
-                                                .icon(if expanded {
-                                                    AppIcon::ChevronDown
+                                                Icon::new(if expanded {
+                                                    gpui_kit::assets::IconName::FolderOpen
                                                 } else {
-                                                    AppIcon::ChevronRight
+                                                    gpui_kit::assets::IconName::Folder
                                                 })
-                                                .on_click(move |_, _, cx| {
-                                                    cx.stop_propagation();
-                                                    let _ = toggle_handle.update(cx, |this, cx| {
-                                                        if expanded {
-                                                            this.state
-                                                                .collapsed_folders
-                                                                .insert(toggle_path.clone());
-                                                        } else {
-                                                            this.state
-                                                                .collapsed_folders
-                                                                .remove(&toggle_path);
-                                                        }
-                                                        this.rebuild_tree(cx);
-                                                    });
-                                                }),
-                                            )
-                                            .child(
-                                                Icon::new(
-                                                    if entry.is_folder() && entry.is_expanded() {
-                                                        gpui_kit::assets::IconName::FolderOpen
-                                                    } else {
-                                                        gpui_kit::assets::IconName::Folder
-                                                    },
-                                                )
                                                 .size_4()
                                                 .flex_shrink_0()
                                                 .text_color(cx.theme().muted_foreground),
@@ -2209,36 +2333,121 @@ impl Render for Workbench {
                                         }),
                                 )
                         })
-                        .context_menu(move |_, entry, mut menu, _, cx| {
-                            let path = entry.item().id.to_string();
-                            let handle = tree_menu_handle.clone();
-                            if handle.upgrade().is_some_and(|view| {
-                                view.read(cx).collection.as_ref().is_some_and(|collection| {
-                                    collection.find(&path).is_ok_and(|doc| {
-                                        matches!(
-                                            doc.kind(),
-                                            apifuck_core::DocumentKind::Http
-                                                | apifuck_core::DocumentKind::Graphql
-                                        )
+                        .context_menu(
+                            move |_, entry, mut menu, window, cx| {
+                                let path = entry.item().id.to_string();
+                                let Some(view) = tree_menu_handle.upgrade() else {
+                                    return menu;
+                                };
+                                let Some(collection) = &view.read(cx).collection else {
+                                    return menu;
+                                };
+                                let root = collection.root().to_owned();
+                                let kind = collection.find(&path).ok().map(|doc| doc.kind());
+                                let actions = TreeAction::available(&path, kind);
+                                let request =
+                                    collection.find(&path).is_ok_and(|doc| doc.is_request());
+                                let copy_actions: Vec<_> = actions
+                                    .iter()
+                                    .copied()
+                                    .filter(|action| {
+                                        request
+                                            && matches!(
+                                                action,
+                                                TreeAction::Export(_) | TreeAction::Bru
+                                            )
                                     })
-                                })
-                            }) {
-                                for language in ["curl", "javascript", "python", "go"] {
+                                    .collect();
+                                let mut copy_menu_added = false;
+                                for action in actions {
                                     let path = path.clone();
-                                    let handle = handle.clone();
+                                    let root = root.clone();
+                                    let handle = tree_menu_handle.clone();
+                                    if copy_actions.contains(&action) {
+                                        if !copy_menu_added {
+                                            copy_menu_added = true;
+                                            let copy_actions = copy_actions.clone();
+                                            let submenu = PopupMenu::build(
+                                                window,
+                                                cx,
+                                                move |mut submenu, _, _| {
+                                                    for action in copy_actions {
+                                                        let path = path.clone();
+                                                        let root = root.clone();
+                                                        let handle = handle.clone();
+                                                        let label = match action {
+                                                            TreeAction::Export("curl") => "cURL",
+                                                            TreeAction::Export("javascript") => {
+                                                                "JavaScript"
+                                                            }
+                                                            TreeAction::Export("python") => {
+                                                                "Python"
+                                                            }
+                                                            TreeAction::Export("go") => "Go",
+                                                            TreeAction::Bru => ".bru",
+                                                            _ => unreachable!(),
+                                                        };
+                                                        submenu = submenu.item(
+                                                            PopupMenuItem::new(label)
+                                                                .icon(action.icon())
+                                                                .on_click(move |_, window, cx| {
+                                                                    let _ = handle.update(
+                                                                        cx,
+                                                                        |this, cx| {
+                                                                            if this
+                                                                                .collection
+                                                                                .as_ref()
+                                                                                .is_some_and(|c| {
+                                                                                    c.root() == root
+                                                                                })
+                                                                            {
+                                                                                this.tree_action(
+                                                                                    &path, action,
+                                                                                    window, cx,
+                                                                                );
+                                                                            }
+                                                                        },
+                                                                    );
+                                                                }),
+                                                        );
+                                                    }
+                                                    submenu
+                                                },
+                                            );
+                                            menu = menu.separator().item(
+                                                PopupMenuItem::submenu(tr("复制为"), submenu)
+                                                    .icon(AppIcon::Copy),
+                                            );
+                                        }
+                                        continue;
+                                    }
+                                    if matches!(
+                                        action,
+                                        TreeAction::Duplicate
+                                            | TreeAction::Export("curl")
+                                            | TreeAction::Trash
+                                    ) {
+                                        menu = menu.separator();
+                                    }
                                     menu = menu.item(
-                                        PopupMenuItem::new(format!("{} {language}", tr("复制为")))
+                                        PopupMenuItem::new(action.label())
+                                            .icon(action.icon())
                                             .on_click(move |_, window, cx| {
                                                 let _ = handle.update(cx, |this, cx| {
-                                                    this.open_document(&path, window, cx);
-                                                    this.export(language, window, cx);
+                                                    if this
+                                                        .collection
+                                                        .as_ref()
+                                                        .is_some_and(|c| c.root() == root)
+                                                    {
+                                                        this.tree_action(&path, action, window, cx);
+                                                    }
                                                 });
                                             }),
                                     );
                                 }
-                            }
-                            menu
-                        }),
+                                menu
+                            },
+                        ),
                     ),
             );
         let sidebar = if self.sidebar_view == SidebarView::Environments {
@@ -2248,10 +2457,6 @@ impl Render for Workbench {
         };
         let workspace_weak = cx.entity().downgrade();
         let recent_projects = self.recent_projects.entries().to_vec();
-        let current_project_path = self
-            .collection
-            .as_ref()
-            .map(|project| project.root().to_owned());
         let toolbar = div()
             .flex()
             .items_center()
@@ -2285,7 +2490,6 @@ impl Render for Workbench {
                     .when_some(self.collection.as_ref(), |button, collection| {
                         button.tooltip(collection.root().display().to_string())
                     })
-                    .icon(AppIcon::Layers)
                     .dropdown_caret(true)
                     .dropdown_menu(move |menu, window, cx| {
                         let open = workspace_weak.clone();
@@ -2293,7 +2497,6 @@ impl Render for Workbench {
                         let import = workspace_weak.clone();
                         let recent = workspace_weak.clone();
                         let projects = recent_projects.clone();
-                        let active_path = current_project_path.clone();
                         menu.item(
                             PopupMenuItem::new(tr("打开项目…"))
                                 .icon(AppIcon::FolderOpen)
@@ -2303,54 +2506,42 @@ impl Render for Workbench {
                                     });
                                 }),
                         )
-                        .submenu(tr("最近打开"), window, cx, move |mut menu, _, _| {
-                            if projects.is_empty() {
-                                return menu
-                                    .item(PopupMenuItem::new(tr("暂无最近项目")).disabled(true));
-                            }
-                            for project in &projects {
-                                let path = project.path.clone();
-                                let name = project.name.clone();
-                                let display_path = path.display().to_string();
-                                let tooltip = format!("{name}\n{display_path}");
-                                let handle = recent.clone();
-                                let checked = active_path.as_ref() == Some(&path);
-                                menu = menu.item(
-                                    PopupMenuItem::element(move |_, cx| {
-                                        let tooltip = tooltip.clone();
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "recent-project:{display_path}"
-                                            )))
-                                            .flex()
-                                            .flex_col()
-                                            .gap_1()
-                                            .w(px(280.))
-                                            .min_w_0()
-                                            .child(div().text_sm().truncate().child(name.clone()))
-                                            .child(
+                        .submenu_with_icon(
+                            Some(Icon::default().path(crate::icons::HISTORY)),
+                            tr("最近打开"),
+                            window,
+                            cx,
+                            move |menu, _, _| {
+                                let mut menu = menu.min_w(px(240.)).max_w(px(480.));
+                                let home = std::env::home_dir();
+                                if projects.is_empty() {
+                                    return menu.item(
+                                        PopupMenuItem::new(tr("暂无最近项目")).disabled(true),
+                                    );
+                                }
+                                for project in &projects {
+                                    let path = project.path.clone();
+                                    let display_path = recent_project_label(&path, home.as_deref());
+                                    let handle = recent.clone();
+                                    menu =
+                                        menu.item(
+                                            PopupMenuItem::element(move |_, _| {
                                                 div()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
+                                                    .max_w(px(440.))
+                                                    .min_w_0()
                                                     .truncate()
-                                                    .child(display_path.clone()),
-                                            )
-                                            .tooltip(move |window, cx| {
-                                                Tooltip::new(tooltip.clone()).build(window, cx)
+                                                    .child(display_path.clone())
                                             })
-                                    })
-                                    .checked(checked)
-                                    .on_click(
-                                        move |_, window, cx| {
-                                            let _ = handle.update(cx, |this, cx| {
-                                                this.load(path.clone(), window, cx);
-                                            });
-                                        },
-                                    ),
-                                );
-                            }
-                            menu
-                        })
+                                            .on_click(move |_, window, cx| {
+                                                let _ = handle.update(cx, |this, cx| {
+                                                    this.load(path.clone(), window, cx);
+                                                });
+                                            }),
+                                        );
+                                }
+                                menu
+                            },
+                        )
                         .item(
                             PopupMenuItem::new(tr("新建项目…"))
                                 .icon(AppIcon::FolderPlus)
@@ -2554,17 +2745,11 @@ impl Render for Workbench {
         let commands = div()
             .flex()
             .flex_shrink_0()
-            .h_full()
-            .border_b_1()
-            .border_color(cx.theme().border)
             .items_center()
-            .px_3()
-            .py_1()
             .gap_2()
             .child(
                 Button::new("export")
                     .icon(AppIcon::Code)
-                    .dropdown_caret(true)
                     .ghost()
                     .small()
                     .label(tr("生成代码"))
@@ -2672,22 +2857,34 @@ impl Render for Workbench {
                         )
                     }),
             );
+        let (tab_commands, request_header) = if let Some(tab) = active
+            .as_ref()
+            .filter(|tab| tab.read(cx).document().is_request())
+        {
+            let header = tab.update(cx, |tab, cx| tab.request_header(commands, cx));
+            (None, Some(header))
+        } else {
+            (Some(commands.px_3().py_1()), None)
+        };
         let content = div()
             .flex()
             .flex_col()
             .size_full()
             .min_w_0()
             .min_h_0()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .flex_shrink_0()
-                    .h_8()
-                    .bg(cx.theme().tab_bar)
-                    .child(div().flex_1().min_w_0().overflow_hidden().child(tabs))
-                    .child(commands),
-            )
+            .when(!self.tabs.is_empty(), |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .flex_shrink_0()
+                        .h_8()
+                        .bg(cx.theme().tab_bar)
+                        .child(div().flex_1().min_w_0().overflow_hidden().child(tabs))
+                        .children(tab_commands),
+                )
+            })
+            .children(request_header)
             .when_some(active, |d, tab| {
                 d.child(div().flex_1().min_h_0().child(tab))
             })
@@ -2723,15 +2920,9 @@ impl Render for Workbench {
                     .w_12()
                     .h_12()
                     .accessibility_label(tr("集合"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_1()
-                            .child(Icon::new(IconName::BookOpen))
-                            .child(div().text_xs().child(tr("集合"))),
-                    )
+                    .icon(AppIcon::Layers)
+                    .tooltip(tr("集合"))
+                    .tooltip_placement(Placement::Right)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.show_settings = false;
                         this.sidebar_view = SidebarView::Collections;
@@ -2746,15 +2937,9 @@ impl Render for Workbench {
                     .w_12()
                     .h_12()
                     .accessibility_label(tr("环境"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_1()
-                            .child(Icon::new(AppIcon::Globe))
-                            .child(div().text_xs().child(tr("环境"))),
-                    )
+                    .icon(AppIcon::Globe)
+                    .tooltip(tr("环境"))
+                    .tooltip_placement(Placement::Right)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.show_settings = false;
                         this.sidebar_view = SidebarView::Environments;
@@ -2765,10 +2950,13 @@ impl Render for Workbench {
             .when_some(self.updates.read(cx).sidebar_label(), |rail, label| {
                 rail.child(
                     Button::new("nav-update")
-                        .small()
                         .primary()
-                        .label(label)
-                        .tooltip(tr("软件更新"))
+                        .w_12()
+                        .h_12()
+                        .icon(AppIcon::Download)
+                        .accessibility_label(format!("{} · {label}", tr("软件更新")))
+                        .tooltip(format!("{} · {label}", tr("软件更新")))
+                        .tooltip_placement(Placement::Right)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.updates
                                 .update(cx, |updates, cx| updates.activate(window, cx));
@@ -2782,15 +2970,9 @@ impl Render for Workbench {
                     .w_12()
                     .h_12()
                     .accessibility_label(tr("设置"))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_1()
-                            .child(Icon::new(AppIcon::Settings))
-                            .child(div().text_xs().child(tr("设置"))),
-                    )
+                    .icon(AppIcon::Settings)
+                    .tooltip(tr("设置"))
+                    .tooltip_placement(Placement::Right)
                     .on_click(cx.listener(|this, _, window, cx| this.settings(window, cx))),
             );
         div()
@@ -2885,6 +3067,172 @@ impl Render for Workbench {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TreeAction {
+    Open,
+    New(&'static str),
+    Rename,
+    Duplicate,
+    Move,
+    Reload,
+    Export(&'static str),
+    Bru,
+    Trash,
+}
+impl TreeAction {
+    fn available(path: &str, kind: Option<apifuck_core::DocumentKind>) -> Vec<Self> {
+        use apifuck_core::DocumentKind;
+        let folder = path.starts_with("folder:") || kind == Some(DocumentKind::Folder);
+        if !folder
+            && !matches!(
+                kind,
+                Some(
+                    DocumentKind::Http
+                        | DocumentKind::Graphql
+                        | DocumentKind::WebSocket
+                        | DocumentKind::Other
+                )
+            )
+        {
+            return vec![];
+        }
+        let mut actions = vec![Self::Open];
+        if folder {
+            actions.extend([
+                Self::New("http"),
+                Self::New("graphql"),
+                Self::New("websocket"),
+                Self::New("folder"),
+            ]);
+        }
+        actions.extend([Self::Rename, Self::Duplicate, Self::Move, Self::Reload]);
+        if matches!(kind, Some(DocumentKind::Http | DocumentKind::Graphql)) {
+            actions.extend(["curl", "javascript", "python", "go"].map(Self::Export));
+        }
+        if folder
+            || matches!(
+                kind,
+                Some(DocumentKind::Http | DocumentKind::Graphql | DocumentKind::WebSocket)
+            )
+        {
+            actions.push(Self::Bru);
+        }
+        actions.push(Self::Trash);
+        actions
+    }
+    fn label(self) -> String {
+        match self {
+            Self::Open => tr("编辑").into(),
+            Self::New("http") => tr("新建 HTTP 请求").into(),
+            Self::New("graphql") => tr("新建 GraphQL 请求").into(),
+            Self::New("websocket") => tr("新建 WebSocket 请求").into(),
+            Self::New(_) => tr("新建目录").into(),
+            Self::Rename => tr("重命名").into(),
+            Self::Duplicate => tr("创建副本").into(),
+            Self::Move => tr("移动或重命名文件…").into(),
+            Self::Reload => tr("重新载入").into(),
+            Self::Export(language) => format!("{} {language}", tr("复制为")),
+            Self::Bru => tr("复制为 .bru").into(),
+            Self::Trash => tr("移到废纸篓").into(),
+        }
+    }
+    fn icon(self) -> AppIcon {
+        match self {
+            Self::New(kind) => crate::icons::document_kind(kind),
+            Self::Open | Self::Rename | Self::Move => AppIcon::Pencil,
+            Self::Duplicate | Self::Bru => AppIcon::Copy,
+            Self::Reload => AppIcon::RefreshCw,
+            Self::Export(_) => AppIcon::FileCode,
+            Self::Trash => AppIcon::Trash,
+        }
+    }
+}
+
+fn recent_project_label(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    if let Some(relative) = home.and_then(|home| path.strip_prefix(home).ok()) {
+        if relative.as_os_str().is_empty() {
+            return "~".into();
+        }
+        return format!("~{}{}", std::path::MAIN_SEPARATOR, relative.display());
+    }
+    path.display().to_string()
+}
+
+fn tree_creation_parent(path: &str) -> PathBuf {
+    path.strip_prefix("folder:")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(path)
+                .parent()
+                .unwrap_or(std::path::Path::new(""))
+                .to_owned()
+        })
+}
+
+/// Relocate both open and closed drafts using path components, never string prefixes.
+fn remap_workspace_paths(
+    state: &mut WorkspaceState,
+    from: &std::path::Path,
+    to: &std::path::Path,
+    copy: bool,
+) {
+    fn remap<T: Clone>(
+        map: &mut std::collections::BTreeMap<String, T>,
+        from: &std::path::Path,
+        to: &std::path::Path,
+        copy: bool,
+    ) {
+        let changes: Vec<_> = map
+            .iter()
+            .filter_map(|(key, value)| {
+                std::path::Path::new(key)
+                    .strip_prefix(from)
+                    .ok()
+                    .map(|suffix| {
+                        (
+                            key.clone(),
+                            to.join(suffix).to_string_lossy().into_owned(),
+                            value.clone(),
+                        )
+                    })
+            })
+            .collect();
+        for (old, new, value) in changes {
+            if !copy {
+                map.remove(&old);
+            }
+            map.insert(new, value);
+        }
+    }
+    remap(&mut state.drafts, from, to, copy);
+    remap(&mut state.editor_drafts, from, to, copy);
+    let changes: Vec<_> = state
+        .collapsed_folders
+        .iter()
+        .filter_map(|key| {
+            let (prefix, path) = key
+                .strip_prefix("folder:")
+                .map(|path| ("folder:", path))
+                .unwrap_or(("", key.as_str()));
+            std::path::Path::new(path)
+                .strip_prefix(from)
+                .ok()
+                .map(|suffix| {
+                    (
+                        key.clone(),
+                        format!("{prefix}{}", to.join(suffix).display()),
+                    )
+                })
+        })
+        .collect();
+    for (old, new) in changes {
+        if !copy {
+            state.collapsed_folders.remove(&old);
+        }
+        state.collapsed_folders.insert(new);
+    }
+}
+
 #[derive(Clone, Copy)]
 enum TabCloseAction {
     Current,
@@ -2926,6 +3274,94 @@ fn active_after_close(active: usize, closed: usize, count: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{TabCloseAction, active_after_close};
+
+    #[test]
+    fn tree_menus_cover_folders_and_protocols_without_unsupported_exports() {
+        use super::TreeAction::*;
+        use apifuck_core::DocumentKind::*;
+        let folder = super::TreeAction::available("api/folder.yaml", Some(Folder));
+        for action in [
+            Open,
+            New("http"),
+            New("graphql"),
+            New("websocket"),
+            New("folder"),
+            Rename,
+            Duplicate,
+            Move,
+            Reload,
+            Bru,
+            Trash,
+        ] {
+            assert!(folder.contains(&action));
+        }
+        assert_eq!(folder, super::TreeAction::available("folder:api", None));
+        for kind in [Http, Graphql, WebSocket] {
+            let menu = super::TreeAction::available("api/request.yml", Some(kind));
+            for action in [Open, Rename, Duplicate, Move, Reload, Bru, Trash] {
+                assert!(menu.contains(&action));
+            }
+            assert_eq!(menu.contains(&Export("curl")), kind != WebSocket);
+            assert!(!menu.iter().any(|action| matches!(action, New(_))));
+        }
+        assert!(super::TreeAction::available("missing.yml", None).is_empty());
+        assert!(super::TreeAction::available("opencollection.yml", Some(Collection)).is_empty());
+        assert_eq!(
+            super::tree_creation_parent("folder:api/users"),
+            std::path::Path::new("api/users")
+        );
+        assert_eq!(
+            super::tree_creation_parent("api/users/folder.yaml"),
+            std::path::Path::new("api/users")
+        );
+    }
+
+    #[test]
+    fn advertised_bru_exports_accept_each_menu_protocol() {
+        for protocol in ["http", "graphql", "websocket", "folder"] {
+            let source = apifuck_core::collection::template(protocol, "Example").unwrap();
+            let kind = if protocol == "folder" {
+                "folder"
+            } else {
+                "request"
+            };
+            let output = apifuck_core::bru::convert(&source, kind, "export").unwrap();
+            assert!(!output.is_empty(), "{protocol}");
+        }
+    }
+
+    #[test]
+    fn moving_or_copying_folders_preserves_closed_drafts_and_component_boundaries() {
+        use super::remap_workspace_paths;
+        use std::path::Path;
+        let mut state = apifuck_core::settings::WorkspaceState::default();
+        state
+            .drafts
+            .insert("api/nested/request.yml".into(), "invalid: [".into());
+        state
+            .drafts
+            .insert("api-other/request.yml".into(), "untouched".into());
+        state.editor_drafts.insert(
+            "api/nested/request.yml".into(),
+            serde_json::json!({"dirty":true, "name":"edited"}),
+        );
+        state.collapsed_folders.insert("folder:api/nested".into());
+        state.collapsed_folders.insert("api/folder.yml".into());
+        remap_workspace_paths(&mut state, Path::new("api"), Path::new("copy"), true);
+        assert_eq!(state.drafts["copy/nested/request.yml"], "invalid: [");
+        assert!(state.drafts.contains_key("api/nested/request.yml"));
+        assert!(state.collapsed_folders.contains("folder:copy/nested"));
+        remap_workspace_paths(&mut state, Path::new("api"), Path::new("moved"), false);
+        assert!(!state.drafts.contains_key("api/nested/request.yml"));
+        assert_eq!(state.drafts["moved/nested/request.yml"], "invalid: [");
+        assert_eq!(
+            state.editor_drafts["moved/nested/request.yml"]["name"],
+            "edited"
+        );
+        assert_eq!(state.drafts["api-other/request.yml"], "untouched");
+        assert!(!state.collapsed_folders.contains("api/folder.yml"));
+        assert!(state.collapsed_folders.contains("moved/folder.yml"));
+    }
 
     #[test]
     fn context_menu_targets_the_clicked_tab_and_respects_boundaries() {

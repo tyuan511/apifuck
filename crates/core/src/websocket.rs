@@ -1,6 +1,6 @@
 use crate::{
     collection::selected,
-    engine::{Event, Execution, emit, headers_and_url},
+    engine::{Event, Execution, RequestHead, emit, headers_and_url},
     settings,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -39,6 +39,11 @@ pub async fn connect(
     for (name, value) in &headers {
         request.headers_mut().append(name, value.clone());
     }
+    let head = RequestHead::new(
+        request.method().as_str(),
+        &request.uri().to_string(),
+        request.headers(),
+    );
     let (mut socket, _) = tokio::time::timeout(
         Duration::from_millis(execution.settings.connect_timeout_ms),
         tokio_tungstenite::connect_async(request),
@@ -47,6 +52,7 @@ pub async fn connect(
     .context("WebSocket 连接超时")??;
     let sender = Some(events);
     emit(&sender, Event::Connected);
+    emit(&sender, Event::Request { request: head });
     settings::persist_variables(
         &execution.root,
         execution.environment.as_deref(),

@@ -76,7 +76,7 @@ cargo run --locked -p apifuck-desktop -- examples/demo
 | 编辑辅助 | 多语言语法高亮、后台格式化、内置 LSP 语法诊断；脚本 API 离线补全与悬停说明 |
 | 协议与响应 | HTTP、GraphQL、SSE 增量响应与取消、WebSocket 收发；状态、耗时、大小、响应头、正文、时间线和测试结果 |
 | 脚本与测试 | QuickJS 同步前后置脚本、Chai、AJV JSON Schema、声明式断言、响应变量提取和本机环境写回 |
-| 导入导出 | 地址栏粘贴 cURL、Bru 请求/环境/目录转换、cURL/JavaScript/Python/Go 代码预览与复制 |
+| 导入导出 | 地址栏粘贴 cURL、Bru 请求/环境/目录转换、cURL/JavaScript/Python/Go 代码生成与复制 |
 | 本机体验 | 原始输入草稿恢复、简体中文/English、浅色/深色/跟随系统、六种强调色、网络与代理设置、应用内更新 |
 
 顶部项目菜单提供打开项目、最近打开、新建项目和导入 `.bru`。集合级变量、认证等配置通过集合侧栏标题旁的设置按钮打开；顶部菜单不再提供“项目设置”和“删除项目”。应用偏好设置位于左侧“设置”页面。

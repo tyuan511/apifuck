@@ -391,6 +391,10 @@ pub fn format(language: Language, text: &str) -> anyhow::Result<String> {
             &input,
             &dprint_plugin_json::configuration::ConfigurationBuilder::new()
                 .indent_width(2)
+                .use_tabs(false)
+                // prefer_single_line(false) still retains short inline containers.
+                // Force every non-empty object/array to expand, preserving tokens.
+                .line_width(1)
                 .prefer_single_line(false)
                 .build(),
         )?
@@ -495,6 +499,43 @@ mod tests {
         ] {
             assert!(!diagnostics(Language::Json, input).is_empty(), "{input}");
             assert!(format(Language::Json, input).is_err());
+        }
+    }
+
+    #[test]
+    fn json_formatting_expands_response_objects_and_arrays_with_two_spaces() {
+        let input = r#"{"authenticated":true,"method":"bearer","permissions":["users:read","users:write"]}"#;
+        let expected = concat!(
+            "{\n",
+            "  \"authenticated\": true,\n",
+            "  \"method\": \"bearer\",\n",
+            "  \"permissions\": [\n",
+            "    \"users:read\",\n",
+            "    \"users:write\"\n",
+            "  ]\n",
+            "}\n",
+        );
+        assert_eq!(format(Language::Json, input).unwrap(), expected);
+        assert_eq!(format(Language::Json, expected).unwrap(), expected);
+    }
+
+    #[test]
+    fn json_formatting_expands_short_nested_values_and_keeps_empty_containers() {
+        for (input, expected) in [
+            (r#"{"a":1}"#, "{\n  \"a\": 1\n}\n"),
+            ("[1]", "[\n  1\n]\n"),
+            (
+                r#"[{"a":[1]},[],{}]"#,
+                "[\n  {\n    \"a\": [\n      1\n    ]\n  },\n  [],\n  {}\n]\n",
+            ),
+            (r#"{"id":{{ user_id }}}"#, "{\n  \"id\": {{ user_id }}\n}\n"),
+            ("{}", "{}\n"),
+            ("[]", "[]\n"),
+            ("true", "true\n"),
+        ] {
+            let output = format(Language::Json, input).unwrap();
+            assert_eq!(output, expected, "{input}");
+            assert_eq!(format(Language::Json, &output).unwrap(), output);
         }
     }
 

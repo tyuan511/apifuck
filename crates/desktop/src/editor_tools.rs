@@ -132,12 +132,25 @@ pub fn format_button(id: &'static str, editor: &Entity<EditorState>, language: L
                         }
                         match result {
                             Ok(text) => {
-                                if text != before.as_ref() {
+                                let changed = text != before.as_ref();
+                                if changed {
                                     editor.update(cx, |state, cx| {
                                         state.replace_all(text, window, cx);
                                         state.focus(window, cx);
                                     });
                                 }
+                                crate::feedback::show(
+                                    Notification::success(
+                                        tr(if changed {
+                                            "格式化完成"
+                                        } else {
+                                            "内容已是标准格式"
+                                        })
+                                        .to_owned(),
+                                    ),
+                                    window,
+                                    cx,
+                                );
                             }
                             Err(error) => crate::feedback::show(
                                 Notification::error(format!(

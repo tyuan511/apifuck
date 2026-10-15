@@ -21,6 +21,9 @@ use std::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Event {
+    Request {
+        request: RequestHead,
+    },
     Started {
         status: u16,
         headers: Vec<(String, String)>,
@@ -38,6 +41,29 @@ pub enum Event {
     Error {
         message: String,
     },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RequestHead {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+}
+impl RequestHead {
+    pub(crate) fn new(method: &str, url: &str, headers: &reqwest::header::HeaderMap) -> Self {
+        Self {
+            method: method.to_owned(),
+            url: url.to_owned(),
+            headers: headers
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        name.to_string(),
+                        String::from_utf8_lossy(value.as_bytes()).into_owned(),
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -732,6 +758,94 @@ pub async fn execute(
         .await
         .map(|(response, _)| response)
 }
+
+// Materialize the client's implicit headers on the very request we send, so
+// the UI does not have to reconstruct them from editable configuration.
+fn finalize_request(request: &mut reqwest::Request) -> Result<()> {
+    use reqwest::header::{
+        ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, HOST, HeaderValue, TRANSFER_ENCODING,
+    };
+    let host = request.url()[url::Position::BeforeHost..url::Position::AfterPort].to_owned();
+    let length = request
+        .body()
+        .and_then(|body| body.as_bytes())
+        .map(|body| body.len());
+    let empty = request.body().is_none() || length == Some(0);
+    let headers = request.headers_mut();
+    headers.entry(HOST).or_insert(HeaderValue::from_str(&host)?);
+    headers
+        .entry(ACCEPT)
+        .or_insert(HeaderValue::from_static("*/*"));
+    headers
+        .entry(ACCEPT_ENCODING)
+        .or_insert(HeaderValue::from_static("gzip,deflate,br"));
+    if empty {
+        headers.remove(TRANSFER_ENCODING);
+    } else if headers.contains_key(TRANSFER_ENCODING) {
+        headers.remove(CONTENT_LENGTH);
+        if let reqwest::header::Entry::Occupied(mut entry) = headers.entry(TRANSFER_ENCODING)
+            && let Some(value) = entry.iter_mut().next_back()
+            && !value
+                .to_str()?
+                .rsplit(',')
+                .next()
+                .is_some_and(|encoding| encoding.trim().eq_ignore_ascii_case("chunked"))
+        {
+            let mut bytes = value.as_bytes().to_vec();
+            bytes.extend_from_slice(b", chunked");
+            *value = HeaderValue::from_bytes(&bytes)?;
+        }
+    } else if let Some(length) = length.filter(|length| *length > 0) {
+        headers
+            .entry(CONTENT_LENGTH)
+            .or_insert(HeaderValue::from(length));
+    }
+    Ok(())
+}
+
+async fn send_request(
+    execution: &Execution,
+    events: &Option<tokio::sync::mpsc::UnboundedSender<Event>>,
+) -> Result<(reqwest::Response, bool, reqwest::header::HeaderMap)> {
+    let mut single = execution.clone();
+    single.settings.follow_redirects = false;
+    let (client, request) = request_builder(&single).await?.build_split();
+    let mut request = request?;
+    if request.url().scheme() == "http"
+        && !request
+            .headers()
+            .contains_key(reqwest::header::PROXY_AUTHORIZATION)
+        && let Some(proxy) = execution
+            .settings
+            .proxy
+            .as_deref()
+            .filter(|proxy| !proxy.is_empty())
+    {
+        let proxy = url::Url::parse(proxy)?;
+        if matches!(proxy.scheme(), "http" | "https") {
+            // Use reqwest's own URL credential decoding, including percent escapes.
+            let proxy_request = client.get(proxy).build()?;
+            if let Some(auth) = proxy_request.headers().get(reqwest::header::AUTHORIZATION) {
+                request
+                    .headers_mut()
+                    .insert(reqwest::header::PROXY_AUTHORIZATION, auth.clone());
+            }
+        }
+    }
+    let replayable = request.try_clone().is_some();
+    finalize_request(&mut request)?;
+    let head = RequestHead::new(
+        request.method().as_str(),
+        request.url().as_str(),
+        request.headers(),
+    );
+    let headers = request.headers().clone();
+    let response = client.execute(request).await.context("请求失败")?;
+    // Receiving response headers proves this hop was sent, even if reading its
+    // body later fails or is cancelled. Connection failures have no sent head.
+    emit(events, Event::Request { request: head });
+    Ok((response, replayable, headers))
+}
 pub(crate) async fn execute_with_variables(
     mut execution: Execution,
     events: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
@@ -759,34 +873,77 @@ pub(crate) async fn execute_with_variables(
     let future = async {
         let start = Instant::now();
         let mut current = execution.clone();
-        let mut response = request_builder(&current)
-            .await?
-            .send()
-            .await
-            .context("请求失败")?;
-        if execution.settings.forward_authorization_header && execution.settings.follow_redirects {
+        let (mut response, mut replayable, mut sent_headers) =
+            send_request(&current, &events).await?;
+        if execution.settings.follow_redirects {
             let mut redirects = 0;
             while matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
                 let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
                     break;
                 };
+                let reset_body = (response.status().as_u16() == 303
+                    && (!execution.settings.forward_authorization_header
+                        || current.request["method"] != "HEAD"))
+                    || (matches!(response.status().as_u16(), 301 | 302)
+                        && current.request["method"] == "POST");
+                if !reset_body && !replayable && !execution.settings.forward_authorization_header {
+                    break;
+                }
                 ensure!(
                     redirects < execution.settings.max_redirects,
                     "超过最大重定向次数"
                 );
                 redirects += 1;
-                let next = response.url().join(location.to_str()?)?;
-                let cross_origin = next.origin() != response.url().origin();
-                let (_, headers) = headers_and_url(&current.request)?;
-                current.request["headers"]=json!(headers.iter().filter(|(name,_)|**name!=reqwest::header::HOST && (!cross_origin || (**name!=reqwest::header::COOKIE && **name!=reqwest::header::PROXY_AUTHORIZATION))).map(|(name,value)|json!({"name":name.as_str(),"value":value.to_str().unwrap_or("")})).collect::<Vec<_>>());
+                let next = match location
+                    .to_str()
+                    .ok()
+                    .and_then(|location| response.url().join(location).ok())
+                {
+                    Some(next) => next,
+                    None if !execution.settings.forward_authorization_header => break,
+                    None => bail!("无效的重定向地址"),
+                };
+                let cross_origin = if execution.settings.forward_authorization_header {
+                    next.origin() != response.url().origin()
+                } else {
+                    next.host_str() != response.url().host_str()
+                        || next.port_or_known_default() != response.url().port_or_known_default()
+                };
+                let (_, mut headers) = headers_and_url(&current.request)?;
+                // URL userinfo is converted into Basic auth by RequestBuilder.
+                // Carry the actual header forward before applying redirect policy.
+                if let Some(auth) = sent_headers.get(reqwest::header::AUTHORIZATION) {
+                    headers.insert(reqwest::header::AUTHORIZATION, auth.clone());
+                }
+                let forwarded_headers = headers.iter().filter(|(name, _)| {
+                    (**name != reqwest::header::HOST || !execution.settings.forward_authorization_header) && (!cross_origin ||
+                        (!matches!(name.as_str(), "cookie" | "cookie2" | "proxy-authorization" | "www-authenticate") &&
+                        (**name != reqwest::header::AUTHORIZATION || execution.settings.forward_authorization_header)))
+                }).map(|(name,value)|json!({"name":name.as_str(),"value":String::from_utf8_lossy(value.as_bytes())})).collect::<Vec<_>>();
+                current.request["headers"] = json!(forwarded_headers);
+                if !(execution.settings.forward_authorization_header
+                    || response.url().scheme() == "https" && next.scheme() == "http")
+                {
+                    let mut referer = response.url().clone();
+                    let _ = referer.set_username("");
+                    let _ = referer.set_password(None);
+                    referer.set_fragment(None);
+                    current.request["headers"]
+                        .as_array_mut()
+                        .unwrap()
+                        .retain(|header| header["name"] != "referer");
+                    current.request["headers"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!({"name":"referer", "value":referer.as_str()}));
+                }
                 current.request["url"] = json!(next.as_str());
                 current.request["params"] = json!([]);
                 current.request.as_object_mut().unwrap().remove("auth");
-                if (response.status().as_u16() == 303 && current.request["method"] != "HEAD")
-                    || (matches!(response.status().as_u16(), 301 | 302)
-                        && current.request["method"] == "POST")
-                {
-                    current.request["method"] = json!("GET");
+                if reset_body {
+                    if current.request["method"] != "HEAD" {
+                        current.request["method"] = json!("GET");
+                    }
                     current.request.as_object_mut().unwrap().remove("body");
                     current.request["headers"]
                         .as_array_mut()
@@ -794,13 +951,16 @@ pub(crate) async fn execute_with_variables(
                         .retain(|header| {
                             !matches!(
                                 header["name"].as_str(),
-                                Some("content-type" | "content-length" | "transfer-encoding")
+                                Some(
+                                    "content-type"
+                                        | "content-length"
+                                        | "content-encoding"
+                                        | "transfer-encoding"
+                                )
                             )
                         });
                 }
-                response = request_builder(&current)
-                    .await?
-                    .send()
+                (response, replayable, sent_headers) = send_request(&current, &events)
                     .await
                     .context("重定向请求失败")?;
             }

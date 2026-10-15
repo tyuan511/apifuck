@@ -3,7 +3,6 @@ mod appearance;
 mod brand;
 mod document_tab;
 mod editor_tools;
-mod export_view;
 mod feedback;
 mod i18n;
 mod icons;

@@ -143,8 +143,12 @@ impl KeyValueEditor {
             {
                 let value = path.to_string_lossy().into_owned();
                 let _ = this.update_in(cx, |this, window, cx| {
-                    if let Some(row) = this.rows.iter_mut().find(|r| r.id == id) {
-                        row.original["type"] = json!("file");
+                    if this.multipart
+                        && let Some(row) = this
+                            .rows
+                            .iter_mut()
+                            .find(|r| r.id == id && r.original["type"] == "file")
+                    {
                         row.value.update(cx, |s, cx| s.set_value(value, window, cx));
                         cx.emit(Changed);
                         cx.notify();
@@ -360,7 +364,7 @@ impl Render for KeyValueEditor {
                                                             _ => mode,
                                                         })
                                                         .icon(crate::icons::value_kind(mode))
-                                                        .on_click(move |_, window, cx| {
+                                                        .on_click(move |_, _, cx| {
                                                             let _ = weak.update(cx, |this, cx| {
                                                                 if let Some(row) = this
                                                                     .rows
@@ -372,11 +376,6 @@ impl Render for KeyValueEditor {
                                                                     } else {
                                                                         "type"
                                                                     }] = json!(mode);
-                                                                }
-                                                                if !assertions && mode == "file" {
-                                                                    this.choose_file(
-                                                                        id, window, cx,
-                                                                    );
                                                                 }
                                                                 cx.emit(Changed);
                                                                 cx.notify();
@@ -403,22 +402,46 @@ impl Render for KeyValueEditor {
                                 )),
                             )
                             .child(
-                                div().flex_1().min_w_0().child(crate::variable_input::input(
-                                    &row.value,
-                                    Input::new(&row.value)
-                                        .readonly(row.original["secret"] == true)
-                                        .small()
-                                        .bordered(false)
-                                        .rounded_none()
-                                        .aria_label(tr("值")),
-                                    if row.original["secret"] == true {
-                                        &empty_variables
-                                    } else {
-                                        &self.variables
-                                    },
-                                    window,
-                                    cx,
-                                )),
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .when(self.multipart && row.original["type"] == "file", |d| {
+                                        d.child(
+                                            Button::new(("browse-file", id))
+                                                .ghost()
+                                                .small()
+                                                .flex_shrink_0()
+                                                .icon(AppIcon::FolderOpen)
+                                                .label(tr("选择文件…"))
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        this.choose_file(id, window, cx);
+                                                    },
+                                                )),
+                                        )
+                                    })
+                                    .child(
+                                        div().flex_1().min_w_0().child(
+                                            crate::variable_input::input(
+                                                &row.value,
+                                                Input::new(&row.value)
+                                                    .readonly(row.original["secret"] == true)
+                                                    .small()
+                                                    .bordered(false)
+                                                    .rounded_none()
+                                                    .aria_label(tr("值")),
+                                                if row.original["secret"] == true {
+                                                    &empty_variables
+                                                } else {
+                                                    &self.variables
+                                                },
+                                                window,
+                                                cx,
+                                            ),
+                                        ),
+                                    ),
                             )
                             .child(
                                 div().flex_1().min_w_0().child(

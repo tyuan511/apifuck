@@ -7,8 +7,8 @@ use crate::surfaces::{panel_editor, panel_toolbar};
 use anyhow::{Context as _, Result, ensure};
 use apifuck_core::settings::RequestLayout;
 use apifuck_core::{
-    Collection, Document, DocumentKind, Event, NetworkSettings, Response, exchange, execute,
-    prepare, websocket,
+    Collection, Document, DocumentKind, Event, NetworkSettings, RequestHead, Response, exchange,
+    execute, prepare, websocket,
 };
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, Sizable,
@@ -110,6 +110,30 @@ enum Delivery {
     Event(Event),
     Done(Result<Option<Response>, String>),
 }
+struct DocumentLayout {
+    default: RequestLayout,
+    local: Option<RequestLayout>,
+}
+impl DocumentLayout {
+    fn new(default: RequestLayout) -> Self {
+        Self {
+            default,
+            local: None,
+        }
+    }
+    fn current(&self) -> RequestLayout {
+        self.local.unwrap_or(self.default)
+    }
+    fn toggle(&mut self) {
+        self.local = Some(match self.current() {
+            RequestLayout::Vertical => RequestLayout::Horizontal,
+            RequestLayout::Horizontal => RequestLayout::Vertical,
+        });
+    }
+    fn restore(&mut self, state: &Value) {
+        self.local = serde_json::from_value(state["requestLayout"].clone()).ok();
+    }
+}
 pub struct DocumentTab {
     document: Document,
     variables: crate::variable_input::Variables,
@@ -117,10 +141,14 @@ pub struct DocumentTab {
     source: Entity<EditorState>,
     section_editor: Entity<EditorState>,
     response_editor: Entity<EditorState>,
+    sent_headers_editor: Entity<EditorState>,
+    sent_requests: Vec<RequestHead>,
+    sent_request_index: usize,
+    show_sent_headers: bool,
     form: Entity<RequestForm>,
     form_source: Value,
     form_drafts: std::collections::BTreeMap<String, Value>,
-    vertical: bool,
+    layout: DocumentLayout,
     docs_preview: bool,
     response_pretty: bool,
     timeline: Vec<String>,
@@ -186,6 +214,7 @@ impl DocumentTab {
         });
         let method =
             cx.new(|cx| InputState::new(window, cx).default_value(original_method.clone()));
+        let sent_headers_editor = cx.new(|cx| EditorState::new(window, cx).line_number(false));
         let url = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(tr("请求 URL，或直接粘贴 cURL"))
@@ -310,10 +339,14 @@ impl DocumentTab {
             source,
             section_editor,
             response_editor,
+            sent_headers_editor,
+            sent_requests: vec![],
+            sent_request_index: 0,
+            show_sent_headers: false,
             form,
             form_source: Value::Null,
             form_drafts: Default::default(),
-            vertical: layout == RequestLayout::Vertical,
+            layout: DocumentLayout::new(layout),
             docs_preview: true,
             response_pretty: true,
             timeline: vec![],
@@ -393,12 +426,68 @@ impl DocumentTab {
             cx.notify();
         }
     }
-    pub fn set_request_layout(&mut self, layout: RequestLayout, cx: &mut Context<Self>) {
-        self.vertical = layout == RequestLayout::Vertical;
+    pub fn set_default_layout(&mut self, layout: RequestLayout, cx: &mut Context<Self>) {
+        self.layout.default = layout;
         cx.notify();
+    }
+    pub fn request_header(&self, commands: Div, cx: &Context<Self>) -> Div {
+        let vertical = self.layout.current() == RequestLayout::Vertical;
+        let layout_label = if vertical {
+            tr("切换为左右布局")
+        } else {
+            tr("切换为上下布局")
+        };
+        div()
+            .flex()
+            .items_center()
+            .flex_shrink_0()
+            .min_w_0()
+            .px_4()
+            .pt_3()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(div().min_w_0().truncate().child(self.breadcrumb.clone()))
+                    .child("/")
+                    .child(
+                        div().flex_1().min_w_0().max_w(rems(28.)).child(
+                            Input::new(&self.name)
+                                .small()
+                                .bordered(false)
+                                .aria_label(tr("请求名称")),
+                        ),
+                    ),
+            )
+            .child(commands)
+            .child(
+                Button::new("request-layout")
+                    .small()
+                    .ghost()
+                    .label(tr("切换布局"))
+                    .flex_shrink_0()
+                    .icon(if vertical {
+                        AppIcon::Columns2
+                    } else {
+                        AppIcon::Rows2
+                    })
+                    .accessibility_label(layout_label)
+                    .tooltip(layout_label)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.layout.toggle();
+                        cx.notify();
+                    })),
+            )
     }
     pub fn editor_snapshot(&self, cx: &App) -> Value {
         json!({"baseSource":self.document.source(), "dirty":self.dirty, "message":self.message.read(cx).value().to_string(),
+            "requestLayout":self.layout.local,
             "formDraft":self.form.read(cx).snapshot(cx), "formDrafts": self.form_drafts,
             "source":self.raw_source(cx), "section":self.section, "sectionSource":self.section_source,
             "sectionText":self.section_editor.read(cx).value().to_string(),
@@ -406,6 +495,8 @@ impl DocumentTab {
             "originalMethod":self.original_method,"originalUrl":self.original_url,"formValue":self.form.read(cx).value(cx),"formSource":self.form_source,"name":self.name.read(cx).value().to_string(),"originalName":self.original_name})
     }
     pub fn restore_editor(&mut self, state: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        // Local presentation state survives even when a clean document changed externally.
+        self.layout.restore(state);
         if let Some(message) = state["message"].as_str() {
             self.message.update(cx, |input, cx| {
                 input.set_value(message.to_owned(), window, cx)
@@ -902,6 +993,12 @@ impl DocumentTab {
         cx: &mut Context<Self>,
     ) -> Result<()> {
         ensure!(!self.running, "{}", tr("请求正在运行"));
+        self.sent_requests.clear();
+        self.sent_request_index = 0;
+        self.show_sent_headers = false;
+        self.sent_headers_editor
+            .update(cx, |editor, cx| editor.set_value("", window, cx));
+        cx.notify();
         let document = self.commit_editors(window, cx)?;
         let execution = prepare(collection, &document, env, network)?;
         self.cancel = Some(execution.cancellation());
@@ -957,6 +1054,24 @@ impl DocumentTab {
         cx.notify();
         Ok(())
     }
+    fn update_sent_headers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self
+            .sent_requests
+            .get(self.sent_request_index)
+            .map(|request| {
+                let mut lines = vec![format!("{} {}", request.method, request.url), String::new()];
+                lines.extend(
+                    request
+                        .headers
+                        .iter()
+                        .map(|(name, value)| format!("{name}: {value}")),
+                );
+                lines.join("\n")
+            })
+            .unwrap_or_default();
+        self.sent_headers_editor
+            .update(cx, |editor, cx| editor.set_value(text, window, cx));
+    }
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         if let Some(cancel) = &self.cancel {
             cancel.store(true, Ordering::Relaxed);
@@ -978,6 +1093,12 @@ impl DocumentTab {
         }
         for message in messages {
             match message {
+                Delivery::Event(Event::Request { request }) => {
+                    self.sent_requests.push(request);
+                    self.sent_request_index = self.sent_requests.len() - 1;
+                    self.show_sent_headers = true;
+                    self.update_sent_headers(window, cx);
+                }
                 Delivery::Event(Event::Started { status, headers }) => {
                     self.stream_headers = headers;
                     self.stream_status = Some(status);
@@ -1485,6 +1606,96 @@ impl Render for DocumentTab {
                     )))
                 },
             )
+            .when(
+                self.section == Section::Headers && !self.sent_requests.is_empty(),
+                |d| {
+                    let headers_weak = cx.entity().downgrade();
+                    d.child(
+                        panel_toolbar(cx)
+                            .child(
+                                TabBar::new("request-headers-mode")
+                                    .pill()
+                                    .small()
+                                    .selected_index(usize::from(self.show_sent_headers))
+                                    .children([
+                                        Tab::new().label(tr("编辑配置")),
+                                        Tab::new().label(tr("实际发送")),
+                                    ])
+                                    .on_click(cx.listener(|this, index, _, cx| {
+                                        this.show_sent_headers = *index == 1;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(div().flex_1())
+                            .when(
+                                self.show_sent_headers && self.sent_requests.len() > 1,
+                                |bar| {
+                                    bar.child(
+                                        Button::new("sent-request-hop")
+                                            .small()
+                                            .ghost()
+                                            .label(format!("#{}", self.sent_request_index + 1))
+                                            .tooltip(tr("选择重定向请求"))
+                                            .dropdown_caret(true)
+                                            .dropdown_menu(move |mut menu, _, cx| {
+                                                let Some(tab) = headers_weak.upgrade() else {
+                                                    return menu;
+                                                };
+                                                for (index, request) in
+                                                    tab.read(cx).sent_requests.iter().enumerate()
+                                                {
+                                                    let handle = headers_weak.clone();
+                                                    menu = menu.item(
+                                                        PopupMenuItem::new(format!(
+                                                            "#{} {} {}",
+                                                            index + 1,
+                                                            request.method,
+                                                            request.url
+                                                        ))
+                                                        .checked(
+                                                            index
+                                                                == tab.read(cx).sent_request_index,
+                                                        )
+                                                        .on_click(move |_, window, cx| {
+                                                            let _ =
+                                                                handle.update(cx, |this, cx| {
+                                                                    this.sent_request_index = index;
+                                                                    this.update_sent_headers(
+                                                                        window, cx,
+                                                                    );
+                                                                    cx.notify();
+                                                                });
+                                                        }),
+                                                    );
+                                                }
+                                                menu
+                                            }),
+                                    )
+                                },
+                            )
+                            .when(self.show_sent_headers, |bar| {
+                                bar.child(
+                                    Button::new("copy-sent-headers")
+                                        .ghost()
+                                        .small()
+                                        .icon(AppIcon::Copy)
+                                        .label(tr("复制"))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            crate::feedback::copy(
+                                                this.sent_headers_editor
+                                                    .read(cx)
+                                                    .value()
+                                                    .to_string(),
+                                                tr("已复制请求头").to_owned(),
+                                                window,
+                                                cx,
+                                            );
+                                        })),
+                                )
+                            }),
+                    )
+                },
+            )
             .when(self.section == Section::Docs, |d| {
                 d.child(
                     panel_toolbar(cx).child(
@@ -1511,6 +1722,11 @@ impl Render for DocumentTab {
                             SharedString::from(format!("docs:{}", self.document.path().display())),
                             self.section_editor.read(cx).value(),
                         ))
+                        .into_any_element()
+                } else if self.section == Section::Headers && self.show_sent_headers {
+                    panel_editor(&self.sent_headers_editor)
+                        .readonly(true)
+                        .aria_label(tr("实际发送的请求头"))
                         .into_any_element()
                 } else if self.section.form().is_some() {
                     self.form.clone().into_any_element()
@@ -1699,16 +1915,12 @@ impl Render for DocumentTab {
                                             .xsmall()
                                             .label(tr("复制"))
                                             .on_click(cx.listener(|this, _, window, cx| {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                crate::feedback::copy(
                                                     this.response_editor
                                                         .read(cx)
                                                         .value()
                                                         .to_string(),
-                                                ));
-                                                crate::feedback::show(
-                                                    Notification::success(
-                                                        tr("已复制响应内容").to_owned(),
-                                                    ),
+                                                    tr("已复制响应内容").to_owned(),
                                                     window,
                                                     cx,
                                                 );
@@ -1812,7 +2024,7 @@ impl Render for DocumentTab {
             );
         let split = if !is_request {
             request_pane.into_any_element()
-        } else if self.vertical {
+        } else if self.layout.current() == RequestLayout::Vertical {
             v_resizable("request-response-vertical")
                 .child(resizable_panel().child(request_pane))
                 .child(resizable_panel().child(response_pane))
@@ -1860,28 +2072,6 @@ impl Render for DocumentTab {
                                 .on_click(|_, window, cx| {
                                     window.dispatch_action(Box::new(crate::workbench::Save), cx)
                                 }),
-                        ),
-                )
-            })
-            .when(is_request, |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .px_4()
-                        .pt_3()
-                        .gap_2()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(self.breadcrumb.clone())
-                        .child("/")
-                        .child(
-                            div().flex_1().min_w_0().max_w(rems(28.)).child(
-                                Input::new(&self.name)
-                                    .small()
-                                    .bordered(false)
-                                    .aria_label(tr("请求名称")),
-                            ),
                         ),
                 )
             })
@@ -2011,8 +2201,54 @@ fn should_restore_document_draft(state: &Value, source: &str) -> bool {
 
 #[cfg(test)]
 mod draft_tests {
-    use super::should_restore_document_draft;
+    use super::{DocumentLayout, should_restore_document_draft};
+    use apifuck_core::settings::{RequestLayout, WorkspaceState};
     use serde_json::json;
+
+    #[test]
+    fn request_layout_is_independent_and_survives_workspace_recovery() {
+        let mut first = DocumentLayout::new(RequestLayout::Vertical);
+        let second = DocumentLayout::new(RequestLayout::Vertical);
+        first.toggle();
+        assert_eq!(first.current(), RequestLayout::Horizontal);
+        assert_eq!(second.current(), RequestLayout::Vertical);
+
+        let mut workspace = WorkspaceState::default();
+        workspace.editor_drafts.insert(
+            "first.yml".into(),
+            json!({"requestLayout": first.local, "dirty": false, "baseSource": "old file"}),
+        );
+        workspace
+            .editor_drafts
+            .insert("second.yml".into(), json!({"requestLayout": second.local}));
+        let saved = serde_json::to_string(&workspace).unwrap();
+        let restored: WorkspaceState = serde_json::from_str(&saved).unwrap();
+        let snapshot = &restored.editor_drafts["first.yml"];
+        assert!(!should_restore_document_draft(snapshot, "external edit"));
+        let mut first = DocumentLayout::new(RequestLayout::Vertical);
+        first.restore(snapshot);
+        assert_eq!(first.current(), RequestLayout::Horizontal);
+        first.toggle();
+        first.default = RequestLayout::Horizontal;
+        assert_eq!(first.current(), RequestLayout::Vertical);
+
+        let mut second = DocumentLayout::new(RequestLayout::Horizontal);
+        second.restore(&restored.editor_drafts["second.yml"]);
+        assert_eq!(second.current(), RequestLayout::Horizontal);
+        second.default = RequestLayout::Vertical;
+        assert_eq!(second.current(), RequestLayout::Vertical);
+    }
+
+    #[test]
+    fn legacy_or_invalid_layout_drafts_follow_the_default() {
+        for snapshot in [json!({}), json!({"requestLayout": "unknown"})] {
+            let mut layout = DocumentLayout::new(RequestLayout::Horizontal);
+            layout.restore(&snapshot);
+            assert_eq!(layout.current(), RequestLayout::Horizontal);
+            layout.default = RequestLayout::Vertical;
+            assert_eq!(layout.current(), RequestLayout::Vertical);
+        }
+    }
 
     #[test]
     fn dirty_and_legacy_drafts_survive_external_file_changes() {

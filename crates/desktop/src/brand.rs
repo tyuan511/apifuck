@@ -24,6 +24,8 @@ gpui_kit::assets::icon_assets!(
         Moon,
         Monitor,
         Code,
+        Columns2,
+        Rows2,
         Ellipsis,
         Copy,
         Trash,
@@ -55,6 +57,10 @@ impl AssetSource for BrandAssets {
             Ok(Some(Cow::Borrowed(include_bytes!(
                 "../../../assets/apifuck.png"
             ))))
+        } else if path == crate::icons::HISTORY {
+            Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../../assets/icons/history.svg"
+            ))))
         } else if let Some(icon) = UiAssets.load(path)? {
             Ok(Some(icon))
         } else {
@@ -64,6 +70,9 @@ impl AssetSource for BrandAssets {
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(UiAssets.list(path)?);
+        if crate::icons::HISTORY.starts_with(path) {
+            paths.push(crate::icons::HISTORY.into());
+        }
         paths.sort();
         paths.dedup();
         if LOGO.starts_with(path) {
@@ -77,7 +86,7 @@ mod tests {
     use super::*;
     #[test]
     fn all_ui_icons_are_embedded_without_external_files() {
-        let paths = UiAssets.list("icons/").unwrap();
+        let paths = BrandAssets.list("icons/").unwrap();
         assert!(!paths.is_empty());
         for path in paths {
             let bytes = BrandAssets.load(&path).unwrap().expect("missing UI icon");
