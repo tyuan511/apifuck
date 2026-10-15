@@ -23,7 +23,7 @@ try {
         route.fulfill({ json: { tag_name: "v0.0.8", assets: [] } }),
       );
       const page = await context.newPage();
-    page.setDefaultTimeout(15000);
+      page.setDefaultTimeout(15000);
       page.on("pageerror", (error) => errors.push(error.message));
       const path = locale === "en" ? "/en/" : "/";
       for (const width of [320, 375, 768, 1024, 1440]) {
@@ -52,7 +52,7 @@ try {
         // Critical UI must fit its own box, not merely avoid document overflow.
         for (const selector of [
           ".header-inner",
-          ".url-row",
+          ".preview-wrap",
           ".protocol-tabs",
           ".download-card",
         ]) {
@@ -69,6 +69,28 @@ try {
         for (const id of ["workbench", "local", "download"])
           assert.equal(await page.locator(`#${id}`).count(), 1);
         assert.equal(await page.locator("h1").count(), 1);
+        const screenshot = page.locator(".workbench-screenshot");
+        await screenshot.evaluate((image) => image.decode());
+        assert.equal(
+          await screenshot.evaluate((image) => image.naturalWidth),
+          2632,
+        );
+        assert.equal(
+          await screenshot.evaluate((image) => image.naturalHeight),
+          1752,
+        );
+        assert.equal(
+          await screenshot.evaluate(
+            (image) =>
+              Math.abs(image.width / image.height - 2632 / 1752) < 0.01,
+          ),
+          true,
+          "screenshot retains its full aspect ratio",
+        );
+        assert.equal(
+          await page.locator(".screenshot-link").getAttribute("href"),
+          "/workbench-screenshot.png",
+        );
         assert.equal(await page.locator("[data-platform]").count(), 3);
         for (const link of await page.locator("[data-platform]").all())
           assert.equal(
@@ -122,13 +144,6 @@ try {
       assert.equal(await page.locator("#protocol-panel-1").isVisible(), true);
       await page.keyboard.press("End");
       assert.equal(await page.locator("#protocol-panel-3").isVisible(), true);
-      await page.locator('[data-request-tab="2"]').click();
-      assert.equal(await page.locator("#request-panel-2").isVisible(), true);
-      await page.locator(".send-button").click();
-      assert.match(
-        await page.locator("#demo-status").innerText(),
-        locale === "zh" ? /示例完成/ : /Example complete/,
-      );
       await page.locator("summary").first().click();
       assert.equal(
         await page.locator("details").first().getAttribute("open"),
@@ -138,7 +153,7 @@ try {
     }
   const context = await browser.newContext();
   const page = await context.newPage();
-    page.setDefaultTimeout(15000);
+  page.setDefaultTimeout(15000);
   await context.route(endpoint, (route) =>
     route.fulfill({
       json: {
@@ -206,7 +221,7 @@ try {
   await noJS.close();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS keyboard tabs, demo, FAQ, theme persistence, release success/fallback, no-JS and HTTP checks",
+    "PASS real screenshot, keyboard tabs, FAQ, theme persistence, release success/fallback, no-JS and HTTP checks",
   );
 } finally {
   await browser.close();

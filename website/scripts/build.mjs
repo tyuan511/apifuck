@@ -44,24 +44,7 @@ function page(t, locale) {
 <main id="main">
 <section class="hero" id="top"><div class="hero-backdrop" aria-hidden="true"></div>
 <div class="hero-copy"><p class="eyebrow hero-eyebrow"><span></span>${t.eyebrow}</p><h1>${t.headline.map((x) => `<span>${esc(x)}</span>`).join("")}</h1><p class="hero-lead">${lines(t.lead)}</p><div class="hero-actions"><a class="button hero-button" href="#download">${t.download}<span aria-hidden="true">↓</span></a><a class="hero-source" href="${github}">${t.source} ${arrow}</a></div><p class="platform-hint">${t.platforms}</p></div>
-<div class="preview-wrap"><div class="workbench" aria-label="${t.preview}">
-<div class="window-bar"><div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div><span>ApiFuck <span class="window-divider">/</span> Playground</span><span class="window-environment"><i></i> Local</span></div>
-<div class="workbench-body"><aside class="collection-tree"><div class="tree-heading">${t.collection}<span>＋</span></div><div class="tree-project">▾ &nbsp; Playground</div><div class="tree-folder">▾ &nbsp; users</div><div class="tree-item active"><b>GET</b>${t.request}</div><div class="tree-item"><b class="post">POST</b>Create user</div><div class="tree-item"><b class="gql">GQL</b>GraphQL</div><div class="tree-item"><b>GET</b>Event stream</div><div class="tree-item"><b class="gql">WS</b>Echo socket</div><div class="tree-bottom"><span>◉ &nbsp; ${t.environment}</span><span>⚙ &nbsp; Playground</span></div></aside>
-<div class="request-pane"><div class="request-tab"><b>GET</b> ${t.request}<span>×</span></div><div class="request-editor"><div class="url-row"><span class="method">GET</span><code><span>{{base_url}}</span>/users</code><button class="send-button" data-send="${t.send}" data-sending="${t.sending}" hidden>${t.send}<span>↵</span></button></div>
-<div class="request-tabs" role="tablist" aria-label="${t.request}">${[t.params, t.headers, t.tests].map((name, i) => `<button role="tab" id="request-tab-${i}" aria-controls="request-panel-${i}" aria-selected="${i === 0}" tabindex="${i === 0 ? "0" : "-1"}" data-request-tab="${i}">${name}${i === 0 ? " <small>1</small>" : ""}</button>`).join("")}</div>
-<div class="request-panel" role="tabpanel" id="request-panel-0" aria-labelledby="request-tab-0"><div class="kv-row kv-head"><span></span><span>${t.key}</span><span>${t.value}</span></div><div class="kv-row"><span class="check">✓</span><code>limit</code><code>10</code></div></div>
-<div class="request-panel" role="tabpanel" id="request-panel-1" aria-labelledby="request-tab-1" hidden><div class="kv-row kv-head"><span></span><span>${t.key}</span><span>${t.value}</span></div><div class="kv-row"><span class="check">✓</span><code>Accept</code><code>application/json</code></div></div>
-<div class="request-panel" role="tabpanel" id="request-panel-2" aria-labelledby="request-tab-2" hidden><pre><code>test("status is 200", () =&gt; {
-  expect(api.response.status).to.equal(200);
-});</code></pre></div>
-<div class="response-bar"><span>${t.body}</span><div><b>200 OK</b><span>24 ms</span><span>128 B</span></div></div>
-<div class="response-code"><div class="line-numbers" aria-hidden="true">1<br>2<br>3<br>4<br>5<br>6<br>7</div><pre><code>{
-  <span class="syntax-key">"users"</span>: [
-    { <span class="syntax-key">"id"</span>: <span class="syntax-number">1</span>, <span class="syntax-key">"name"</span>: <span class="syntax-string">"Alex"</span> },
-    { <span class="syntax-key">"id"</span>: <span class="syntax-number">2</span>, <span class="syntax-key">"name"</span>: <span class="syntax-string">"Sam"</span> }
-  ],
-  <span class="syntax-key">"total"</span>: <span class="syntax-number">2</span>
-}</code></pre></div><div class="response-footer"><span class="test-pass">✓ ${t.testPass}</span><span id="demo-status" role="status" aria-live="polite">${t.demo}</span></div></div></div></div></div><p class="preview-caption">${t.preview} <span>— ${t.demoNote}</span></p></div></section>
+<figure class="preview-wrap"><a class="screenshot-link" href="/workbench-screenshot.png" target="_blank" rel="noreferrer"><img class="workbench-screenshot" src="/workbench-screenshot.png" width="2632" height="1752" alt="${esc(t.previewAlt)}" fetchpriority="high" decoding="async"></a><figcaption class="preview-caption">${t.preview}</figcaption></figure></section>
 <div class="trust-strip wrap">${t.strip.map((s, i) => `<span><i aria-hidden="true">${["◈", "◎", "⌘", "↗"][i]}</i>${s}</span>`).join("")}</div>
 <section class="section wrap" id="workbench"><div class="section-heading"><p class="eyebrow">${t.workflowEyebrow}</p><h2>${lines(t.workflowTitle)}</h2><p>${t.workflowLead}</p></div>
 <div class="protocol-tabs" role="tablist" aria-label="${t.nav[0]}">${t.protocols.map((p, i) => `<button role="tab" id="protocol-tab-${i}" aria-selected="${i === 0}" tabindex="${i === 0 ? "0" : "-1"}" aria-controls="protocol-panel-${i}" data-protocol-tab="${i}">${p[0]}</button>`).join("")}</div>

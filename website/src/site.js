@@ -5,7 +5,6 @@ const header = document.querySelector(".site-header");
 const menu = document.querySelector(".menu-toggle");
 const theme = document.querySelector(".theme-toggle");
 const dark = matchMedia("(prefers-color-scheme: dark)");
-const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 const refreshHeader = () => root.classList.toggle("scrolled", scrollY > 24);
 refreshHeader();
 addEventListener("scroll", refreshHeader, { passive: true });
@@ -81,23 +80,7 @@ function setupTabs(selector) {
     });
   });
 }
-setupTabs("[data-request-tab]");
 setupTabs("[data-protocol-tab]");
-const send = document.querySelector(".send-button");
-send.hidden = false;
-send.addEventListener("click", async () => {
-  send.disabled = true;
-  send.firstChild.textContent = send.dataset.sending;
-  const status = document.getElementById("demo-status");
-  status.textContent = zh ? "正在加载示例响应…" : "Loading sample response…";
-  if (!reduced.matches)
-    await new Promise((resolve) => setTimeout(resolve, 380));
-  status.textContent = zh
-    ? "示例完成 · 2 项测试通过"
-    : "Example complete · 2 tests passed";
-  send.firstChild.textContent = send.dataset.send;
-  send.disabled = false;
-});
 async function loadDownloads() {
   const statuses = document.querySelectorAll(".release-status");
   statuses.forEach(
