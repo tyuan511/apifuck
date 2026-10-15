@@ -73,16 +73,16 @@ try {
         await screenshot.evaluate((image) => image.decode());
         assert.equal(
           await screenshot.evaluate((image) => image.naturalWidth),
-          2632,
+          2560,
         );
         assert.equal(
           await screenshot.evaluate((image) => image.naturalHeight),
-          1752,
+          1680,
         );
         assert.equal(
           await screenshot.evaluate(
             (image) =>
-              Math.abs(image.width / image.height - 2632 / 1752) < 0.01,
+              Math.abs(image.width / image.height - 2560 / 1680) < 0.01,
           ),
           true,
           "screenshot retains its full aspect ratio",

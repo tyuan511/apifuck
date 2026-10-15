@@ -2,7 +2,7 @@
 
 独立静态官网，参考 FastVibe Services 的蓝紫首屏、浮动毛玻璃导航和大幅产品预览。中文 `/`，英文 `/en/`，支持系统主题和手动主题切换。它与 Rust 桌面应用没有构建或运行依赖。
 
-首屏使用用户提供的真实桌面截图 `public/workbench-screenshot.png`（2632 × 1752），原图保持不变，在中英文和明暗主题下等比例完整显示，点击可查看原图。产品能力以根目录 README 与 `docs/execution.md` 为准，未宣传 CLI、MCP 或尚未实现的协议。
+首屏使用用户提供的真实桌面截图 `public/workbench-screenshot.png`（2560 × 1680），原图保持不变，在中英文和明暗主题下等比例完整显示，点击可查看原图。产品能力以根目录 README 与 `docs/execution.md` 为准，未宣传 CLI、MCP 或尚未实现的协议。
 
 ## 开发与验证
 
