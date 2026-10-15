@@ -16,7 +16,7 @@ try {
   const prerelease = parseVersion(tag.slice(1)).prerelease.length > 0
   const notes = `docs/release/${tag.slice(1)}.md`
   if (!fs.readFileSync(notes, 'utf8').trim()) throw new Error('Release notes are empty')
-  const assets = verifyArtifacts(directory)
+  const assets = verifyArtifacts(directory, tag.slice(1))
   // A failed lookup must never be interpreted as permission to edit a public release.
   const lookup = spawnSync('gh', ['release', 'view', tag, '--json', 'isDraft'], { encoding: 'utf8' })
   if (lookup.status !== 0) {

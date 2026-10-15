@@ -16,6 +16,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -91,6 +92,7 @@ pub(super) struct Job {
     value: Value,
     cancel: Arc<AtomicBool>,
     socket: Option<mpsc::UnboundedSender<crate::websocket::Command>>,
+    completed_at: Option<Instant>,
 }
 
 pub struct Service {

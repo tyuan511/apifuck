@@ -25,17 +25,17 @@ Native builds are distributed through [GitHub Releases](https://github.com/tyuan
 | Platform | Latest stable build |
 | --- | --- |
 | macOS Apple Silicon | [Download](https://github.com/tyuan511/apifuck/releases/latest) |
-| Windows x86_64 | [Download EXE](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-pc-windows-msvc.exe) |
-| Linux x86_64 | [Download AppImage](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-unknown-linux-gnu.AppImage) |
+| Windows x86_64 | [Download EXE](https://github.com/tyuan511/apifuck/releases/latest) |
+| Linux x86_64 | [Download AppImage](https://github.com/tyuan511/apifuck/releases/latest) |
 
 These links resolve to matching assets in the latest stable release. If native assets are not yet available there, run from source below. Older versions are listed in [Releases](https://github.com/tyuan511/apifuck/releases).
 <!-- release-downloads:end -->
 
-On macOS, open the DMG and drag `ApiFuck.app` into Applications before launching it. If you installed the earlier standalone v0.1.0 build, download this DMG manually: automatic updates only select newer version numbers. On Windows, run the `.exe`. On Linux, make the AppImage executable first:
+On macOS, open the DMG and drag `ApiFuck.app` into Applications before launching it. If you use v0.1.0 or v0.1.1, download v0.1.2 manually once: those clients only recognize the legacy filenames. On Windows, run the `.exe`. On Linux, make the AppImage executable first (replace the example below with the actual downloaded filename; older releases use legacy names):
 
 ```sh
-chmod +x apifuck-desktop-x86_64-unknown-linux-gnu.AppImage
-./apifuck-desktop-x86_64-unknown-linux-gnu.AppImage
+chmod +x ApiFuck-0.1.2.AppImage
+./ApiFuck-0.1.2.AppImage
 ```
 
 Releases provide a signed and notarized macOS DMG, a Windows EXE and a Linux AppImage. Automatic updates use those same files; no separate macOS ZIP or update archive is published. Intel Mac and Linux ARM64 assets are not currently produced. See the [development guide](docs/development.md) for Linux system dependencies.

@@ -79,7 +79,7 @@ test('release gate requires matching versions and non-empty notes', (t) => {
   assert.equal(result.status, 0, result.stderr)
 })
 
-test('download sync prefers native DMG over ZIP and historical installers', (t) => {
+test('download sync prefers versioned installers over legacy names and other versions', (t) => {
   const root = fixture(t)
   writeFileSync(path.join(root, 'README.md'), 'Before\n<!-- release-downloads:start -->\nOld\n<!-- release-downloads:end -->\nAfter\n')
   const names = [
@@ -87,6 +87,8 @@ test('download sync prefers native DMG over ZIP and historical installers', (t) 
     'unrelated-tool-aarch64-apple-darwin', 'unrelated-tool-x86_64-pc-windows-msvc.exe', 'unrelated-tool-x86_64-unknown-linux-gnu',
     'apifuck-desktop-aarch64-apple-darwin.zip',
     'apifuck-desktop-aarch64-apple-darwin.dmg', 'apifuck-desktop-x86_64-pc-windows-msvc.exe', 'apifuck-desktop-x86_64-unknown-linux-gnu.AppImage',
+    'ApiFuck-9.9.9-arm64.dmg', 'ApiFuck-9.9.9.exe', 'ApiFuck-9.9.9.AppImage',
+    'ApiFuck-1.2.3-arm64.dmg', 'ApiFuck-1.2.3.exe', 'ApiFuck-1.2.3.AppImage',
   ]
   writeFileSync(path.join(root, 'mock-fetch.mjs'), `globalThis.fetch = async () => new Response(JSON.stringify(${JSON.stringify({ tag_name: 'v1.2.3', assets: names.map(name => ({ name })) })}), {status: 200});\n`)
   const result = run(process.execPath, ['--import', './mock-fetch.mjs', path.join(repository, 'scripts/release/update-readme-downloads.mjs'), 'v1.2.3', '--repo', 'example/apifuck'], root)
@@ -95,7 +97,7 @@ test('download sync prefers native DMG over ZIP and historical installers', (t) 
   for (const name of names.slice(-3)) {
     assert.ok(readme.includes(`https://github.com/example/apifuck/releases/download/v1.2.3/${name}`))
   }
-  assert.doesNotMatch(readme, /unrelated-tool|\.zip|ApiFuck_0\.0\.8|setup\.exe/)
+  assert.doesNotMatch(readme, /unrelated-tool|\.zip|ApiFuck_0\.0\.8|setup\.exe|9\.9\.9|apifuck-desktop/)
   assert.ok(readme.startsWith('Before\n'))
   assert.ok(readme.endsWith('\nAfter\n'))
   assert.match(readme, /Latest release:/)

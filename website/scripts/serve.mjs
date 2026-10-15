@@ -10,6 +10,7 @@ const mime = {
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
   ".png": "image/png",
+  ".svg": "image/svg+xml",
   ".json": "application/json",
   ".xml": "application/xml",
   ".txt": "text/plain; charset=utf-8",

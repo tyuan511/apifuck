@@ -2,20 +2,32 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { parseVersion, workspaceVersion } from './version.mjs'
 
 export const targets = ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc']
 export function assetName(target) {
   if (!targets.includes(target)) throw new Error(`Unsupported release target: ${target}`)
   return `apifuck-desktop-${target}${target.includes('windows') ? '.exe' : ''}`
 }
-export const macosDmg = `${assetName('aarch64-apple-darwin')}.dmg`
-export const linuxAppImage = `${assetName('x86_64-unknown-linux-gnu')}.AppImage`
-export const releaseAssetNames = [macosDmg, assetName('x86_64-pc-windows-msvc'), linuxAppImage]
+// electron-builder defaults: non-default arm64 suffix on DMG, default x64 omitted.
+// Windows is portable; use the GitHub-safe form of "ApiFuck <version>.exe".
+export function releaseAssetName(target, version) {
+  parseVersion(version)
+  switch (target) {
+    case 'aarch64-apple-darwin': return `ApiFuck-${version}-arm64.dmg`
+    case 'x86_64-pc-windows-msvc': return `ApiFuck-${version}.exe`
+    case 'x86_64-unknown-linux-gnu': return `ApiFuck-${version}.AppImage`
+    default: throw new Error(`Unsupported release target: ${target}`)
+  }
+}
+export const macosDmg = version => releaseAssetName('aarch64-apple-darwin', version)
+export const linuxAppImage = version => releaseAssetName('x86_64-unknown-linux-gnu', version)
+export const releaseAssetNames = version => [macosDmg(version), releaseAssetName('x86_64-pc-windows-msvc', version), linuxAppImage(version)]
 export function digest(file) {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 }
-export function verifyArtifacts(directory) {
-  const assets = releaseAssetNames.map(name => {
+export function verifyArtifacts(directory, version) {
+  const assets = releaseAssetNames(version).map(name => {
     const file = path.join(directory, name)
     const size = fs.statSync(file).size
     if (!size || size > 512 * 1024 * 1024) throw new Error(`Invalid asset size: ${name}`)
@@ -42,7 +54,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const [mode, argument] = process.argv.slice(2)
     if (mode === 'stage') {
-      const name = assetName(argument)
+      const name = argument.includes('windows') ? releaseAssetName(argument, workspaceVersion(process.cwd())) : assetName(argument)
       const source = `target/${argument}/release/apifuck-desktop${argument.includes('windows') ? '.exe' : ''}`
       fs.mkdirSync('release-assets', { recursive: true })
       const directory = argument.includes('windows') ? 'release-assets' : 'target/release-staging'
@@ -51,7 +63,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       fs.copyFileSync(source, file)
       fs.writeFileSync(`${file}.sha256`, `${digest(file)}  ${name}\n`)
     } else if (mode === 'verify') {
-      verifyArtifacts(argument)
+      verifyArtifacts(argument, workspaceVersion(process.cwd()))
     } else {
       throw new Error('Usage: artifacts.mjs stage <target> | verify <directory>')
     }

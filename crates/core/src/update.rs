@@ -65,15 +65,18 @@ impl Release {
         } else {
             ""
         };
-        let name = format!("apifuck-desktop-{target}{suffix}");
-        let Some(asset) = value["assets"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|a| a["name"] == name)
-        else {
+        let legacy = format!("apifuck-desktop-{target}{suffix}");
+        let names = [release_asset_name(version, target, bundle), Some(legacy)];
+        let Some(asset) = names.iter().flatten().find_map(|name| {
+            value["assets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|asset| asset["name"] == *name)
+        }) else {
             return Ok(None);
         };
+        let name = asset["name"].as_str().context("发布附件缺少文件名")?;
         let url = asset["browser_download_url"]
             .as_str()
             .context("发布附件缺少下载地址")?;
@@ -86,7 +89,8 @@ impl Release {
                 && parsed.port().is_none()
                 && parsed.query().is_none()
                 && parsed.fragment().is_none()
-                && parsed.path() == format!("/tyuan511/apifuck/releases/download/{tag}/{name}"),
+                // GitHub may encode the '+' in semver build metadata in download URLs.
+                && parsed.path().replace("%2B", "+").replace("%2b", "+") == format!("/tyuan511/apifuck/releases/download/{tag}/{name}"),
             "更新附件来源无效"
         );
         let sha256 = asset["digest"]
@@ -120,6 +124,16 @@ impl Release {
         Ok(())
     }
 }
+fn release_asset_name(version: &str, target: &str, bundle: bool) -> Option<String> {
+    let suffix = match (target, bundle) {
+        ("aarch64-apple-darwin", true) => "-arm64.dmg",
+        ("x86_64-pc-windows-msvc", false) => ".exe",
+        ("x86_64-unknown-linux-gnu", false) => ".AppImage",
+        _ => return None,
+    };
+    Some(format!("ApiFuck-{version}{suffix}"))
+}
+
 pub fn target() -> String {
     format!(
         "{}-{}",
@@ -328,6 +342,58 @@ pub fn restart_path() -> Result<std::path::PathBuf> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn versioned_asset_names_match_release_tooling_and_accept_legacy_releases() {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../scripts/release/asset-name-fixtures.json"
+        ))
+        .unwrap();
+        for fixture in fixtures.as_array().unwrap() {
+            let version = fixture["version"].as_str().unwrap();
+            for (platform, target, bundle) in [
+                ("mac", "aarch64-apple-darwin", true),
+                ("windows", "x86_64-pc-windows-msvc", false),
+                ("linux", "x86_64-unknown-linux-gnu", false),
+            ] {
+                let name = fixture[platform].as_str().unwrap();
+                assert_eq!(
+                    release_asset_name(version, target, bundle).as_deref(),
+                    Some(name)
+                );
+                if version.contains('-') {
+                    continue;
+                }
+                let mut value = json!({"tag_name":format!("v{version}"),"assets":[{
+                    "name":name,"size":6,"digest":format!("sha256:{:x}", Sha256::digest(b"binary")),
+                    "browser_download_url":format!("https://github.com/tyuan511/apifuck/releases/download/v{version}/{name}").replace('+', "%2B")
+                }]});
+                assert!(
+                    Release::select_for_install(&value, "0.0.1", target, bundle)
+                        .unwrap()
+                        .is_some()
+                );
+                value["assets"][0]["name"] = json!(name.replace(version, "9.9.9"));
+                assert!(
+                    Release::select_for_install(&value, "0.0.1", target, bundle)
+                        .unwrap()
+                        .is_none()
+                );
+                value["assets"][0]["name"] = json!(name);
+                value["assets"][0]["browser_download_url"] = json!(format!(
+                    "https://github.com/tyuan511/apifuck/releases/download/v9.9.9/{name}"
+                ));
+                assert!(Release::select_for_install(&value, "0.0.1", target, bundle).is_err());
+            }
+        }
+        assert!(release_asset_name("1.2.3", "x86_64-apple-darwin", true).is_none());
+        for target in ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"] {
+            assert!(
+                Release::select(&release_value(target), "0.1.0", target)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
     #[test]
     fn application_bundles_select_only_whole_bundle_assets() {
         assert_eq!(

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { assetName, releaseAssetName } from './artifacts.mjs'
 
 function fail(message) {
   console.error(message)
@@ -88,12 +89,8 @@ async function resolveRelease(repo, tagName) {
   return releases.find(item => item.tag_name === tagName) ?? null
 }
 
-function findAsset(assets, matcher) {
-  return assets.find(asset => matcher.test(asset.name))
-}
-
 function buildReleaseDownloadUrl(repo, tagName, assetName) {
-  return `https://github.com/${repo}/releases/download/${tagName}/${encodeURIComponent(assetName)}`
+  return `https://github.com/${repo}/releases/download/${encodeURIComponent(tagName)}/${encodeURIComponent(assetName)}`
 }
 
 function buildReleasePageUrl(repo, tagName) {
@@ -101,11 +98,13 @@ function buildReleasePageUrl(repo, tagName) {
 }
 
 async function resolveAssets(repo, tagName) {
-  const requiredMatchers = {
-    macos: /^apifuck-desktop-aarch64-apple-darwin\.dmg$/,
-    windows: /^apifuck-desktop-x86_64-pc-windows-msvc\.exe$/,
-    linux: /^apifuck-desktop-x86_64-unknown-linux-gnu\.AppImage$/,
+  const targets = {
+    macos: ['aarch64-apple-darwin', '.dmg'],
+    windows: ['x86_64-pc-windows-msvc', ''],
+    linux: ['x86_64-unknown-linux-gnu', '.AppImage'],
   }
+  if (!tagName.startsWith('v')) throw new Error('Expected a version tag')
+  const names = Object.fromEntries(Object.entries(targets).map(([platform, [target, extension]]) => [platform, [releaseAssetName(target, tagName.slice(1)), `${assetName(target)}${extension}`]]))
 
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     const release = await resolveRelease(repo, tagName)
@@ -120,12 +119,9 @@ async function resolveAssets(repo, tagName) {
       fail(`Release ${tagName} was not found.`)
     }
 
+    if (release.tag_name !== tagName) throw new Error('Release version does not match the requested tag')
     const assets = release.assets ?? []
-    const selectedAssets = {
-      macos: findAsset(assets, requiredMatchers.macos),
-      windows: findAsset(assets, requiredMatchers.windows),
-      linux: findAsset(assets, requiredMatchers.linux),
-    }
+    const selectedAssets = Object.fromEntries(Object.entries(names).map(([platform, candidates]) => [platform, candidates.map(name => assets.find(asset => asset.name === name)).find(Boolean)]))
 
     if (selectedAssets.macos && selectedAssets.windows && selectedAssets.linux) {
       return {

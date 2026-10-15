@@ -18,7 +18,7 @@ for (const scenario of ['new', 'public', 'corrupt', 'prerelease', 'older']) {
     fs.mkdirSync(path.join(root, 'assets'))
     const version = scenario === 'prerelease' ? '0.2.0-beta.1' : '0.2.0'
     fs.writeFileSync(path.join(root, `docs/release/${version}.md`), `# ${version}\n\nRelease notes.\n`)
-    for (const name of releaseAssetNames) {
+    for (const name of releaseAssetNames(version)) {
       const file = path.join(root, 'assets', name)
       fs.writeFileSync(file, `fixture executable ${name}`)
       fs.writeFileSync(`${file}.sha256`, `${digest(file)}  ${name}\n`)
@@ -61,7 +61,7 @@ fs.writeFileSync('state.json', JSON.stringify(state));
     } else {
       assert.equal(result.status, 0, result.stderr)
       assert.equal(final.draft, false)
-      assert.equal(final.assets.length, releaseAssetNames.length + 1)
+      assert.equal(final.assets.length, releaseAssetNames(version).length + 1)
       assert.equal(final.latest, scenario === 'new')
     }
   })

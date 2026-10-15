@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { assetName, digest, macosDmg } from './artifacts.mjs'
 import { createApp, createDmg, bundleIdentifier } from './macos-package.mjs'
+import { workspaceVersion } from './version.mjs'
 
 const requiredSecrets = ['APPLE_CERT_P12', 'APPLE_CERT_PASSWORD', 'APPLE_API_KEY_P8', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
 
@@ -70,7 +71,7 @@ export function signAndNotarize({ env = process.env, run = runTool, root = proce
   // Refuse to reuse another invocation's keychain, including on self-hosted runners.
   fs.mkdirSync(directory, { mode: 0o700 })
   fs.mkdirSync(path.join(root, 'release-assets'), { recursive: true })
-  const dmg = path.join(root, 'release-assets', macosDmg)
+  const dmg = path.join(root, 'release-assets', macosDmg(workspaceVersion(root)))
   const assets = [dmg]
   const diagnostics = path.join(env.RUNNER_TEMP, 'apifuck-notarization')
   fs.mkdirSync(diagnostics, { recursive: true })

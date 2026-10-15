@@ -392,6 +392,49 @@ async fn mcp_http_executes_core_scripts_and_persists_local_variables() {
     target.abort();
 }
 
+#[tokio::test]
+async fn four_concurrent_clients_can_read_results_after_the_job_cache_fills() {
+    let h = Harness::new().await;
+    h.workspace.lock().unwrap().network.proxy = Some(String::new());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let target = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            axum::Router::new().route("/", axum::routing::get(|| async { "ok" })),
+        )
+        .await
+        .unwrap();
+    });
+    let request = h
+        .call(
+            "import_curl",
+            json!({"name":"Concurrent", "command":format!("curl {url}")}),
+        )
+        .await;
+    let arguments = json!({"selector":request["path"]});
+    for _ in 0..32 {
+        let job = h.call("send_request", arguments.clone()).await;
+        assert_eq!(
+            h.finished(job["id"].as_str().unwrap()).await["status"],
+            "completed"
+        );
+    }
+    futures_util::future::join_all((0..4).map(|_| async {
+        for _ in 0..25 {
+            let job = h.call("send_request", arguments.clone()).await;
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            let result = h.finished(job["id"].as_str().unwrap()).await;
+            assert_eq!(result["status"], "completed", "{result}");
+            assert_eq!(result["result"]["status"], 200);
+            assert_eq!(result["result"]["body"], "ok");
+        }
+    }))
+    .await;
+    eprintln!("4 concurrent clients: 100/100 HTTP results retrieved after 32 warmup jobs");
+    target.abort();
+}
+
 #[test]
 fn tutorials_are_exactly_the_requested_native_clients() {
     assert_eq!(

@@ -14,6 +14,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Instant,
 };
 use tokio::sync::mpsc;
 
@@ -292,7 +293,8 @@ impl Service {
         if jobs.len() >= 32 {
             let old = jobs
                 .iter()
-                .find(|(_, job)| job.value["status"] != "running")
+                .filter_map(|(id, job)| job.completed_at.map(|at| (id, at)))
+                .min_by_key(|(_, at)| *at)
                 .map(|(id, _)| id.clone())
                 .context("Maximum 32 active MCP jobs")?;
             jobs.remove(&old);
@@ -304,6 +306,7 @@ impl Service {
                 value: json!({"id":id,"status":"running","connected":false,"events":[]}),
                 cancel,
                 socket,
+                completed_at: None,
             },
         );
         Ok(id)
@@ -364,6 +367,7 @@ fn finish(
     result: Result<Value>,
 ) {
     if let Some(job) = jobs.lock().unwrap().get_mut(id) {
+        job.completed_at = Some(Instant::now());
         job.value["connected"] = json!(false);
         job.socket = None;
         job.value["status"] = json!(if job.cancel.load(Ordering::Relaxed) {
@@ -377,5 +381,93 @@ fn finish(
             Ok(value) => job.value["result"] = value,
             Err(error) => job.value["error"] = json!(format!("{error:#}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn evicts_oldest_completion_instead_of_smallest_uuid() {
+        let temp = tempfile::tempdir().unwrap();
+        let (service, _receiver) = Service::new(
+            temp.path().join("mcp.json"),
+            tokio::runtime::Handle::current(),
+        )
+        .unwrap();
+        let now = Instant::now();
+        {
+            let mut jobs = service.jobs.lock().unwrap();
+            for index in 0..32 {
+                jobs.insert(
+                    format!("{index:02}"),
+                    Job {
+                        value: json!({"status":"completed"}),
+                        cancel: Arc::new(AtomicBool::new(false)),
+                        socket: None,
+                        completed_at: Some(now - Duration::from_secs(index)),
+                    },
+                );
+            }
+        }
+        let id = service
+            .insert_job(Arc::new(AtomicBool::new(false)), None)
+            .unwrap();
+        let jobs = service.jobs.lock().unwrap();
+        assert_eq!(jobs.len(), 32);
+        assert!(
+            !jobs.contains_key("31"),
+            "oldest completed result should expire first"
+        );
+        assert!(
+            jobs.contains_key("00"),
+            "newly completed result must remain readable"
+        );
+        assert!(jobs.contains_key(&id));
+    }
+
+    #[tokio::test]
+    async fn running_jobs_are_never_evicted_and_terminal_states_release_capacity() {
+        let temp = tempfile::tempdir().unwrap();
+        let (service, _receiver) = Service::new(
+            temp.path().join("mcp.json"),
+            tokio::runtime::Handle::current(),
+        )
+        .unwrap();
+        let ids: Vec<_> = (0..32)
+            .map(|_| {
+                service
+                    .insert_job(Arc::new(AtomicBool::new(false)), None)
+                    .unwrap()
+            })
+            .collect();
+        assert!(
+            service
+                .insert_job(Arc::new(AtomicBool::new(false)), None)
+                .is_err()
+        );
+        assert_eq!(service.jobs.lock().unwrap().len(), 32);
+        finish(
+            &service.jobs,
+            &ids[0],
+            Err(anyhow::anyhow!("failed request")),
+        );
+        service
+            .insert_job(Arc::new(AtomicBool::new(false)), None)
+            .unwrap();
+        assert!(!service.jobs.lock().unwrap().contains_key(&ids[0]));
+        service.jobs.lock().unwrap()[&ids[1]]
+            .cancel
+            .store(true, Ordering::Relaxed);
+        finish(&service.jobs, &ids[1], Ok(json!({})));
+        service
+            .insert_job(Arc::new(AtomicBool::new(false)), None)
+            .unwrap();
+        let jobs = service.jobs.lock().unwrap();
+        assert_eq!(jobs.len(), 32);
+        assert!(!jobs.contains_key(&ids[1]));
+        assert!(ids[2..].iter().all(|id| jobs.contains_key(id)));
     }
 }

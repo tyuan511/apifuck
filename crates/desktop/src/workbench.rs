@@ -426,6 +426,23 @@ impl Workbench {
         cx.notify();
         Ok(())
     }
+    fn clear_recent_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let recent = RecentProjects::default();
+        match settings::app_state_path().and_then(|path| recent.save_to(&path)) {
+            Ok(()) => {
+                self.recent_projects = recent;
+                self.notify_success(tr("已清除最近项目记录").into(), window, cx);
+            }
+            Err(error) => self.notify_error(
+                crate::i18n::format(
+                    tr("清除最近项目失败：{error:#}"),
+                    &[("error:#", format!("{error:#}"))],
+                ),
+                window,
+                cx,
+            ),
+        }
+    }
     fn handle_mcp(
         &mut self,
         call: apifuck_core::mcp::Call,
@@ -2185,7 +2202,6 @@ impl Render for Workbench {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .px_2()
                     .pt_1()
                     .pb_2()
                     .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
@@ -2352,6 +2368,8 @@ impl Render for Workbench {
                                         }),
                                 )
                         })
+                        // Keep row gutters inside the tree so its scrollbar reaches the sidebar edge.
+                        .px_2()
                         .context_menu(
                             move |_, entry, mut menu, window, cx| {
                                 let path = entry.item().id.to_string();
@@ -2534,7 +2552,7 @@ impl Render for Workbench {
                                 let mut menu = menu.min_w(px(240.)).max_w(px(480.));
                                 let home = std::env::home_dir();
                                 if projects.is_empty() {
-                                    return menu.item(
+                                    menu = menu.item(
                                         PopupMenuItem::new(tr("暂无最近项目")).disabled(true),
                                     );
                                 }
@@ -2558,7 +2576,16 @@ impl Render for Workbench {
                                             }),
                                         );
                                 }
-                                menu
+                                let clear = recent.clone();
+                                menu.separator().item(
+                                    PopupMenuItem::new(tr("清除"))
+                                        .disabled(projects.is_empty())
+                                        .on_click(move |_, window, cx| {
+                                            let _ = clear.update(cx, |this, cx| {
+                                                this.clear_recent_projects(window, cx);
+                                            });
+                                        }),
+                                )
                             },
                         )
                         .item(

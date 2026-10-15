@@ -1,6 +1,9 @@
 use anyhow::{Context as _, Result, anyhow, ensure};
 use serde_json::{Value, json};
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct TestResult {
@@ -13,6 +16,41 @@ pub struct ScriptReport {
     pub logs: Vec<String>,
     pub tests: Vec<TestResult>,
     pub variables: Value,
+}
+
+fn runtime(deadline: Instant) -> Result<rquickjs::Runtime> {
+    let runtime = rquickjs::Runtime::new()?;
+    runtime.set_memory_limit(32 * 1024 * 1024);
+    runtime.set_max_stack_size(4 * 1024 * 1024);
+    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    Ok(runtime)
+}
+
+/// Cache only trusted library bytecode, never a VM, context or user script.
+/// Compile with the running QuickJS version so there is no persisted bytecode
+/// compatibility boundary. Failed initialization can be retried by a later hook.
+fn runtime_bytecode(deadline: Instant) -> Result<Arc<[u8]>> {
+    static BYTECODE: Mutex<Option<Arc<[u8]>>> = Mutex::new(None);
+    let mut cached = BYTECODE
+        .lock()
+        .map_err(|_| anyhow!("脚本运行库缓存不可用"))?;
+    if let Some(bytes) = cached.as_ref() {
+        return Ok(bytes.clone());
+    }
+    let runtime = runtime(deadline)?;
+    let context = rquickjs::Context::full(&runtime)?;
+    let bytes: Arc<[u8]> = context
+        .with(|ctx| {
+            rquickjs::Module::declare(
+                ctx,
+                "apifuck:script-runtime",
+                include_str!("../resources/javascript/runtime.bundle.js"),
+            )?
+            .write(Default::default())
+        })?
+        .into();
+    *cached = Some(bytes.clone());
+    Ok(bytes)
 }
 
 /// Each hook has a fresh lexical scope; env/vars mutations cross hook boundaries.
@@ -54,11 +92,9 @@ fn run_inner(
     if code.trim().is_empty() {
         return Ok(());
     }
-    let runtime = rquickjs::Runtime::new()?;
-    runtime.set_memory_limit(32 * 1024 * 1024);
-    runtime.set_max_stack_size(4 * 1024 * 1024);
     let deadline = Instant::now() + Duration::from_secs(2);
-    runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    let bytecode = runtime_bytecode(deadline)?;
+    let runtime = runtime(deadline)?;
     let context = rquickjs::Context::full(&runtime)?;
     let seed = json!({"request":request,"response":response.as_deref(),"env":env,"vars":vars});
     let bootstrap = format!(
@@ -106,7 +142,10 @@ function test(name, fn) {{try{{const pending=fn();if(pending && typeof pending.t
 "#
     );
     context.with(|ctx| -> Result<()> {
-        ctx.eval::<(),_>(include_str!("../resources/javascript/runtime.bundle.js"))?;
+        // SAFETY: These immutable bytes were produced above from the embedded
+        // library by this process's QuickJS. They outlive this fresh runtime.
+        let module = unsafe { rquickjs::Module::load(ctx.clone(), &bytecode) }?;
+        module.eval()?.1.finish::<()>()?;
         ctx.eval::<(), _>(bootstrap).map_err(|e| anyhow!("脚本初始化失败：{e}"))?;
         let source = format!("JSON.stringify((() => {{ try {{ (() => {{\n{code}\n}})(); return {{request:state.request,response:state.response,env:state.env,vars:state.vars,mutations:changes,logs:output,tests:results,runtimeChanges}}; }} catch(e) {{return {{error:String(e) + String(e.stack || '')}};}} }})())");
         let output: String = ctx.eval(source).map_err(|e| anyhow!("脚本执行失败或超过 2 秒限制：{e}"))?;

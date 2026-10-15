@@ -25,17 +25,17 @@
 | 平台 | 最新稳定版 |
 | --- | --- |
 | macOS Apple Silicon | [下载](https://github.com/tyuan511/apifuck/releases/latest) |
-| Windows x86_64 | [下载](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-pc-windows-msvc.exe) |
-| Linux x86_64 | [下载](https://github.com/tyuan511/apifuck/releases/latest/download/apifuck-desktop-x86_64-unknown-linux-gnu.AppImage) |
+| Windows x86_64 | [下载](https://github.com/tyuan511/apifuck/releases/latest) |
+| Linux x86_64 | [下载](https://github.com/tyuan511/apifuck/releases/latest) |
 
 以上直链指向最新稳定版中的同名附件；若该版本尚无原生附件，请从源码运行。历史版本见 [Releases](https://github.com/tyuan511/apifuck/releases)。
 <!-- release-downloads:end -->
 
-macOS 打开 DMG，将 `ApiFuck.app` 拖入 Applications 后启动。如果已安装此前的 v0.1.0 独立程序，请手动下载本次 DMG；自动更新只选择更高版本。Windows 直接运行 `.exe`。Linux 下载后先添加可执行权限：
+macOS 打开 DMG，将 `ApiFuck.app` 拖入 Applications 后启动。已安装 v0.1.0 或 v0.1.1 的用户需手动下载 v0.1.2 一次，因为旧客户端只识别旧文件名。Windows 直接运行 `.exe`。Linux 下载后先添加可执行权限（将示例替换为实际下载文件名，旧版附件仍使用旧名称）：
 
 ```sh
-chmod +x apifuck-desktop-x86_64-unknown-linux-gnu.AppImage
-./apifuck-desktop-x86_64-unknown-linux-gnu.AppImage
+chmod +x ApiFuck-0.1.2.AppImage
+./ApiFuck-0.1.2.AppImage
 ```
 
 macOS 应用包和 DMG 经签名、公证并装订票据；Windows 提供 EXE，Linux 仅提供 AppImage。自动更新使用相同安装附件，不再额外发布 ZIP 或整包归档。当前没有 Intel Mac 和 Linux ARM64 附件。Linux 系统依赖见 [开发指南](docs/development.md)。

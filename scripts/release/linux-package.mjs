@@ -58,7 +58,9 @@ export async function packageLinux(root = process.cwd()) {
   fs.chmodSync(tool, 0o755)
   const work = fs.mkdtempSync(path.join(root, 'target/appimage-'))
   const appdir = path.join(work, 'ApiFuck.AppDir')
-  const output = path.join(root, 'release-assets', linuxAppImage)
+  const version = workspaceVersion(root)
+  const name = linuxAppImage(version)
+  const output = path.join(root, 'release-assets', name)
   fs.mkdirSync(path.dirname(output), { recursive: true })
   const binary = path.join(work, 'apifuck-desktop')
   try {
@@ -67,7 +69,7 @@ export async function packageLinux(root = process.cwd()) {
     prepareAppDir({ binary, icon: path.join(root, 'assets/apifuck.png'), appdir })
     run(tool, ['--appimage-extract-and-run', '--appdir', appdir, '--executable', binary, '--desktop-file', path.join(appdir, 'apifuck.desktop'), '--icon-file', path.join(appdir, 'apifuck.png'), '--output', 'appimage'], {
       cwd: work,
-      env: { ...process.env, APPIMAGE_EXTRACT_AND_RUN: '1', LDAI_OUTPUT: output, LDAI_VERSION: workspaceVersion(root), LDAI_NO_APPSTREAM: '1', NO_STRIP: '1' },
+      env: { ...process.env, APPIMAGE_EXTRACT_AND_RUN: '1', LDAI_OUTPUT: output, LDAI_VERSION: version, LDAI_NO_APPSTREAM: '1', NO_STRIP: '1' },
     })
     verifyAppImage(output)
     fs.chmodSync(output, 0o755)
@@ -79,7 +81,7 @@ export async function packageLinux(root = process.cwd()) {
     }
     const dependencies = run('ldd', [path.join(extracted, 'usr/bin/apifuck-desktop')], { env: { ...process.env, LD_LIBRARY_PATH: path.join(extracted, 'usr/lib') } })
     if (dependencies.includes('not found')) throw new Error(`AppImage has unresolved libraries: ${dependencies}`)
-    fs.writeFileSync(`${output}.sha256`, `${digest(output)}  ${linuxAppImage}\n`)
+    fs.writeFileSync(`${output}.sha256`, `${digest(output)}  ${name}\n`)
     console.log(`Verified AppImage structure and shared libraries: ${output}`)
   } finally {
     fs.rmSync(work, { recursive: true, force: true })

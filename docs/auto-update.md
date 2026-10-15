@@ -44,15 +44,21 @@ GitHub 发布权限使用自动提供的 `GITHUB_TOKEN`，只有 Publish job 有
 
 | 平台 | 唯一安装附件 |
 | --- | --- |
-| macOS Apple Silicon | `apifuck-desktop-aarch64-apple-darwin.dmg` |
-| Windows x86_64 | `apifuck-desktop-x86_64-pc-windows-msvc.exe` |
-| Linux x86_64 | `apifuck-desktop-x86_64-unknown-linux-gnu.AppImage` |
+| macOS Apple Silicon | `ApiFuck-<version>-arm64.dmg` |
+| Windows x86_64 | `ApiFuck-<version>.exe` |
+| Linux x86_64 | `ApiFuck-<version>.AppImage` |
+
+文件名的 `<version>` 来自 Cargo 工作区版本，不含 tag 的 `v` 前缀；例如 `ApiFuck-0.1.2-arm64.dmg`、`ApiFuck-0.1.2.exe`、`ApiFuck-0.1.2.AppImage`。参考 electron-builder 的 DMG、portable 和 AppImage 默认规则及 GitHub 安全文件名处理：arm64 保留架构后缀，默认 x64 省略；Windows 是便携 EXE，文件名中的空格转换为连字符。发布前按目标 tag 校验文件名版本，不能混用其他版本的产物；Actions 中间 artifact 名也带 tag。
+
+新命名从后续构建生效，不重命名已公开附件。官网、下载链接辅助脚本和新客户端优先使用版本化名称，同时兼容旧的 `apifuck-desktop-<target>` 安装附件。已发布的旧客户端只识别旧名称，因此命名切换后的首个版本需要手动下载一次。README 的长期下载入口使用 latest Release 页面，避免版本变化后链接失效。
+
+命名依据：[electron-builder 平台命名](https://github.com/electron-userland/electron-builder/blob/master/packages/app-builder-lib/src/platformPackager.ts)、[NSIS / portable 命名](https://github.com/electron-userland/electron-builder/blob/master/packages/app-builder-lib/src/targets/win/nsis/NsisTarget.ts)。
 
 macOS DMG 包含 `ApiFuck.app` 和 Applications 快捷方式；应用和 DMG 均签名、公证并装订票据。Linux 使用固定版本及 SHA-256 校验的 linuxdeploy 打包共享库，检查 AppImage 头、解包目录与动态库解析，不启动 GUI。CI 构建基于 Ubuntu 24.04，AppImage 不保证能在更旧的 glibc 系统运行。
 
 `SHA256SUMS` 覆盖三个安装附件；原始中间二进制留在构建目录，macOS 不额外上传裸程序、ZIP 或更新归档，Linux 不上传裸程序或 DEB。GitHub 自动生成的 Source code 链接不是构建附件。
 
-本次按维护者要求重新发布 **v0.1.0**，此前安装的同版本需要手动下载；更新器不会安装相同版本。常规发布仍使用新的版本号。当前没有 Intel Mac、Linux ARM64 附件。
+从 **v0.1.2** 起使用版本化文件名；旧客户端需手动下载一次以迁移到新命名。每次常规发布使用新的版本号，更新器不会安装相同版本。当前没有 Intel Mac、Linux ARM64 附件。
 
 本地无需签名凭据即可验证结构（输出目录必须尚不存在）：
 
