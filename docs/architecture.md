@@ -1,6 +1,6 @@
 # 原生架构
 
-ApiFuck 是根目录的 Rust workspace，三个成员共享版本和锁文件。桌面使用 GPUI Kit 0.7.3；网络执行使用 Tokio，脚本和 Bru 转换在嵌入的 QuickJS 中完成。没有 WebView 前端或运行时 Node 服务。
+ApiFuck 是根目录的 Rust workspace，三个成员共享版本和锁文件。桌面使用 GPUI Kit 0.7.3，启用 `gpui-fast` 特性以使用 GPUI Fast 的渲染、布局和平台后端；网络执行使用 Tokio，脚本和 Bru 转换在嵌入的 QuickJS 中完成。没有 WebView 前端或运行时 Node 服务。
 
 ## 依赖边界
 
