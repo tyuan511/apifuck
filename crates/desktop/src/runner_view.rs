@@ -1,11 +1,15 @@
-use crate::{i18n::tr, icons::AppIcon, surfaces::panel_editor};
+use crate::{
+    i18n::tr,
+    icons::AppIcon,
+    surfaces::{empty_state, field_caption, panel_editor, panel_toolbar},
+};
 use anyhow::{Result, ensure};
 use apifuck_core::{
     Collection, NetworkSettings,
     runner::{self, RunEntry, RunOptions},
 };
 use gpui_kit::component::{
-    ActiveTheme, Disableable,
+    ActiveTheme, Disableable, Icon,
     button::{Button, ButtonVariants},
     input::{EditorState, Input, InputState},
     menu::{DropdownMenu, PopupMenuItem},
@@ -23,6 +27,14 @@ use std::{
 
 pub enum RunnerEvent {
     Start,
+    Close,
+}
+#[derive(Clone, Copy, PartialEq)]
+enum Outcome {
+    Passed,
+    Failed,
+    Cancelled,
+    Error,
 }
 impl EventEmitter<RunnerEvent> for RunnerView {}
 
@@ -44,6 +56,8 @@ pub struct RunnerView {
     total: usize,
     selected: Option<usize>,
     status: String,
+    outcome: Option<Outcome>,
+    results_scroll: ScrollHandle,
     details: Entity<EditorState>,
     task: Option<Task<()>>,
 }
@@ -78,6 +92,8 @@ impl RunnerView {
             total: 0,
             selected: None,
             status: String::new(),
+            outcome: None,
+            results_scroll: ScrollHandle::new(),
             details: cx.new(|cx| EditorState::new(window, cx).line_number(false)),
             task: None,
         }
@@ -118,6 +134,7 @@ impl RunnerView {
         self.cancel = Arc::new(AtomicBool::new(false));
         self.running = true;
         self.status = tr("运行中…").into();
+        self.outcome = None;
         let cancel = self.cancel.clone();
         let (events, mut incoming) = tokio::sync::mpsc::unbounded_channel();
         let job = runtime.spawn(async move {
@@ -131,7 +148,10 @@ impl RunnerView {
                 let batch: Vec<_> = std::iter::from_fn(|| incoming.try_recv().ok()).collect();
                 if this
                     .update(cx, |this, cx| {
-                        this.entries.extend(batch);
+                        if !batch.is_empty() {
+                            this.entries.extend(batch);
+                            this.results_scroll.scroll_to_bottom();
+                        }
                         cx.notify();
                     })
                     .is_err()
@@ -140,26 +160,42 @@ impl RunnerView {
                 }
                 if job.is_finished() {
                     let result = job.await;
-                    let _ = this.update(cx, |this, cx| {
+                    let _ = this.update_in(cx, |this, window, cx| {
                         this.running = false;
                         match result {
                             Ok(Ok(report)) => {
+                                this.outcome = Some(if report.cancelled {
+                                    Outcome::Cancelled
+                                } else if report.passed() {
+                                    Outcome::Passed
+                                } else {
+                                    Outcome::Failed
+                                });
                                 this.status = format!(
                                     "{} · {} ms",
-                                    tr(if report.cancelled {
-                                        "已取消"
-                                    } else if report.passed() {
-                                        "运行通过"
-                                    } else {
-                                        "运行失败"
+                                    tr(match this.outcome {
+                                        Some(Outcome::Cancelled) => "已取消",
+                                        Some(Outcome::Passed) => "运行通过",
+                                        _ => "运行失败",
                                     }),
                                     report.elapsed_ms
                                 );
                                 this.entries.clear();
                                 this.report = Some(Arc::new(report));
+                                if let Some(index) = this.selected
+                                    && index < this.results().len()
+                                {
+                                    this.select(index, window, cx);
+                                }
                             }
-                            Ok(Err(error)) => this.status = format!("{error:#}"),
-                            Err(error) => this.status = error.to_string(),
+                            Ok(Err(error)) => {
+                                this.outcome = Some(Outcome::Error);
+                                this.status = format!("{error:#}")
+                            }
+                            Err(error) => {
+                                this.outcome = Some(Outcome::Error);
+                                this.status = error.to_string()
+                            }
                         }
                         cx.notify();
                     });
@@ -338,227 +374,392 @@ fn parse_options(
         stop,
     ))
 }
+impl RunnerView {
+    fn counts(&self) -> (usize, usize, usize) {
+        let results = self.results();
+        let skipped = results.iter().filter(|e| e.skipped).count();
+        let passed = results.iter().filter(|e| e.passed && !e.skipped).count();
+        (passed, results.len() - passed - skipped, skipped)
+    }
+    fn status_line(&self, cx: &App) -> Option<Div> {
+        let (color, icon) = match (self.running, self.outcome) {
+            (true, _) => (cx.theme().primary, AppIcon::Play),
+            (_, Some(Outcome::Passed)) => (cx.theme().success, AppIcon::CircleCheck),
+            (_, Some(Outcome::Failed | Outcome::Error)) => (cx.theme().danger, AppIcon::CircleX),
+            (_, Some(Outcome::Cancelled)) => (cx.theme().warning, AppIcon::CircleAlert),
+            _ => return None,
+        };
+        let (passed, failed, skipped) = self.counts();
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_color(color)
+                .child(Icon::new(icon).size_4().flex_shrink_0())
+                .child(div().min_w_0().truncate().child(self.status.clone()))
+                .when(self.outcome != Some(Outcome::Error), |row| {
+                    row.child(
+                        div()
+                            .flex_shrink_0()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!(
+                                "{}/{} · {} {passed} · {} {failed} · {} {skipped}",
+                                self.results().len(),
+                                self.total,
+                                tr("通过"),
+                                tr("失败"),
+                                tr("已跳过"),
+                            )),
+                    )
+                }),
+        )
+    }
+    fn result_row(&self, index: usize, entry: &RunEntry, cx: &mut Context<Self>) -> Stateful<Div> {
+        let (icon, color) = if entry.skipped {
+            (AppIcon::Minus, cx.theme().muted_foreground)
+        } else if entry.passed {
+            (AppIcon::CircleCheck, cx.theme().success)
+        } else {
+            (AppIcon::CircleX, cx.theme().danger)
+        };
+        let detail = match (&entry.response, &entry.error) {
+            (Some(r), _) => format!("HTTP {} · {} ms", r.status, r.elapsed_ms),
+            (None, Some(error)) => error.lines().next().unwrap_or_default().to_owned(),
+            _ if entry.skipped => tr("已跳过").to_owned(),
+            _ => String::new(),
+        };
+        div()
+            .id(("run-entry", index))
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .py_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .cursor_pointer()
+            .hover(|row| row.bg(cx.theme().list_hover))
+            .when(self.selected == Some(index), |row| {
+                row.bg(cx.theme().list_active)
+            })
+            .child(Icon::new(icon).size_4().flex_shrink_0().text_color(color))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .truncate()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(entry.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_xs()
+                            .text_color(if entry.passed || entry.skipped {
+                                cx.theme().muted_foreground
+                            } else {
+                                color
+                            })
+                            .child(format!("#{} · {detail}", entry.iteration)),
+                    ),
+            )
+            .on_click(cx.listener(move |this, _, window, cx| this.select(index, window, cx)))
+    }
+}
 impl Render for RunnerView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let weak = cx.entity().downgrade();
+        let export_weak = weak.clone();
         let environments = self.environments.clone();
+        let has_report = self.report.is_some() && !self.running;
+        let empty = self.results().is_empty();
+        let scope = self
+            .folder
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| tr("整个集合").into());
+        let status = self.status_line(cx);
+        let rows: Vec<_> = self
+            .results()
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| self.result_row(index, entry, cx))
+            .collect();
         div()
             .flex()
             .flex_col()
             .size_full()
-            .gap_3()
-            .p_4()
-            .child(div().text_lg().child(tr("集合运行器")))
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .flex_wrap()
+                panel_toolbar(cx)
+                    .h_12()
+                    .gap_3()
                     .child(
-                        Button::new("runner-data")
-                            .label(tr("加载 CSV / JSON"))
-                            .disabled(self.running || self.loading_data)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.choose_data(window, cx)),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_base()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(tr("集合运行器")),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!(
+                                        "{scope} · {}",
+                                        tr("仅执行已保存文档；WebSocket 将跳过")
+                                    )),
                             ),
                     )
-                    .when(self.data_path.is_some(), |row| {
-                        row.child(
-                            Button::new("runner-data-clear")
-                                .ghost()
-                                .label(tr("移除数据文件"))
-                                .disabled(self.running || self.loading_data)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.data.clear();
-                                    this.data_path = None;
-                                    cx.notify();
-                                })),
-                        )
-                    })
                     .child(
-                        div().flex_1().min_w_0().truncate().child(
-                            self.data_path
-                                .as_ref()
-                                .map(|path| {
-                                    format!(
-                                        "{} · {} {}",
-                                        path.file_name().unwrap_or_default().to_string_lossy(),
-                                        self.data.len(),
-                                        tr("行")
-                                    )
-                                })
-                                .unwrap_or_else(|| tr("未加载数据文件").into()),
-                        ),
-                    )
-                    .children(
-                        [
-                            (runner::report::Format::Json, "JSON"),
-                            (runner::report::Format::Junit, "JUnit"),
-                            (runner::report::Format::Html, "HTML"),
-                        ]
-                        .into_iter()
-                        .map(|(format, label)| {
-                            Button::new(SharedString::from(format!("report-{label}")))
-                                .label(format!("{} {label}", tr("导出")))
-                                .disabled(self.running || self.report.is_none())
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.export_report(format, window, cx)
-                                }))
-                        }),
-                    ),
-            )
-            .child(div().text_color(cx.theme().muted_foreground).child(format!(
-                    "{} · {}",
-                    self.folder
-                        .as_ref()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|| tr("整个集合").into()),
-                    tr("仅执行已保存文档；WebSocket 将跳过")
-                )))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .flex_wrap()
-                    .child(
-                        Button::new("runner-environment")
-                            .label(
-                                self.environment
-                                    .clone()
-                                    .unwrap_or_else(|| tr("未选择环境").into()),
-                            )
-                            .disabled(self.running)
+                        Button::new("runner-export")
+                            .icon(AppIcon::Download)
+                            .label(tr("导出报告"))
+                            .dropdown_caret(true)
+                            .disabled(!has_report)
                             .dropdown_menu(move |mut menu, _, _| {
-                                for environment in std::iter::once(None)
-                                    .chain(environments.iter().cloned().map(Some))
-                                {
-                                    let weak = weak.clone();
-                                    menu = menu.item(
-                                        PopupMenuItem::new(
-                                            environment
-                                                .clone()
-                                                .unwrap_or_else(|| tr("未选择环境").into()),
-                                        )
-                                        .on_click(
-                                            move |_, _, cx| {
-                                                let _ = weak.update(cx, |this, cx| {
-                                                    this.environment = environment.clone();
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    );
+                                for (format, label) in [
+                                    (runner::report::Format::Json, "JSON"),
+                                    (runner::report::Format::Junit, "JUnit"),
+                                    (runner::report::Format::Html, "HTML"),
+                                ] {
+                                    let weak = export_weak.clone();
+                                    menu = menu.item(PopupMenuItem::new(label).on_click(
+                                        move |_, window, cx| {
+                                            let _ = weak.update(cx, |this, cx| {
+                                                this.export_report(format, window, cx)
+                                            });
+                                        },
+                                    ));
                                 }
                                 menu
                             }),
                     )
                     .child(
-                        div()
-                            .w_24()
-                            .child(tr("迭代次数"))
-                            .child(Input::new(&self.iterations).disabled(self.running)),
-                    )
-                    .child(
-                        div()
-                            .w_32()
-                            .child(tr("延迟（毫秒）"))
-                            .child(Input::new(&self.delay).disabled(self.running)),
-                    )
-                    .child(
-                        Switch::new("runner-stop-on-failure")
-                            .label(tr("失败即停止"))
-                            .checked(self.stop_on_failure)
-                            .disabled(self.running)
-                            .on_change(cx.listener(|this, value, _, cx| {
-                                this.stop_on_failure = *value;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("runner-start")
-                            .disabled(self.loading_data)
-                            .primary()
-                            .icon(AppIcon::Play)
-                            .label(tr(if self.running { "停止" } else { "运行" }))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if this.running {
-                                    this.stop();
-                                } else {
-                                    cx.emit(RunnerEvent::Start);
-                                }
-                            })),
+                        Button::new("runner-close")
+                            .ghost()
+                            .icon(AppIcon::Close)
+                            .tooltip(tr("关闭页面"))
+                            .accessibility_label(tr("关闭页面"))
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(RunnerEvent::Close))),
                     ),
             )
-            .child(div().child(format!(
-                "{} · {}/{}",
-                self.status,
-                self.results().len(),
-                self.total
-            )))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p_4()
+                    .flex_shrink_0()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .flex()
+                            .items_end()
+                            .gap_3()
+                            .flex_wrap()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(field_caption(tr("环境"), cx))
+                                    .child(
+                                        Button::new("runner-environment")
+                                            .outline()
+                                            .icon(AppIcon::Globe)
+                                            .label(
+                                                self.environment
+                                                    .clone()
+                                                    .unwrap_or_else(|| tr("未选择环境").into()),
+                                            )
+                                            .dropdown_caret(true)
+                                            .disabled(self.running)
+                                            .dropdown_menu(move |mut menu, _, _| {
+                                                for environment in std::iter::once(None)
+                                                    .chain(environments.iter().cloned().map(Some))
+                                                {
+                                                    let weak = weak.clone();
+                                                    menu = menu.item(
+                                                        PopupMenuItem::new(
+                                                            environment.clone().unwrap_or_else(
+                                                                || tr("未选择环境").into(),
+                                                            ),
+                                                        )
+                                                        .on_click(move |_, _, cx| {
+                                                            let _ = weak.update(cx, |this, cx| {
+                                                                this.environment =
+                                                                    environment.clone();
+                                                                cx.notify();
+                                                            });
+                                                        }),
+                                                    );
+                                                }
+                                                menu
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .w_24()
+                                    .child(field_caption(tr("迭代次数"), cx))
+                                    .child(Input::new(&self.iterations).disabled(self.running)),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .w_32()
+                                    .child(field_caption(tr("延迟（毫秒）"), cx))
+                                    .child(Input::new(&self.delay).disabled(self.running)),
+                            )
+                            .child(
+                                div().h_8().flex().items_center().child(
+                                    Switch::new("runner-stop-on-failure")
+                                        .label(tr("失败即停止"))
+                                        .checked(self.stop_on_failure)
+                                        .disabled(self.running)
+                                        .on_change(cx.listener(|this, value, _, cx| {
+                                            this.stop_on_failure = *value;
+                                            cx.notify();
+                                        })),
+                                ),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("runner-start")
+                                    .disabled(self.loading_data)
+                                    .when(self.running, |b| b.danger())
+                                    .when(!self.running, |b| b.primary())
+                                    .icon(if self.running {
+                                        AppIcon::Square
+                                    } else {
+                                        AppIcon::Play
+                                    })
+                                    .label(tr(if self.running { "停止" } else { "运行" }))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if this.running {
+                                            this.stop();
+                                        } else {
+                                            cx.emit(RunnerEvent::Start);
+                                        }
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                Button::new("runner-data")
+                                    .outline()
+                                    .icon(AppIcon::Upload)
+                                    .label(tr("加载 CSV / JSON"))
+                                    .disabled(self.running || self.loading_data)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.choose_data(window, cx)
+                                    })),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(
+                                        self.data_path
+                                            .as_ref()
+                                            .map(|path| {
+                                                format!(
+                                                    "{} · {} {}",
+                                                    path.file_name()
+                                                        .unwrap_or_default()
+                                                        .to_string_lossy(),
+                                                    self.data.len(),
+                                                    tr("行")
+                                                )
+                                            })
+                                            .unwrap_or_else(|| tr("未加载数据文件").into()),
+                                    ),
+                            )
+                            .when(self.data_path.is_some(), |row| {
+                                row.child(
+                                    Button::new("runner-data-clear")
+                                        .ghost()
+                                        .icon(AppIcon::Close)
+                                        .tooltip(tr("移除数据文件"))
+                                        .accessibility_label(tr("移除数据文件"))
+                                        .disabled(self.running || self.loading_data)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.data.clear();
+                                            this.data_path = None;
+                                            cx.notify();
+                                        })),
+                                )
+                            }),
+                    )
+                    .children(status),
+            )
             .child(
                 div()
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .gap_3()
                     .child(
                         div()
-                            .id("runner-results")
+                            .flex()
+                            .flex_col()
                             .w_80()
+                            .flex_shrink_0()
                             .h_full()
-                            .overflow_y_scroll()
-                            .children(self.results().iter().enumerate().map(|(index, entry)| {
-                                div()
-                                    .id(("run-entry", index))
-                                    .p_2()
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .cursor_pointer()
-                                    .when(self.selected == Some(index), |row| {
-                                        row.bg(cx.theme().secondary)
-                                    })
-                                    .child(format!(
-                                        "{} · {} · {}",
-                                        entry.iteration,
-                                        tr(if entry.skipped {
-                                            "已跳过"
-                                        } else if entry.passed {
-                                            "通过"
-                                        } else {
-                                            "失败"
-                                        }),
-                                        entry.name
-                                    ))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(
-                                                entry
-                                                    .response
-                                                    .as_ref()
-                                                    .map(|r| {
-                                                        format!(
-                                                            "HTTP {} · {} ms",
-                                                            r.status, r.elapsed_ms
-                                                        )
-                                                    })
-                                                    .unwrap_or_default(),
-                                            ),
-                                    )
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.select(index, window, cx)
-                                    }))
-                            })),
+                            .border_r_1()
+                            .border_color(cx.theme().border)
+                            .when(empty, |list| {
+                                list.child(empty_state(
+                                    tr(if self.running {
+                                        "运行中…"
+                                    } else {
+                                        "运行结果将显示在这里"
+                                    }),
+                                    cx,
+                                ))
+                            })
+                            .when(!empty, |list| {
+                                list.child(
+                                    div()
+                                        .id("runner-results")
+                                        .flex_1()
+                                        .min_h_0()
+                                        .overflow_y_scroll()
+                                        .track_scroll(&self.results_scroll)
+                                        .children(rows),
+                                )
+                            }),
                     )
-                    .child(
+                    .child(if self.selected.is_some() {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(panel_editor(&self.details).readonly(true)),
-                    ),
+                            .child(panel_editor(&self.details).readonly(true))
+                    } else {
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(empty_state(tr("选择左侧结果查看详情"), cx))
+                    }),
             )
     }
 }

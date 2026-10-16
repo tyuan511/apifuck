@@ -1252,6 +1252,10 @@ impl Workbench {
             Some(
                 cx.subscribe_in(&history, window, |this, _, event, window, cx| {
                     match event {
+                        HistoryEvent::Close => {
+                            this.show_history = false;
+                            cx.notify();
+                        }
                         HistoryEvent::Open(path) => {
                             // History may refer to a moved or deleted request; never open a different tab.
                             let path = collection::portable_path(path);
@@ -1299,6 +1303,10 @@ impl Workbench {
                 Some(
                     cx.subscribe_in(&runner, window, |this, _, event, window, cx| match event {
                         RunnerEvent::Start => this.start_runner(window, cx),
+                        RunnerEvent::Close => {
+                            this.show_runner = false;
+                            cx.notify();
+                        }
                     }),
                 );
             self.runner = Some(runner);
@@ -3292,6 +3300,21 @@ impl Render for Workbench {
                         this.sidebar_view = SidebarView::Environments;
                         cx.notify();
                     })),
+            )
+            .child(
+                Button::new("nav-runner")
+                    .ghost()
+                    .w_12()
+                    .h_12()
+                    .icon(AppIcon::Play)
+                    .selected(self.show_runner && !self.show_settings)
+                    .tooltip(tr("集合运行器"))
+                    .tooltip_placement(Placement::Right)
+                    .accessibility_label(tr("集合运行器"))
+                    .disabled(self.collection.is_none())
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_runner(None, window, cx)),
+                    ),
             )
             .child(
                 Button::new("nav-cookies")

@@ -1,4 +1,4 @@
-use crate::{i18n::tr, icons::AppIcon};
+use crate::{i18n::tr, icons::AppIcon, surfaces::confirm};
 use apifuck_core::{NetworkSettings, tls::ClientCertificate};
 use gpui_kit::component::{
     ActiveTheme,
@@ -7,7 +7,7 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
     switch::Switch,
 };
-use gpui_kit::*;
+use gpui_kit::{prelude::FluentBuilder, *};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -136,23 +136,71 @@ impl CertificatesEditor {
         })
         .detach();
     }
+    fn is_blank(row: &CertificateRow, cx: &App) -> bool {
+        [&row.domain, &row.certificate, &row.key]
+            .iter()
+            .all(|input| input.read(cx).value().trim().is_empty())
+    }
+    fn remove_row(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.rows.get(index).is_none() {
+            return;
+        }
+        if Self::is_blank(&self.rows[index], cx) {
+            self.rows.remove(index);
+            cx.notify();
+            return;
+        }
+        let weak = cx.entity().downgrade();
+        confirm(
+            "删除证书配置",
+            "将移除这条客户端证书配置，保存设置后生效。",
+            "删除",
+            window,
+            cx,
+            move |_, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if index < this.rows.len() {
+                        this.rows.remove(index);
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+    fn problem(&self, input: &Entity<InputState>, cx: &App) -> Option<Div> {
+        let value = input.read(cx).value();
+        let message = path_problem(value.trim())?;
+        Some(
+            div()
+                .text_xs()
+                .text_color(cx.theme().danger)
+                .child(tr(message).to_owned()),
+        )
+    }
     fn path_input(&self, id: String, input: &Entity<InputState>, cx: &mut Context<Self>) -> Div {
         let input = input.clone();
         let browse = input.clone();
         div()
             .flex()
-            .gap_2()
-            .child(div().flex_1().min_w_0().child(Input::new(&input)))
+            .flex_col()
+            .gap_1()
             .child(
-                Button::new(SharedString::from(id))
-                    .ghost()
-                    .icon(AppIcon::FolderOpen)
-                    .tooltip(tr("选择文件…"))
-                    .accessibility_label(tr("选择文件…"))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.browse(browse.clone(), window, cx)
-                    })),
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(div().flex_1().min_w_0().child(Input::new(&input)))
+                    .child(
+                        Button::new(SharedString::from(id))
+                            .ghost()
+                            .icon(AppIcon::FolderOpen)
+                            .tooltip(tr("选择文件…"))
+                            .accessibility_label(tr("选择文件…"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.browse(browse.clone(), window, cx)
+                            })),
+                    ),
             )
+            .children(self.problem(&input, cx))
     }
 }
 impl Render for CertificatesEditor {
@@ -182,6 +230,17 @@ impl Render for CertificatesEditor {
                         "保留内置信任根。客户端证书按域名从上到下匹配，支持未加密 PEM 证书和私钥。",
                     )),
             )
+            .when(self.rows.is_empty(), |col| {
+                col.child(
+                    div()
+                        .p_3()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .rounded_md()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr("尚未配置客户端证书")),
+                )
+            })
             .children(self.rows.iter().enumerate().map(|(index, row)| {
                 div()
                     .flex()
@@ -190,6 +249,7 @@ impl Render for CertificatesEditor {
                     .p_3()
                     .border_1()
                     .border_color(cx.theme().border)
+                    .rounded_md()
                     .child(
                         div()
                             .flex()
@@ -216,9 +276,8 @@ impl Render for CertificatesEditor {
                                     .icon(AppIcon::Trash)
                                     .tooltip(tr("删除证书配置"))
                                     .accessibility_label(tr("删除证书配置"))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.rows.remove(index);
-                                        cx.notify();
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.remove_row(index, window, cx)
                                     })),
                             ),
                     )
@@ -227,7 +286,36 @@ impl Render for CertificatesEditor {
                             .child(
                                 Field::new()
                                     .label(tr("目标域名（可带端口或 *. 通配符）"))
-                                    .child(Input::new(&row.domain)),
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child(Input::new(&row.domain))
+                                            .when(
+                                                row.domain.read(cx).value().trim().is_empty()
+                                                    && !(row
+                                                        .certificate
+                                                        .read(cx)
+                                                        .value()
+                                                        .trim()
+                                                        .is_empty()
+                                                        && row
+                                                            .key
+                                                            .read(cx)
+                                                            .value()
+                                                            .trim()
+                                                            .is_empty()),
+                                                |col| {
+                                                    col.child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(cx.theme().danger)
+                                                            .child(tr("请填写目标域名")),
+                                                    )
+                                                },
+                                            ),
+                                    ),
                             )
                             .child(Field::new().label(tr("客户端证书文件（PEM）")).child(
                                 self.path_input(
@@ -249,5 +337,38 @@ impl Render for CertificatesEditor {
                         this.add(&ClientCertificate::default(), window, cx)
                     })),
             )
+    }
+}
+
+/// Cheap per-render hint; the core still validates when the settings are saved.
+fn path_problem(value: &str) -> Option<&'static str> {
+    if value.is_empty() {
+        return None;
+    }
+    let path = std::path::Path::new(value);
+    if !path.is_absolute() {
+        Some("路径必须是绝对路径")
+    } else if !path.is_file() {
+        Some("文件不存在")
+    } else {
+        None
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::path_problem;
+    #[test]
+    fn flags_relative_and_missing_paths_only() {
+        assert_eq!(path_problem(""), None);
+        assert_eq!(path_problem("relative/ca.pem"), Some("路径必须是绝对路径"));
+        let missing = std::env::temp_dir().join("apifuck-missing-ca.pem");
+        assert_eq!(
+            path_problem(&missing.display().to_string()),
+            Some("文件不存在")
+        );
+        assert_eq!(
+            path_problem(&std::env::current_exe().unwrap().display().to_string()),
+            None
+        );
     }
 }

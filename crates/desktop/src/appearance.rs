@@ -92,3 +92,15 @@ pub fn accent_color(accent: &str, dark: bool) -> Hsla {
     })
     .into()
 }
+
+/// Outcome color for an HTTP exchange: 2xx/3xx pass, 4xx warn, everything else fails.
+pub fn http_status_color(status: Option<u16>, cancelled: bool, cx: &App) -> Hsla {
+    use gpui_kit::component::ActiveTheme;
+    match status {
+        Some(code) if code < 400 => cx.theme().success,
+        Some(code) if code < 500 => cx.theme().warning,
+        Some(_) => cx.theme().danger,
+        None if cancelled => cx.theme().muted_foreground,
+        None => cx.theme().danger,
+    }
+}
