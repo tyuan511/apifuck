@@ -116,3 +116,6 @@ HTTP、GraphQL、SSE、WebSocket 和集合运行均复用原生核心，不另�
 `crates/core/tests/mcp.rs` 使用临时项目、临时配置与真实回环 HTTP/WebSocket 服务，验证 MCP 握手/鉴权、启停/端口冲突、YAML CRUD/冲突保护、HTTP/GraphQL/SSE、脚本环境写回、WebSocket 与取消、四种配置格式。桌面编译和本地化测试覆盖原生设置集成。
 
 这些检查不等于 GPUI 视觉验收或四个 Agent 的实际客户端联调。人工验收步骤见 [工作区交互](postman-layout.md)。
+
+
+`run_collection` 可选参数 `data` 接受对象数组，用于顺序数据驱动运行；`iterations` 重复整个数据集。返回的每条结果包含 `data_row`、`iteration` 和 `elapsed_ms`，整体结果包含 `planned`。变量行内传递/换行重置规则与桌面一致，详见 [执行规则](execution.md)。HTTP/GraphQL/SSE/WSS 使用同一网络层的自定义 CA 和 PEM 客户端证书设置。OpenAPI/Postman 预览导入和报告另存入口当前在桌面，核心模块可供程序调用，未新增对应的 MCP 文件写入工具。

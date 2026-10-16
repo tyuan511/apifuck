@@ -17,6 +17,9 @@ pub struct NetworkSettings {
     /// None uses system proxies; an empty string disables proxies; a URL overrides them.
     pub proxy: Option<String>,
     pub max_response_bytes: usize,
+    pub cookie_jar: bool,
+    pub custom_ca_path: Option<PathBuf>,
+    pub client_certificates: Vec<crate::tls::ClientCertificate>,
 }
 impl Default for NetworkSettings {
     fn default() -> Self {
@@ -29,6 +32,9 @@ impl Default for NetworkSettings {
             allow_invalid_certificates: false,
             proxy: None,
             max_response_bytes: 32 * 1024 * 1024,
+            cookie_jar: true,
+            custom_ca_path: None,
+            client_certificates: vec![],
         }
     }
 }
@@ -47,6 +53,12 @@ impl NetworkSettings {
                 "代理仅支持 HTTP、HTTPS、SOCKS5 和 SOCKS5H"
             );
             reqwest::Proxy::all(proxy).context("代理地址无效")?;
+        }
+        if let Some(path) = &self.custom_ca_path {
+            anyhow::ensure!(path.is_absolute(), "应用自定义 CA 路径必须是绝对路径");
+        }
+        for certificate in &self.client_certificates {
+            certificate.validate()?;
         }
         Ok(())
     }

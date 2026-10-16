@@ -1,3 +1,5 @@
+pub mod data;
+pub mod report;
 use crate::{Collection, Document, NetworkSettings, Response, prepare};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -18,6 +20,8 @@ pub struct RunOptions {
     pub iterations: u32,
     pub delay_ms: u64,
     pub stop_on_failure: bool,
+    #[serde(default)]
+    pub data: Vec<serde_json::Value>,
 }
 impl Default for RunOptions {
     fn default() -> Self {
@@ -27,6 +31,7 @@ impl Default for RunOptions {
             iterations: 1,
             delay_ms: 0,
             stop_on_failure: false,
+            data: vec![],
         }
     }
 }
@@ -44,6 +49,7 @@ impl RunOptions {
             iterations,
             delay_ms,
             stop_on_failure,
+            data: vec![],
         }
     }
 }
@@ -51,6 +57,10 @@ impl RunOptions {
 #[non_exhaustive]
 pub struct RunEntry {
     pub iteration: u32,
+    #[serde(default)]
+    pub data_row: Option<usize>,
+    #[serde(default)]
+    pub elapsed_ms: u128,
     pub path: PathBuf,
     pub name: String,
     pub passed: bool,
@@ -64,6 +74,8 @@ pub struct RunReport {
     pub entries: Vec<RunEntry>,
     pub elapsed_ms: u128,
     pub cancelled: bool,
+    #[serde(default)]
+    pub planned: usize,
 }
 impl RunReport {
     pub fn passed(&self) -> bool {
@@ -129,91 +141,123 @@ pub async fn run(
     );
     let requests = ordered_requests(&collection, options.folder.as_deref());
     ensure!(!requests.is_empty(), "没有可运行的请求");
+    data::validate(&options.data)?;
+    ensure!(options.delay_ms <= 3_600_000, "延迟不能超过 3600000 毫秒");
+    let rows = options.data.len().max(1);
+    let planned = requests
+        .len()
+        .checked_mul(options.iterations as usize)
+        .and_then(|count| count.checked_mul(rows))
+        .filter(|count| *count <= 10000)
+        .ok_or_else(|| anyhow::anyhow!("总执行次数不能超过 10000"))?;
     let start = Instant::now();
     let mut entries = vec![];
     let mut runtime_variables = json!({});
     'iterations: for iteration in 1..=options.iterations {
-        for document in &requests {
-            if cancel.load(Ordering::Relaxed) {
-                break 'iterations;
+        for row_index in 0..rows {
+            let data_row = (!options.data.is_empty()).then_some(row_index + 1);
+            if data_row.is_some() {
+                runtime_variables = json!({});
             }
-            if document.kind() == crate::DocumentKind::WebSocket {
-                let entry = RunEntry {
-                    iteration,
-                    path: document.path().to_owned(),
-                    name: document.name().into(),
-                    passed: true,
-                    skipped: true,
-                    response: None,
-                    error: None,
+            for document in &requests {
+                let request_start = Instant::now();
+                if cancel.load(Ordering::Relaxed) {
+                    break 'iterations;
+                }
+                if document.kind() == crate::DocumentKind::WebSocket {
+                    let entry = RunEntry {
+                        iteration,
+                        data_row,
+                        elapsed_ms: request_start.elapsed().as_millis(),
+                        path: document.path().to_owned(),
+                        name: document.name().into(),
+                        passed: true,
+                        skipped: true,
+                        response: None,
+                        error: None,
+                    };
+                    if let Some(events) = &events {
+                        let _ = events.send(entry.clone());
+                    }
+                    entries.push(entry);
+                    continue;
+                }
+                let result = match prepare(
+                    &collection,
+                    document,
+                    options.environment.as_deref(),
+                    network.clone(),
+                ) {
+                    Ok(mut execution) => {
+                        execution.cancel = cancel.clone();
+                        if let Some(row) = options
+                            .data
+                            .get(row_index)
+                            .and_then(serde_json::Value::as_object)
+                        {
+                            for (key, value) in row {
+                                execution.variables[key] = value.clone();
+                            }
+                        }
+                        for (key, value) in runtime_variables.as_object().into_iter().flatten() {
+                            execution.variables[key] = value.clone();
+                        }
+                        crate::engine::execute_with_variables(execution, None).await
+                    }
+                    Err(e) => Err(e),
                 };
+                let entry = match result {
+                    Ok((response, variables)) => {
+                        for (key, value) in variables.as_object().into_iter().flatten() {
+                            runtime_variables[key] = value.clone();
+                        }
+                        RunEntry {
+                            iteration,
+                            data_row,
+                            elapsed_ms: request_start.elapsed().as_millis(),
+                            path: document.path().to_owned(),
+                            name: document.name().into(),
+                            passed: response.tests.iter().all(|t| t.passed),
+                            skipped: false,
+                            response: Some(response),
+                            error: None,
+                        }
+                    }
+                    Err(error) => RunEntry {
+                        iteration,
+                        data_row,
+                        elapsed_ms: request_start.elapsed().as_millis(),
+                        path: document.path().to_owned(),
+                        name: document.name().into(),
+                        passed: false,
+                        skipped: false,
+                        response: None,
+                        error: Some(format!("{error:#}")),
+                    },
+                };
+                let failed = !entry.passed;
                 if let Some(events) = &events {
                     let _ = events.send(entry.clone());
                 }
                 entries.push(entry);
-                continue;
-            }
-            let result = match prepare(
-                &collection,
-                document,
-                options.environment.as_deref(),
-                network.clone(),
-            ) {
-                Ok(mut execution) => {
-                    execution.cancel = cancel.clone();
-                    for (key, value) in runtime_variables.as_object().into_iter().flatten() {
-                        execution.variables[key] = value.clone();
-                    }
-                    crate::engine::execute_with_variables(execution, None).await
+                if options.stop_on_failure && failed {
+                    break 'iterations;
                 }
-                Err(e) => Err(e),
-            };
-            let entry = match result {
-                Ok((response, variables)) => {
-                    for (key, value) in variables.as_object().into_iter().flatten() {
-                        runtime_variables[key] = value.clone();
+                if options.delay_ms > 0 {
+                    let until = Instant::now() + Duration::from_millis(options.delay_ms);
+                    while Instant::now() < until && !cancel.load(Ordering::Relaxed) {
+                        tokio::time::sleep(
+                            Duration::from_millis(20)
+                                .min(until.saturating_duration_since(Instant::now())),
+                        )
+                        .await;
                     }
-                    RunEntry {
-                        iteration,
-                        path: document.path().to_owned(),
-                        name: document.name().into(),
-                        passed: response.tests.iter().all(|t| t.passed),
-                        skipped: false,
-                        response: Some(response),
-                        error: None,
-                    }
-                }
-                Err(error) => RunEntry {
-                    iteration,
-                    path: document.path().to_owned(),
-                    name: document.name().into(),
-                    passed: false,
-                    skipped: false,
-                    response: None,
-                    error: Some(format!("{error:#}")),
-                },
-            };
-            let failed = !entry.passed;
-            if let Some(events) = &events {
-                let _ = events.send(entry.clone());
-            }
-            entries.push(entry);
-            if options.stop_on_failure && failed {
-                break 'iterations;
-            }
-            if options.delay_ms > 0 {
-                let until = Instant::now() + Duration::from_millis(options.delay_ms);
-                while Instant::now() < until && !cancel.load(Ordering::Relaxed) {
-                    tokio::time::sleep(
-                        Duration::from_millis(20)
-                            .min(until.saturating_duration_since(Instant::now())),
-                    )
-                    .await;
                 }
             }
         }
     }
     Ok(RunReport {
+        planned,
         entries,
         elapsed_ms: start.elapsed().as_millis(),
         cancelled: cancel.load(Ordering::Relaxed),

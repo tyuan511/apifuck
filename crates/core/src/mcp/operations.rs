@@ -249,13 +249,15 @@ impl Service {
                 document(&collection.add(path, text(args, "source")?)?)
             }
             "run_collection" => {
-                let options = runner::RunOptions::new(
+                let mut options = runner::RunOptions::new(
                     environment(args, context)?,
                     args["folder"].as_str().map(PathBuf::from),
                     args["iterations"].as_u64().unwrap_or(1) as u32,
                     args["delayMs"].as_u64().unwrap_or(0),
                     args["stopOnFailure"].as_bool().unwrap_or(false),
                 );
+                options.data = args["data"].as_array().cloned().unwrap_or_default();
+                runner::data::validate(&options.data)?;
                 if let Some(folder) = &options.folder {
                     public_path(folder)?;
                     collection.safe_path(folder)?;

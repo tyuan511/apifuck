@@ -124,9 +124,15 @@ Agent 可管理 OpenCollection 文档与环境，执行 HTTP/GraphQL/SSE/WebSock
 
 ## 当前边界
 
-Bruno 导入和部分脚本 API 兼容不等于完整 Bruno 客户端兼容。当前未提供 gRPC、高级认证（OAuth、AWS、Digest 等）、完整异步脚本/Node 模块、外部 Secret、dotenv、mTLS、Cookie jar、持久化请求历史或多项目并列工作区。详见 [执行规则](docs/execution.md) 与 [兼容性记录](docs/bruno-parity.md)。
+Bruno 导入和部分脚本 API 兼容不等于完整 Bruno 客户端兼容。当前未提供 gRPC、其他认证流程（OAuth 1、OAuth 隐式/密码授权、AWS、Digest 等）、完整异步脚本/Node 模块、外部 Secret、dotenv、PKCS#12/加密客户端私钥或多项目并列工作区。详见 [执行规则](docs/execution.md) 与 [兼容性记录](docs/bruno-parity.md)。
 
-集合运行器可通过核心库、MCP 和无界面测试使用，桌面没有独立运行器面板。仓库没有独立 CLI 产品；Demo 命令是开发辅助工具。
+桌面支持集合/文件夹运行，复用核心与 MCP 的运行器：CSV/JSON 数据驱动、环境、迭代、延迟、失败停止、取消和逐条结果，并可导出 JSON/JUnit/HTML 报告。运行前需保存或放弃未保存文档，仅执行已保存配置，跳过 WebSocket。
+
+项目菜单可预览导入本地 OpenAPI 2.0/3.0/3.1 和 Postman 2.0/2.1，始终创建新集合；Postman 脚本保留为文档，需手动迁移后启用。详见 [导入说明](docs/import.md)。网络设置支持自定义 CA 和按域名匹配的未加密 PEM 客户端证书，HTTP/GraphQL/SSE/WSS 共用。
+
+请求历史在本项目保留最近 200 次执行和有大小限制的响应预览。Cookie jar 按项目和环境隔离，支持查看、删除及清空。OAuth 2.0 支持客户端凭据和授权码 + PKCE、本机令牌缓存及刷新；授权码回调仅支持 127.0.0.1 HTTP，要求 PKCE S256。OAuth 请求暂不支持代码导出。
+
+仓库没有独立 CLI 产品；Demo 命令是开发辅助工具。
 
 ## 开发与文档
 

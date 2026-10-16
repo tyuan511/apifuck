@@ -76,10 +76,13 @@ The [Playground](examples/playground/README.md) includes 32 ready-to-send reques
 | Editor assistance | Syntax highlighting, background formatting, built-in LSP syntax diagnostics, and offline script API completion and hover help |
 | Protocols and responses | HTTP, GraphQL, incremental SSE with cancellation, WebSocket messaging; status, timing, size, headers, body, timeline, and test results |
 | Scripts and tests | Synchronous QuickJS hooks, Chai, AJV JSON Schema, declarative assertions, response variable extraction, and local environment writeback |
-| Import and export | Paste cURL into the URL bar; convert Bru requests, environments, and folders; generate and copy cURL, JavaScript, Python, and Go code |
-| Desktop preferences | Recover raw drafts; English and Simplified Chinese; light/dark/system themes; six accent colors; network/proxy settings; in-app updates |
+| Import and export | Import local OpenAPI 2.0/3.0/3.1 and Postman 2.0/2.1 collections with a preview; paste cURL into the URL bar; convert Bru requests, environments, and folders; generate and copy cURL, JavaScript, Python, and Go code |
+| Collection runner | Run a collection or folder with CSV/JSON data, environment, iteration, delay, cancellation and per-request results; export JSON, JUnit and HTML reports |
+| Local session data | Project request history with bounded response previews; environment-isolated Cookie jar with inspection and clearing |
+| OAuth 2.0 | Client credentials and authorization code + PKCE, local token caching and refresh |
+| Desktop preferences | Recover raw drafts; English and Simplified Chinese; light/dark/system themes; six accent colors; network/proxy settings, custom CA and PEM client certificates; in-app updates |
 
-Use the project menu to open or create projects, access recent projects, and import `.bru` files. Collection variables and authentication belong in the settings button beside the collection sidebar title. Application preferences live in the Settings page; the project menu has no project-settings or project-delete actions.
+Use the project menu to open or create projects, access recent projects, import `.bru` files, or import an OpenAPI/Postman collection into a new project. Collection variables and authentication belong in the settings button beside the collection sidebar title. Application preferences live in the Settings page; the project menu has no project-settings or project-delete actions.
 
 Opening an environment edits its document; the top-right selector determines which environment requests use. Variable previews reflect static configuration and do not run pre-request scripts.
 
@@ -124,9 +127,9 @@ Agents can manage OpenCollection documents and environments, execute HTTP/GraphQ
 
 ## Current limitations
 
-Bru import and selected script API compatibility do not imply full Bruno client compatibility. gRPC, advanced authentication (OAuth, AWS, Digest, and others), full asynchronous scripting, Node modules, external secrets, dotenv, mTLS, a cookie jar, persistent request history, and side-by-side project workspaces are not currently available. See [execution rules](docs/execution.md) and [Bruno compatibility](docs/bruno-parity.md).
+Bru import and selected script API compatibility do not imply full Bruno client compatibility. gRPC, other authentication flows (OAuth 1, OAuth implicit/password grants, AWS, Digest, and others), full asynchronous scripting, Node modules, external secrets, dotenv, PKCS#12/encrypted client keys, and side-by-side project workspaces are not currently available. See [execution rules](docs/execution.md) and [Bruno compatibility](docs/bruno-parity.md).
 
-The collection runner is available through the core library, MCP, and headless tests; there is no dedicated desktop runner panel. There is no standalone CLI product; Demo commands are development tools.
+The collection runner is available in the desktop, core library and MCP. Desktop runs use saved documents and require unsaved document drafts to be saved or discarded; WebSocket requests are skipped. OAuth authorization code uses an HTTP callback on 127.0.0.1 and requires PKCE S256. OAuth code export is not currently supported. There is no standalone CLI product; Demo commands are development tools.
 
 ## Development and documentation
 
@@ -137,6 +140,7 @@ The detailed guides below are currently written in Chinese.
 | [MCP integration](docs/mcp.md) | Native service, four agent configurations, tools, and execution boundaries |
 | [Architecture](docs/architecture.md) | Crate boundaries, modules, and editing/execution/diagnostic flows |
 | [Workspace interactions](docs/postman-layout.md) | Navigation, forms, variable hints, settings, and manual acceptance checks |
+| [Collection import](docs/import.md) | Supported OpenAPI/Postman conversion, previews and limits |
 | [Storage](docs/storage.md) | OpenCollection, drafts, environment overrides, and atomic writes |
 | [Execution and scripting](docs/execution.md) | Inheritance, templates, script APIs, extensions, and limits |
 | [Development and verification](docs/development.md) | Toolchain, builds, Demo, CI, and non-GUI checks |

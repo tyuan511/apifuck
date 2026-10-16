@@ -30,7 +30,10 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 | `engine.rs` | prepare/execute、静态变量预览、模板展开、继承、认证、正文、HTTP/GraphQL/SSE |
 | `websocket.rs` | WebSocket 连接、发送、接收与关闭 |
 | `scripts.rs`、`testing.rs` | QuickJS Hook、脚本报告、Chai/AJV、声明式断言和响应变量提取 |
-| `runner.rs` | 顺序集合运行、迭代、延迟、取消、失败停止、跨请求运行变量 |
+| `runner.rs`、`runner/` | 顺序集合运行、CSV/JSON 数据、迭代、取消、失败停止、运行变量和 JSON/JUnit/HTML 报告 |
+| `import/` | OpenAPI/Postman 离线转换、预览提示、生成路径和新集合写入 |
+| `tls.rs` | 自定义 CA、客户端证书作用域解析及逐目标域名匹配 |
+| `history.rs`、`cookies.rs`、`oauth.rs` | 有上限的本机执行历史、项目/环境 Cookie jar、OAuth 客户端凭据与 PKCE 授权及令牌缓存 |
 | `bru.rs` | 嵌入式 Bru/OpenCollection 转换 |
 | `exchange.rs`、`codegen.rs` | cURL 导入、代码导出，复用执行准备与 URL 解析 |
 | `mcp/` | 本机鉴权 HTTP MCP、工具与任务、四种 Agent 配置；不依赖 GPUI |
@@ -50,7 +53,8 @@ cargo demo → Rust launch example → Node 启动器 → Demo + desktop
 | `request_form.rs`、`key_value_editor.rs` | 认证、正文、GraphQL、参数/变量/请求头/断言等表单与表格 |
 | `variable_input.rs` | 普通输入框的变量 badge、值提示、浮动候选面板，以及 JSON 编辑器的变量高亮与悬停 |
 | `response_view.rs` | 响应与流消息、测试报告 |
-| `settings_view.rs`、`network_editor.rs` | 应用设置分类、设置草稿、网络参数编辑 |
+| `runner_view.rs`、`history_view.rs`、`cookies_view.rs` | 集合运行进度与结果、本机执行历史、Cookie 查看和清理 |
+| `settings_view.rs`、`network_editor.rs`、`certificates_editor.rs` | 应用设置分类、设置草稿、网络参数编辑 |
 | `mcp_view.rs` | 原生设置中的 MCP 即时开关、状态、四种教程及配置复制 |
 | `update_view.rs` | 更新检查、下载进度、重试与安装阶段的界面状态 |
 | `languages.rs`、`syntax.rs` | 格式化、语法解析、高亮与模板范围 |
@@ -93,3 +97,5 @@ OpenCollection 校验器保留内嵌 Schema 的 Draft-07 声明，按文档类�
 开发命令见 [development.md](development.md)，发布门禁与校验见 [auto-update.md](auto-update.md)。
 
 MCP 接入和工具范围见 [mcp.md](mcp.md)。
+
+导入转换和功能边界见 [import.md](import.md)。

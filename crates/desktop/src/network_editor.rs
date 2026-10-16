@@ -82,6 +82,7 @@ impl SelectItem for ProxyMode {
 
 pub struct NetworkEditor {
     original: NetworkSettings,
+    certificates: Entity<crate::certificates_editor::CertificatesEditor>,
     section: NetworkSection,
     timeout: Entity<InputState>,
     connect_timeout: Entity<InputState>,
@@ -91,11 +92,15 @@ pub struct NetworkEditor {
     proxy_select: Entity<SelectState<Vec<ProxyMode>>>,
     limit: Entity<InputState>,
     follow: bool,
+    cookie_jar: bool,
     invalid_certificates: bool,
     _subscriptions: Vec<Subscription>,
 }
 impl NetworkEditor {
     pub fn new(settings: NetworkSettings, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let certificates =
+            cx.new(|cx| crate::certificates_editor::CertificatesEditor::new(&settings, window, cx));
+        let certificate_observer = cx.observe(&certificates, |_, _, cx| cx.notify());
         let timeout =
             cx.new(|cx| InputState::new(window, cx).default_value(settings.timeout_ms.to_string()));
         let connect_timeout = cx.new(|cx| {
@@ -134,6 +139,7 @@ impl NetworkEditor {
                 })
             })
             .collect();
+        subscriptions.push(certificate_observer);
         subscriptions.push(cx.subscribe(
             &proxy_select,
             |this, _, event: &SelectEvent<Vec<ProxyMode>>, cx| {
@@ -146,6 +152,7 @@ impl NetworkEditor {
         Self {
             _subscriptions: subscriptions,
             original: settings.clone(),
+            certificates,
             section: NetworkSection::Network,
             timeout,
             connect_timeout,
@@ -155,6 +162,7 @@ impl NetworkEditor {
             proxy_select,
             limit,
             follow: settings.follow_redirects,
+            cookie_jar: settings.cookie_jar,
             invalid_certificates: settings.allow_invalid_certificates,
         }
     }
@@ -164,12 +172,14 @@ impl NetworkEditor {
     }
     pub fn snapshot(&self, cx: &App) -> serde_json::Value {
         serde_json::json!({
+            "certificates":self.certificates.read(cx).snapshot(cx),
             "timeout":self.timeout.read(cx).value().to_string(),
             "connectTimeout":self.connect_timeout.read(cx).value().to_string(),
             "redirects":self.redirects.read(cx).value().to_string(),
             "proxy":self.proxy.read(cx).value().to_string(),
             "proxyMode":self.proxy_mode,
             "limit":self.limit.read(cx).value().to_string(),
+            "cookieJar": self.cookie_jar,
             "follow":self.follow, "invalidCertificates":self.invalid_certificates,
         })
     }
@@ -179,6 +189,9 @@ impl NetworkEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.certificates.update(cx, |view, cx| {
+            view.restore(&raw["certificates"], window, cx)
+        });
         self.proxy_mode = ProxyMode::restore(raw, self.proxy_mode);
         self.proxy_select.update(cx, |select, cx| {
             select.set_selected_value(&self.proxy_mode, window, cx);
@@ -196,6 +209,7 @@ impl NetworkEditor {
                 });
             }
         }
+        self.cookie_jar = raw["cookieJar"].as_bool().unwrap_or(self.cookie_jar);
         self.follow = raw["follow"].as_bool().unwrap_or(self.follow);
         self.invalid_certificates = raw["invalidCertificates"]
             .as_bool()
@@ -240,8 +254,10 @@ impl NetworkEditor {
         );
         settings.max_response_bytes = megabytes * 1024 * 1024;
         settings.follow_redirects = self.follow;
+        settings.cookie_jar = self.cookie_jar;
         settings.allow_invalid_certificates = self.invalid_certificates;
         settings.proxy = self.proxy_mode.proxy(&self.proxy.read(cx).value())?;
+        self.certificates.read(cx).apply(&mut settings, cx);
         settings.validate().map_err(|error| {
             anyhow::anyhow!(
                 "{}",
@@ -323,6 +339,15 @@ impl Render for NetworkEditor {
             })
             .when(self.section == NetworkSection::Network, |view| {
                 view.child(
+                    Switch::new("cookie-jar")
+                        .label(tr("自动保存和发送 Cookie"))
+                        .checked(self.cookie_jar)
+                        .on_change(cx.listener(|this, value, _, cx| {
+                            this.cookie_jar = *value;
+                            cx.notify();
+                        })),
+                )
+                .child(
                     Switch::new("follow-redirects")
                         .label(tr("跟随重定向"))
                         .checked(self.follow)
@@ -340,6 +365,9 @@ impl Render for NetworkEditor {
                             cx.notify();
                         })),
                 )
+            })
+            .when(self.section == NetworkSection::Network, |view| {
+                view.child(self.certificates.clone())
             })
             .child(
                 div()

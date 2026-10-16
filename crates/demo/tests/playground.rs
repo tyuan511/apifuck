@@ -66,7 +66,11 @@ async fn complete_prefilled_collection_passes_against_real_local_service() {
         runner::run(
             collection.clone(),
             options,
-            NetworkSettings::default(),
+            {
+                let mut network = NetworkSettings::default();
+                network.proxy = Some(String::new());
+                network
+            },
             Arc::new(AtomicBool::new(false)),
             None,
         ),

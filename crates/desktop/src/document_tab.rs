@@ -107,6 +107,8 @@ impl Section {
     }
 }
 enum Delivery {
+    AuthorizeUrl(String),
+    Authorized(Result<(), String>),
     Event(Event),
     Done(Result<Option<Response>, String>),
 }
@@ -983,6 +985,39 @@ impl DocumentTab {
         self.dirty = false;
         cx.notify();
     }
+    pub fn authorize_oauth(
+        &mut self,
+        collection: &Collection,
+        environment: Option<&str>,
+        network: NetworkSettings,
+        runtime: &Arc<tokio::runtime::Runtime>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        ensure!(!self.running, "{}", tr("请求正在运行"));
+        let document = self.commit_editors(window, cx)?;
+        let execution = prepare(collection, &document, environment, network)?;
+        self.cancel = Some(execution.cancellation());
+        self.running = true;
+        self.status = tr("正在获取 OAuth 令牌…").into();
+        let (delivery, incoming) = mpsc::channel();
+        self.incoming = Some(incoming);
+        let (urls, mut urls_rx) = tokio::sync::mpsc::unbounded_channel();
+        let forward = delivery.clone();
+        runtime.spawn(async move {
+            while let Some(url) = urls_rx.recv().await {
+                let _ = forward.send(Delivery::AuthorizeUrl(url));
+            }
+        });
+        runtime.spawn(async move {
+            let result = apifuck_core::oauth::authorize(execution, urls)
+                .await
+                .map_err(|error| format!("{error:#}"));
+            let _ = delivery.send(Delivery::Authorized(result));
+        });
+        cx.notify();
+        Ok(())
+    }
     pub fn send(
         &mut self,
         collection: &Collection,
@@ -1093,6 +1128,34 @@ impl DocumentTab {
         }
         for message in messages {
             match message {
+                Delivery::AuthorizeUrl(url) => {
+                    if self.running
+                        && self
+                            .cancel
+                            .as_ref()
+                            .is_some_and(|cancel| !cancel.load(Ordering::Relaxed))
+                    {
+                        cx.open_url(&url);
+                    }
+                }
+                Delivery::Authorized(result) => {
+                    self.running = false;
+                    self.cancel = None;
+                    match result {
+                        Ok(()) => {
+                            self.status = tr("OAuth 令牌已保存").into();
+                            crate::feedback::show(
+                                Notification::success(tr("OAuth 令牌已保存")),
+                                window,
+                                cx,
+                            );
+                        }
+                        Err(error) => {
+                            self.status = tr("OAuth 授权失败").into();
+                            crate::feedback::show(Notification::error(error), window, cx);
+                        }
+                    }
+                }
                 Delivery::Event(Event::Request { request }) => {
                     self.sent_requests.push(request);
                     self.sent_request_index = self.sent_requests.len() - 1;
@@ -1141,7 +1204,10 @@ impl DocumentTab {
                     );
                 }
                 Delivery::Event(Event::Error { message }) => {
-                    self.record_socket(tr("错误"), &message)
+                    if self.document.kind() == DocumentKind::WebSocket {
+                        self.record_socket(tr("错误"), &message);
+                    }
+                    crate::feedback::show(Notification::error(message), window, cx);
                 }
                 Delivery::Event(Event::Finished) => {
                     if self.document.kind() == DocumentKind::WebSocket {
@@ -1729,7 +1795,40 @@ impl Render for DocumentTab {
                         .aria_label(tr("实际发送的请求头"))
                         .into_any_element()
                 } else if self.section.form().is_some() {
-                    self.form.clone().into_any_element()
+                    div()
+                        .flex()
+                        .flex_col()
+                        .size_full()
+                        .when(
+                            is_request
+                                && self.section == Section::Auth
+                                && (self.form.read(cx).value(cx)["type"] == "oauth2"
+                                    || self.form.read(cx).value(cx) == "inherit"),
+                            |view| {
+                                view.child(
+                                    div().px_4().py_2().child(
+                                        Button::new("oauth-authorize")
+                                            .label(tr("获取 OAuth 令牌"))
+                                            .disabled(self.running)
+                                            .on_click(|_, window, cx| {
+                                                window.dispatch_action(
+                                                    Box::new(crate::workbench::AuthorizeOAuth),
+                                                    cx,
+                                                )
+                                            }),
+                                    ),
+                                )
+                            },
+                        )
+                        .child(
+                            div()
+                                .id("form-scroll")
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_y_scroll()
+                                .child(self.form.clone()),
+                        )
+                        .into_any_element()
                 } else {
                     panel_editor(editor)
                         .aria_label(tr("请求编辑器"))

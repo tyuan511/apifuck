@@ -16,6 +16,27 @@ pub enum Command {
 }
 pub async fn connect(
     mut execution: Execution,
+    commands: UnboundedReceiver<Command>,
+    events: UnboundedSender<Event>,
+) -> Result<()> {
+    let start = std::time::Instant::now();
+    let result = connect_inner(&mut execution, commands, events.clone()).await;
+    if let Err(error) = crate::history::record(
+        &execution,
+        None,
+        result.as_ref().err(),
+        start.elapsed().as_millis(),
+    )
+    .await
+    {
+        let _ = events.send(Event::Error {
+            message: format!("请求历史保存失败：{error:#}"),
+        });
+    }
+    result
+}
+async fn connect_inner(
+    execution: &mut Execution,
     mut commands: UnboundedReceiver<Command>,
     events: UnboundedSender<Event>,
 ) -> Result<()> {
@@ -30,6 +51,7 @@ pub async fn connect(
         "WebSocket 代理和跳过证书验证尚未支持"
     );
     execution.before()?;
+    crate::oauth::apply(execution).await?;
     let (url, headers) = headers_and_url(&execution.request)?;
     ensure!(
         matches!(url.scheme(), "ws" | "wss"),
@@ -39,20 +61,66 @@ pub async fn connect(
     for (name, value) in &headers {
         request.headers_mut().append(name, value.clone());
     }
+    let mut cookie_url = url.clone();
+    let _ = cookie_url.set_scheme(if url.scheme() == "wss" {
+        "https"
+    } else {
+        "http"
+    });
+    if execution.settings.cookie_jar && !request.headers().contains_key("cookie") {
+        let root = execution.root.clone();
+        let environment = execution.environment.clone();
+        let url = cookie_url.clone();
+        if let Some(cookie) = tokio::task::spawn_blocking(move || {
+            crate::cookies::header(&root, environment.as_deref(), &url)
+        })
+        .await??
+        {
+            request.headers_mut().insert("cookie", cookie.parse()?);
+        }
+    }
     let head = RequestHead::new(
         request.method().as_str(),
         &request.uri().to_string(),
         request.headers(),
     );
-    let (mut socket, _) = tokio::time::timeout(
+    let (mut socket, handshake) = tokio::time::timeout(
         Duration::from_millis(execution.settings.connect_timeout_ms),
-        tokio_tungstenite::connect_async(request),
+        tokio_tungstenite::connect_async_tls_with_config(
+            request,
+            None,
+            false,
+            crate::tls::websocket_connector(&execution.settings, &url)?,
+        ),
     )
     .await
     .context("WebSocket 连接超时")??;
     let sender = Some(events);
     emit(&sender, Event::Connected);
     emit(&sender, Event::Request { request: head });
+    if execution.settings.cookie_jar {
+        let root = execution.root.clone();
+        let environment = execution.environment.clone();
+        let cookies: Vec<_> = handshake
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|value| value.to_str().ok().map(str::to_owned))
+            .collect();
+        if let Err(error) = tokio::task::spawn_blocking(move || {
+            crate::cookies::store(&root, environment.as_deref(), &cookie_url, &cookies)
+        })
+        .await?
+        {
+            emit(
+                &sender,
+                Event::Error {
+                    message: format!("Cookie jar 保存失败：{error:#}"),
+                },
+            );
+        }
+    }
+
     settings::persist_variables(
         &execution.root,
         execution.environment.as_deref(),

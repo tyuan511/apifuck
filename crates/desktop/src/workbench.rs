@@ -1,6 +1,8 @@
 use crate::document_tab::DocumentTab;
+use crate::history_view::{HistoryEvent, HistoryView};
 use crate::i18n::tr;
 use crate::icons::AppIcon;
+use crate::runner_view::{RunnerEvent, RunnerView};
 use crate::settings_view::{SettingsEvent, SettingsView};
 use crate::update_view::{AppUpdate, UpdateEvent};
 use anyhow::{Context as _, Result};
@@ -32,6 +34,7 @@ gpui_kit::actions!(
         NewProject,
         Save,
         Send,
+        AuthorizeOAuth,
         CloseTab,
         NewRequest,
         Refresh,
@@ -64,6 +67,12 @@ pub struct Workbench {
     tree_selection: String,
     sidebar_view: SidebarView,
     show_settings: bool,
+    show_runner: bool,
+    show_history: bool,
+    history: Option<Entity<HistoryView>>,
+    history_subscription: Option<Subscription>,
+    runner: Option<Entity<RunnerView>>,
+    runner_subscription: Option<Subscription>,
     settings_view: Option<Entity<SettingsView>>,
     settings_subscription: Option<Subscription>,
     preferences: Option<AppPreferences>,
@@ -269,6 +278,12 @@ impl Workbench {
             tree_selection: String::new(),
             sidebar_view: SidebarView::Collections,
             show_settings: false,
+            show_runner: false,
+            show_history: false,
+            history: None,
+            history_subscription: None,
+            runner: None,
+            runner_subscription: None,
             settings_view: None,
             settings_subscription: None,
             preferences,
@@ -331,6 +346,14 @@ impl Workbench {
             );
             return;
         }
+        if self
+            .runner
+            .as_ref()
+            .is_some_and(|runner| runner.read(cx).is_running())
+        {
+            self.notify_error(tr("请先停止集合运行再切换项目").into(), window, cx);
+            return;
+        }
         self.project_loading = true;
         let task = cx.background_spawn(async move {
             let collection = Collection::open(path)?;
@@ -371,6 +394,12 @@ impl Workbench {
         {
             state = self.state.clone();
         }
+        self.history = None;
+        self.history_subscription = None;
+        self.runner = None;
+        self.runner_subscription = None;
+        self.show_runner = false;
+        self.show_history = false;
         self.tab_subscriptions.clear();
         self.tabs.clear();
         self.tab_scroll = ScrollHandle::new();
@@ -380,6 +409,8 @@ impl Workbench {
             preferences.apply_to(&mut self.state);
         }
         self.show_settings = false;
+        self.show_runner = false;
+        self.show_history = false;
         for (input, key) in [
             (&self.search, "search"),
             (&self.environment_search, "environmentSearch"),
@@ -474,7 +505,11 @@ impl Workbench {
                         .values()
                         .any(|v| v["dirty"].as_bool().unwrap_or(false))
                     || self.tabs.iter().any(|t| t.read(cx).is_dirty()),
-                busy: self.tabs.iter().any(|t| t.read(cx).is_running()),
+                busy: self.tabs.iter().any(|t| t.read(cx).is_running())
+                    || self
+                        .runner
+                        .as_ref()
+                        .is_some_and(|runner| runner.read(cx).is_running()),
             };
             let old_root = context.root.clone();
             let moved = if call.name == "move_document" {
@@ -907,6 +942,8 @@ impl Workbench {
         cx: &mut Context<Self>,
     ) {
         self.show_settings = false;
+        self.show_runner = false;
+        self.show_history = false;
         if let Some(ix) = self
             .tabs
             .iter()
@@ -968,6 +1005,8 @@ impl Workbench {
         let name = document.name().to_owned();
         let kind = document.kind();
         self.show_settings = false;
+        self.show_runner = false;
+        self.show_history = false;
         if kind == apifuck_core::DocumentKind::Environment {
             self.sidebar_view = SidebarView::Environments;
             self.tree_selection.clear();
@@ -1184,6 +1223,132 @@ impl Workbench {
             }
         }
         cx.notify();
+    }
+    fn open_cookies(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(collection) = &self.collection else {
+            return;
+        };
+        let view = cx.new(|cx| {
+            crate::cookies_view::CookiesView::new(
+                collection.root().to_owned(),
+                self.state.environment.clone(),
+                window,
+                cx,
+            )
+        });
+        window.open_dialog(cx, move |dialog, _, cx| {
+            dialog
+                .title(tr("Cookie 管理"))
+                .w(rems(42.).to_pixels(cx.theme().font_size))
+                .child(view.clone())
+        });
+    }
+    fn open_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(collection) = &self.collection else {
+            return;
+        };
+        let history = cx.new(|cx| HistoryView::new(collection.root().to_owned(), window, cx));
+        self.history_subscription =
+            Some(
+                cx.subscribe_in(&history, window, |this, _, event, window, cx| {
+                    match event {
+                        HistoryEvent::Open(path) => {
+                            // History may refer to a moved or deleted request; never open a different tab.
+                            let path = collection::portable_path(path);
+                            if this.collection.as_ref().is_some_and(|c| {
+                                history_document_exists(c, std::path::Path::new(&path))
+                            }) {
+                                this.open_document(&path, window, cx);
+                            } else {
+                                this.notify_error(tr("原请求已移动或删除").into(), window, cx);
+                            }
+                        }
+                    }
+                }),
+            );
+        self.history = Some(history);
+        self.show_settings = false;
+        self.show_runner = false;
+        self.show_history = true;
+        cx.notify();
+    }
+    fn open_runner(
+        &mut self,
+        folder: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(collection) = &self.collection else {
+            return;
+        };
+        let reuse = self
+            .runner
+            .as_ref()
+            .is_some_and(|runner| runner.read(cx).is_running() || runner.read(cx).folder == folder);
+        if !reuse {
+            let runner = cx.new(|cx| {
+                RunnerView::new(
+                    collection,
+                    self.state.environment.clone(),
+                    folder,
+                    window,
+                    cx,
+                )
+            });
+            self.runner_subscription =
+                Some(
+                    cx.subscribe_in(&runner, window, |this, _, event, window, cx| match event {
+                        RunnerEvent::Start => this.start_runner(window, cx),
+                    }),
+                );
+            self.runner = Some(runner);
+        }
+        self.show_settings = false;
+        self.show_history = false;
+        self.show_runner = true;
+        cx.notify();
+    }
+    fn start_runner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let result = (|| -> Result<()> {
+            anyhow::ensure!(
+                self.unsaved_document_paths(cx).is_empty(),
+                "{}",
+                tr("请先保存或放弃未保存的文档，再运行集合")
+            );
+            let collection = self.collection.as_ref().context("没有打开的项目")?;
+            // Re-read disk so external changes are included; never run stale clean snapshots.
+            let collection = Collection::open(collection.root())?;
+            let runner = self.runner.as_ref().context("没有打开集合运行器")?;
+            runner.update(cx, |runner, cx| {
+                runner.start(
+                    collection,
+                    self.state.network.clone(),
+                    &self.runtime,
+                    window,
+                    cx,
+                )
+            })
+        })();
+        if let Err(error) = result {
+            self.notify_error(format!("{error:#}"), window, cx);
+        }
+    }
+    fn authorize_oauth(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let (Some(collection), Some(tab)) = (&self.collection, self.active()) {
+            let result = tab.update(cx, |tab, cx| {
+                tab.authorize_oauth(
+                    collection,
+                    self.state.environment.as_deref(),
+                    self.state.network.clone(),
+                    &self.runtime,
+                    window,
+                    cx,
+                )
+            });
+            if let Err(error) = result {
+                self.notify_error(format!("{error:#}"), window, cx);
+            }
+        }
     }
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let (Some(c), Some(tab)) = (&self.collection, self.active()) {
@@ -1656,6 +1821,10 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if action == TreeAction::Run {
+            self.open_runner(Some(tree_creation_parent(path)), window, cx);
+            return;
+        }
         if let TreeAction::New(kind) = action {
             let parent = tree_creation_parent(path);
             self.new_document_in(kind, parent, window, cx);
@@ -1685,7 +1854,7 @@ impl Workbench {
             TreeAction::Trash => self.trash(window, cx),
             TreeAction::Export(language) => self.export(language, window, cx),
             TreeAction::Bru => self.export_bru(window, cx),
-            TreeAction::New(_) => unreachable!(),
+            TreeAction::New(_) | TreeAction::Run => unreachable!(),
         }
     }
     fn reorder_tree(
@@ -1747,6 +1916,110 @@ impl Workbench {
                 Err(error) => self.notify_error(format!("{error:#}"), window, cx),
             }
         }
+    }
+    fn import_collection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let choice = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(tr("选择 OpenAPI / Postman 文件").into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = choice.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let task = cx.background_spawn(async move { apifuck_core::import::read(&path) });
+            let result = task.await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(plan) => this.preview_import(plan, window, cx),
+                Err(error) => this.notify_error(format!("{error:#}"), window, cx),
+            });
+        })
+        .detach();
+    }
+    fn preview_import(
+        &mut self,
+        plan: apifuck_core::import::ImportPlan,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let plan = Arc::new(plan);
+        let handle = cx.entity().downgrade();
+        let summary = format!(
+            "{} · {} · {} {}\n\n{}\n\n{}",
+            plan.name,
+            plan.format,
+            plan.request_count(),
+            tr("个请求"),
+            tr("将在所选目录下创建新集合，不覆盖现有项目。"),
+            plan.warnings.join("\n")
+        );
+        let editor = cx.new(|cx| {
+            gpui_kit::component::input::EditorState::new(window, cx)
+                .line_number(false)
+                .default_value(summary)
+        });
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let plan = plan.clone();
+            let handle = handle.clone();
+            dialog
+                .title(tr("导入预览"))
+                .w(rems(42.).to_pixels(cx.theme().font_size))
+                .child(
+                    div()
+                        .h_80()
+                        .child(crate::surfaces::panel_editor(&editor).readonly(true)),
+                )
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(tr("选择目标目录并导入"))
+                        .cancel_text(tr("取消"))
+                        .show_cancel(true),
+                )
+                .on_ok(move |_, window, cx| {
+                    let _ =
+                        handle.update(cx, |this, cx| this.write_import(plan.clone(), window, cx));
+                    true
+                })
+        });
+    }
+    fn write_import(
+        &mut self,
+        plan: Arc<apifuck_core::import::ImportPlan>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let choice = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(tr("选择新集合的父目录").into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = choice.await else {
+                return;
+            };
+            let Some(parent) = paths.into_iter().next() else {
+                return;
+            };
+            let task = cx.background_spawn(async move { plan.write_new(&parent) });
+            let result = task.await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(root) => {
+                    this.notify_success(
+                        format!("{}: {}", tr("集合已导入"), root.display()),
+                        window,
+                        cx,
+                    );
+                    this.load(root, window, cx);
+                }
+                Err(error) => this.notify_error(format!("{error:#}"), window, cx),
+            });
+        })
+        .detach();
     }
     fn import_bru(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(collection) = self.collection.clone() else {
@@ -2181,6 +2454,18 @@ impl Render for Workbench {
                             }),
                     )
                     .child(
+                        Button::new("run-collection")
+                            .small()
+                            .ghost()
+                            .icon(AppIcon::Play)
+                            .tooltip(tr("运行集合"))
+                            .accessibility_label(tr("运行集合"))
+                            .disabled(self.collection.is_none())
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_runner(None, window, cx)
+                            })),
+                    )
+                    .child(
                         Button::new("refresh")
                             .small()
                             .ghost()
@@ -2532,6 +2817,7 @@ impl Render for Workbench {
                         let open = workspace_weak.clone();
                         let new = workspace_weak.clone();
                         let import = workspace_weak.clone();
+                        let import_collection = workspace_weak.clone();
                         let recent = workspace_weak.clone();
                         let projects = recent_projects.clone();
                         menu.item(
@@ -2541,6 +2827,14 @@ impl Render for Workbench {
                                     let _ = open.update(cx, |this, cx| {
                                         this.choose_project(false, window, cx)
                                     });
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new(tr("导入 OpenAPI / Postman…"))
+                                .icon(AppIcon::FileInput)
+                                .on_click(move |_, window, cx| {
+                                    let _ = import_collection
+                                        .update(cx, |this, cx| this.import_collection(window, cx));
                                 }),
                         )
                         .submenu_with_icon(
@@ -2955,7 +3249,12 @@ impl Render for Workbench {
             .child(
                 Button::new("nav-collections")
                     .ghost()
-                    .selected(!self.show_settings && self.sidebar_view == SidebarView::Collections)
+                    .selected(
+                        !self.show_settings
+                            && !self.show_runner
+                            && !self.show_history
+                            && self.sidebar_view == SidebarView::Collections,
+                    )
                     .w_12()
                     .h_12()
                     .accessibility_label(tr("集合"))
@@ -2964,6 +3263,8 @@ impl Render for Workbench {
                     .tooltip_placement(Placement::Right)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.show_settings = false;
+                        this.show_runner = false;
+                        this.show_history = false;
                         this.sidebar_view = SidebarView::Collections;
                         this.rebuild_tree(cx);
                         cx.notify();
@@ -2972,7 +3273,12 @@ impl Render for Workbench {
             .child(
                 Button::new("nav-environments")
                     .ghost()
-                    .selected(!self.show_settings && self.sidebar_view == SidebarView::Environments)
+                    .selected(
+                        !self.show_settings
+                            && !self.show_runner
+                            && !self.show_history
+                            && self.sidebar_view == SidebarView::Environments,
+                    )
                     .w_12()
                     .h_12()
                     .accessibility_label(tr("环境"))
@@ -2981,9 +3287,36 @@ impl Render for Workbench {
                     .tooltip_placement(Placement::Right)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.show_settings = false;
+                        this.show_runner = false;
+                        this.show_history = false;
                         this.sidebar_view = SidebarView::Environments;
                         cx.notify();
                     })),
+            )
+            .child(
+                Button::new("nav-cookies")
+                    .ghost()
+                    .w_12()
+                    .h_12()
+                    .icon(AppIcon::KeyRound)
+                    .tooltip(tr("Cookie 管理"))
+                    .tooltip_placement(Placement::Right)
+                    .accessibility_label(tr("Cookie 管理"))
+                    .disabled(self.collection.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| this.open_cookies(window, cx))),
+            )
+            .child(
+                Button::new("nav-history")
+                    .ghost()
+                    .w_12()
+                    .h_12()
+                    .icon(Icon::default().path(crate::icons::HISTORY))
+                    .selected(self.show_history && !self.show_settings)
+                    .tooltip(tr("请求历史"))
+                    .tooltip_placement(Placement::Right)
+                    .accessibility_label(tr("请求历史"))
+                    .disabled(self.collection.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| this.open_history(window, cx))),
             )
             .child(div().flex_1())
             .when_some(self.updates.read(cx).sidebar_label(), |rail, label| {
@@ -3036,17 +3369,24 @@ impl Render for Workbench {
                     if let Some(view) = &this.settings_view {
                         view.update(cx, |view, cx| view.save(window, cx));
                     }
-                } else {
+                } else if !this.show_runner && !this.show_history {
                     this.save(window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &AuthorizeOAuth, window, cx| {
+                if !this.show_settings && !this.show_runner && !this.show_history {
+                    this.authorize_oauth(window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &Send, window, cx| {
-                if !this.show_settings {
+                if !this.show_settings && !this.show_runner && !this.show_history {
                     this.send(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
-                if this.show_settings {
+                if this.show_settings || this.show_runner || this.show_history {
+                    this.show_history = false;
+                    this.show_runner = false;
                     this.show_settings = false;
                     cx.notify();
                 } else {
@@ -3076,7 +3416,21 @@ impl Render for Workbench {
                     .flex_1()
                     .min_h_0()
                     .child(rail)
-                    .child(if self.show_settings {
+                    .child(if self.show_history && !self.show_settings {
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .children(self.history.clone())
+                            .into_any_element()
+                    } else if self.show_runner && !self.show_settings {
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .children(self.runner.clone())
+                            .into_any_element()
+                    } else if self.show_settings {
                         div()
                             .flex_1()
                             .min_w_0()
@@ -3109,6 +3463,7 @@ impl Render for Workbench {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TreeAction {
     Open,
+    Run,
     New(&'static str),
     Rename,
     Duplicate,
@@ -3138,6 +3493,7 @@ impl TreeAction {
         let mut actions = vec![Self::Open];
         if folder {
             actions.extend([
+                Self::Run,
                 Self::New("http"),
                 Self::New("graphql"),
                 Self::New("websocket"),
@@ -3162,6 +3518,7 @@ impl TreeAction {
     fn label(self) -> String {
         match self {
             Self::Open => tr("编辑").into(),
+            Self::Run => tr("运行集合").into(),
             Self::New("http") => tr("新建 HTTP 请求").into(),
             Self::New("graphql") => tr("新建 GraphQL 请求").into(),
             Self::New("websocket") => tr("新建 WebSocket 请求").into(),
@@ -3177,6 +3534,7 @@ impl TreeAction {
     }
     fn icon(self) -> AppIcon {
         match self {
+            Self::Run => AppIcon::Play,
             Self::New(kind) => crate::icons::document_kind(kind),
             Self::Open | Self::Rename | Self::Move => AppIcon::Pencil,
             Self::Duplicate | Self::Bru => AppIcon::Copy,
@@ -3185,6 +3543,14 @@ impl TreeAction {
             Self::Trash => AppIcon::Trash,
         }
     }
+}
+
+fn history_document_exists(collection: &Collection, path: &std::path::Path) -> bool {
+    collection
+        .documents()
+        .iter()
+        .any(|document| document.path() == path)
+        && collection.safe_path(path).is_ok_and(|path| path.is_file())
 }
 
 fn recent_project_label(path: &std::path::Path, home: Option<&std::path::Path>) -> String {

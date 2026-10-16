@@ -10,6 +10,14 @@ use tokio::{
     net::TcpListener,
 };
 
+// Loopback fixtures must not depend on the developer's system proxy.
+fn direct_network() -> NetworkSettings {
+    let mut network = NetworkSettings::default();
+    network.proxy = Some(String::new());
+    network.timeout_ms = 5_000;
+    network
+}
+
 fn project() -> (tempfile::TempDir, Collection) {
     let dir = tempfile::tempdir().unwrap();
     let c = Collection::create(dir.path(), "Tests").unwrap();
@@ -89,7 +97,7 @@ async fn disabled_proxy_connects_directly() {
     let (_dir, collection) = project();
     let (url, wire) = server(ok("{}")).await;
     let doc = request(&collection, &url, json!({}));
-    let mut settings = NetworkSettings::default();
+    let mut settings = direct_network();
     settings.proxy = Some(String::new());
     settings.validate().unwrap();
     tokio::time::timeout(
@@ -129,7 +137,7 @@ async fn sent_headers_include_inheritance_auth_scripts_duplicates_and_transport_
     let c = Collection::open(c.root()).unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     execute(
-        prepare(&c, &doc, Some("dev"), NetworkSettings::default()).unwrap(),
+        prepare(&c, &doc, Some("dev"), direct_network()).unwrap(),
         Some(tx),
     )
     .await
@@ -188,12 +196,9 @@ async fn sent_headers_match_wire_for_body_modes_and_empty_requests() {
         }
         let doc = request(&c, &url, json!({"http":http}));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        execute(
-            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-            Some(tx),
-        )
-        .await
-        .unwrap();
+        execute(prepare(&c, &doc, None, direct_network()).unwrap(), Some(tx))
+            .await
+            .unwrap();
         let Event::Request { request: head } = rx.recv().await.unwrap() else {
             panic!("missing sent headers");
         };
@@ -216,12 +221,9 @@ async fn sent_headers_preserve_overrides_range_and_explicit_proxy_auth() {
             json!({"http":{"method":"POST","url":url,"headers":headers,"body":{"type":"text","data":"hello"}}}),
         );
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        execute(
-            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-            Some(tx),
-        )
-        .await
-        .unwrap();
+        execute(prepare(&c, &doc, None, direct_network()).unwrap(), Some(tx))
+            .await
+            .unwrap();
         let Event::Request { request: head } = rx.recv().await.unwrap() else {
             panic!("missing sent headers");
         };
@@ -232,7 +234,7 @@ async fn sent_headers_preserve_overrides_range_and_explicit_proxy_auth() {
     let proxy = proxy.replacen("http://", "http://test:pa%2Bss@", 1);
     let doc = request(&c, "http://target.invalid/resource", json!({}));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut network = NetworkSettings::default();
+    let mut network = direct_network();
     network.proxy = Some(proxy);
     execute(prepare(&c, &doc, None, network).unwrap(), Some(tx))
         .await
@@ -260,12 +262,9 @@ async fn redirected_sent_headers_match_each_hop_and_drop_cross_origin_credential
             json!({"http":{"method":"POST","url":url,"auth":{"type":"bearer","token":"private"},"headers":[{"name":"Cookie","value":"local"}],"body":{"type":"json","data":"{}"}}}),
         );
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        execute(
-            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-            Some(tx),
-        )
-        .await
-        .unwrap();
+        execute(prepare(&c, &doc, None, direct_network()).unwrap(), Some(tx))
+            .await
+            .unwrap();
         let mut sent = vec![];
         while let Some(event) = rx.recv().await {
             if let Event::Request { request } = event {
@@ -300,7 +299,7 @@ async fn sent_header_events_respect_redirect_limits_and_connection_failures() {
         let (_dir, c) = project();
         let (url, wire) = server(b"HTTP/1.1 302 Found\r\nLocation: http://target.invalid/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()).await;
         let doc = request(&c, &url, json!({}));
-        let mut network = NetworkSettings::default();
+        let mut network = direct_network();
         network.follow_redirects = follow;
         network.max_redirects = limit;
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -325,12 +324,9 @@ async fn sent_header_events_respect_redirect_limits_and_connection_failures() {
     let doc = request(&c, &url, json!({}));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     assert!(
-        execute(
-            prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-            Some(tx)
-        )
-        .await
-        .is_err()
+        execute(prepare(&c, &doc, None, direct_network()).unwrap(), Some(tx))
+            .await
+            .is_err()
     );
     assert!(rx.try_recv().is_err());
 }
@@ -457,7 +453,7 @@ async fn inheritance_auth_duplicate_query_and_scripts_are_sent() {
         .unwrap();
     let c = Collection::open(c.root()).unwrap();
     let response = execute(
-        prepare(&c, &doc, Some("dev"), NetworkSettings::default()).unwrap(),
+        prepare(&c, &doc, Some("dev"), direct_network()).unwrap(),
         None,
     )
     .await
@@ -486,12 +482,9 @@ async fn no_auth_is_distinct_from_inherit() {
     let c = Collection::open(c.root()).unwrap();
     let (url, server) = server(ok("{}")).await;
     let doc = request(&c, &url, json!({}));
-    execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     assert!(!String::from_utf8_lossy(&server.await.unwrap()).contains("authorization"));
 }
 #[tokio::test]
@@ -502,12 +495,9 @@ async fn multipart_and_binary_files_use_request_relative_paths() {
     let (url, server) = server(ok("{}")).await;
     let source=serde_yaml::to_string(&json!({"info":{"name":"Upload","type":"http"},"http":{"method":"POST","url":url,"body":{"type":"multipart-form","data":[{"name":"file","type":"file","value":"data.bin","contentType":"application/octet-stream"},{"name":"name","type":"text","value":"文件"}]}}})).unwrap();
     let doc = c.add(Path::new("upload/test.yml"), &source).unwrap();
-    execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     let bytes = server.await.unwrap();
     assert!(bytes.windows(3).any(|w| w == [0, 1, 255]));
     assert!(String::from_utf8_lossy(&bytes).contains("filename=\"data.bin\""));
@@ -528,7 +518,7 @@ async fn stream_cancellation_is_prompt_and_has_partial_events() {
         tokio::time::sleep(Duration::from_secs(5)).await;
     });
     let doc = request(&c, &url, json!({}));
-    let ex = prepare(&c, &doc, None, NetworkSettings::default()).unwrap();
+    let ex = prepare(&c, &doc, None, direct_network()).unwrap();
     let cancel = ex.cancellation();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let run = tokio::spawn(execute(ex, Some(tx)));
@@ -585,7 +575,7 @@ async fn websocket_roundtrip() {
     });
     let source=serde_yaml::to_string(&json!({"info":{"name":"WS","type":"websocket"},"websocket":{"url":url,"message":{"type":"json","data":"{}"}}})).unwrap();
     let doc = c.add(Path::new("socket.yml"), &source).unwrap();
-    let ex = prepare(&c, &doc, None, NetworkSettings::default()).unwrap();
+    let ex = prepare(&c, &doc, None, direct_network()).unwrap();
     let (tx, commands) = tokio::sync::mpsc::unbounded_channel();
     let (events, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let run = tokio::spawn(websocket::connect(ex, commands, events));
@@ -627,7 +617,7 @@ fn import_export_does_not_execute_shell_and_keeps_literal_payload() {
     let (_dir, c) = project();
     let source=exchange::import_curl("curl -X POST 'https://example.com/a?x=1' -H 'Content-Type: application/json' --data-raw '{\"name\":\"$(touch /tmp/do-not-run)\"}'","Imported").unwrap();
     let doc = c.add(Path::new("test.yml"), &source).unwrap();
-    let ex = prepare(&c, &doc, None, NetworkSettings::default()).unwrap();
+    let ex = prepare(&c, &doc, None, direct_network()).unwrap();
     let command = exchange::export(&ex, "curl").unwrap();
     assert!(command.contains("$(touch /tmp/do-not-run)"));
     let parsed = exchange::import_curl(&command, "Again").unwrap();
@@ -642,12 +632,9 @@ async fn script_failure_and_missing_variables_prevent_send() {
         "http://127.0.0.1:1",
         json!({"runtime":{"scripts":[{"type":"before-request","code":"throw new Error('preflight failed');"}]}}),
     );
-    let error = execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap_err();
+    let error = execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap_err();
     assert!(error.to_string().contains("preflight failed"));
 }
 #[test]
@@ -667,12 +654,9 @@ async fn path_parameters_do_not_replace_prefixes_or_query_values_and_disabled_va
         &url,
         json!({"http":{"method":"GET","url":format!("{url}/:id/:identifier?literal=:id"),"params":[{"name":"id","value":"a/b c","type":"path"},{"name":"identifier","value":"other","type":"path"},{"name":"skip","value":"{{missing}}","type":"query","disabled":true}]}}),
     );
-    execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     let request = String::from_utf8(server.await.unwrap()).unwrap();
     assert!(
         request.starts_with("GET /a%2Fb%20c/other?literal=:id "),
@@ -696,7 +680,7 @@ async fn settings_inherit_preserves_parent_and_multipart_filename_extension() {
         &url,
         json!({"settings":{"timeout":"inherit"},"http":{"method":"POST","url":url,"body":{"type":"multipart-form","data":[{"name":"file","type":"file","value":"file.bin"}]}}}),
     );
-    let ex = prepare(&c, &doc, None, NetworkSettings::default()).unwrap();
+    let ex = prepare(&c, &doc, None, direct_network()).unwrap();
     assert_eq!(ex.network().timeout_ms, 1234);
     execute(ex, None).await.unwrap();
     let request = String::from_utf8(server.await.unwrap()).unwrap();
@@ -734,7 +718,7 @@ fn code_exports_cover_file_and_multipart_bodies() {
         "https://example.com",
         json!({"http":{"method":"POST","url":"https://example.com/upload","body":{"type":"multipart-form","data":[{"name":"file","type":"file","value":"file.bin"},{"name":"note","type":"text","value":"hello"}]}}}),
     );
-    let ex = prepare(&c, &doc, None, NetworkSettings::default()).unwrap();
+    let ex = prepare(&c, &doc, None, direct_network()).unwrap();
     for language in ["javascript", "python", "go"] {
         let code = exchange::export(&ex, language).unwrap();
         assert!(code.contains("file.bin"));
@@ -750,12 +734,9 @@ async fn response_script_modifications_are_preserved() {
         &url,
         json!({"runtime":{"scripts":[{"type":"after-response","code":"api.response.status = 202; api.response.body = 'changed'; api.response.headers['x-added']='yes';"}]}}),
     );
-    let response = execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    let response = execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     assert_eq!(response.status, 202);
     assert_eq!(response.body, "changed");
     assert!(response.headers.contains(&("x-added".into(), "yes".into())));
@@ -815,13 +796,7 @@ fn renaming_request_updates_extension_keys_without_trailing_slash() {
     c.rename(c.find("old.yml").unwrap(), Path::new("new.yml"))
         .unwrap();
     let c = Collection::open(c.root()).unwrap();
-    let ex = prepare(
-        &c,
-        c.find("new.yml/").unwrap(),
-        None,
-        NetworkSettings::default(),
-    )
-    .unwrap();
+    let ex = prepare(&c, c.find("new.yml/").unwrap(), None, direct_network()).unwrap();
     assert_eq!(ex.network().connect_timeout_ms, 321);
 }
 #[tokio::test]
@@ -834,7 +809,7 @@ async fn curl_data_import_preserves_content_type_and_redirect_policy() {
     )
     .unwrap();
     let doc = c.add(Path::new("import.yml"), &source).unwrap();
-    let ex = prepare(&c, &doc, None, NetworkSettings::default()).unwrap();
+    let ex = prepare(&c, &doc, None, direct_network()).unwrap();
     assert!(!ex.network().follow_redirects);
     execute(ex, None).await.unwrap();
     let request = String::from_utf8(server.await.unwrap()).unwrap();
@@ -854,12 +829,9 @@ async fn graphql_uses_json_transport_and_preserves_variables() {
         )
         .unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let response = execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        Some(tx),
-    )
-    .await
-    .unwrap();
+    let response = execute(prepare(&c, &doc, None, direct_network()).unwrap(), Some(tx))
+        .await
+        .unwrap();
     assert_eq!(response.status, 200);
     let sent = String::from_utf8(server.await.unwrap()).unwrap();
     let Event::Request { request: head } = rx.recv().await.unwrap() else {
@@ -879,12 +851,9 @@ async fn chai_tests_and_assertions_report_all_failures_without_hiding_response()
         &url,
         json!({"runtime":{"scripts":[{"type":"tests","code":"test('status',()=>expect(res.status).to.equal(200)); test('failure',()=>expect(res.body.items).to.have.lengthOf(3)); test('continues',()=>expect(res.getStatus()).to.equal(200));"}],"assertions":[{"expression":"res.body.items","operator":"length","value":"2"},{"expression":"res.status","operator":"eq","value":"201"},{"expression":"does.not.exist","operator":"eq","value":"1","disabled":true}]}}),
     );
-    let response = execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    let response = execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     assert_eq!(response.status, 200);
     assert_eq!(response.tests.len(), 5);
     assert_eq!(response.tests.iter().filter(|t| !t.passed).count(), 2);
@@ -948,7 +917,7 @@ async fn runner_shares_runtime_variables_and_records_skipped_websockets() {
     let report = apifuck_core::runner::run(
         c,
         apifuck_core::runner::RunOptions::default(),
-        NetworkSettings::default(),
+        direct_network(),
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         None,
     )
@@ -972,12 +941,9 @@ async fn response_actions_are_available_to_tests_and_json_schema_assertions() {
         &url,
         json!({"runtime":{"actions":[{"type":"set-variable","phase":"after-response","selector":{"method":"jsonq","expression":"$res.body.token"},"variable":{"name":"token","scope":"request"}}],"scripts":[{"type":"tests","code":"test('response variable',()=>expect(bru.getVar('token')).to.equal('abc'));test('schema',()=>expect(res.body).to.have.jsonSchema({type:'object',required:['token'],properties:{token:{type:'string'}}}));test('async is not a false pass',async()=>{throw new Error('failed');});"}]}}),
     );
-    let response = execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    let response = execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     assert_eq!(response.tests.len(), 3);
     assert!(response.tests[0].passed);
     assert!(response.tests[1].passed, "{:?}", response.tests[1]);
@@ -994,12 +960,9 @@ async fn bruno_redirect_setting_preserves_auth_but_not_cross_origin_cookies() {
         &first_url,
         json!({"http":{"method":"POST","url":first_url,"auth":{"type":"bearer","token":"test-token"},"headers":[{"name":"Cookie","value":"session=local-test"}],"params":[{"name":"original","value":"one","type":"query"}],"body":{"type":"json","data":"{}"}},"settings":{"followRedirects":true,"forwardAuthorizationHeader":true}}),
     );
-    let response = execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    let response = execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     assert_eq!(response.status, 200);
     let final_request = String::from_utf8(final_server.await.unwrap()).unwrap();
     assert!(final_request.starts_with("GET /done?only=1 "));
@@ -1019,12 +982,9 @@ async fn release_curl_cookie_and_literal_form_fields_reach_the_server() {
     ).unwrap();
     let doc = c.add(Path::new("import.yml"), &source).unwrap();
     assert_eq!(doc.value()["http"]["body"]["data"][0]["type"], "text");
-    execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        None,
-    )
-    .await
-    .unwrap();
+    execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
     let wire = String::from_utf8(wire.await.unwrap()).unwrap();
     assert!(wire.starts_with("POST /submit?q=hello HTTP/1.1"));
     assert!(
@@ -1032,11 +992,8 @@ async fn release_curl_cookie_and_literal_form_fields_reach_the_server() {
             .contains("cookie: session=abc; theme=dark")
     );
     assert!(wire.contains("@missing.txt;type=text/plain"));
-    let code = exchange::export(
-        &prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        "curl",
-    )
-    .unwrap();
+    let code =
+        exchange::export(&prepare(&c, &doc, None, direct_network()).unwrap(), "curl").unwrap();
     assert!(code.contains("--form-string"));
     let again = Document::parse(
         "again.yml".into(),
@@ -1094,7 +1051,7 @@ async fn release_base_url_inheritance_matches_execution_and_all_exports() {
     .unwrap();
     let doc = c.add(Path::new("api/users.yml"), &serde_yaml::to_string(&json!({"info":{"name":"Users","type":"http"},"http":{"method":"GET","url":" /users?limit=1 "}})).unwrap()).unwrap();
     let c = Collection::open(c.root()).unwrap();
-    let execution = prepare(&c, &doc, Some("local"), NetworkSettings::default()).unwrap();
+    let execution = prepare(&c, &doc, Some("local"), direct_network()).unwrap();
     for language in ["curl", "javascript", "python", "go"] {
         assert!(
             exchange::export(&execution, language)
@@ -1118,7 +1075,7 @@ async fn release_base_url_inheritance_matches_execution_and_all_exports() {
     .unwrap();
     assert!(
         exchange::export(
-            &prepare(&c, &override_doc, Some("local"), NetworkSettings::default()).unwrap(),
+            &prepare(&c, &override_doc, Some("local"), direct_network()).unwrap(),
             "curl"
         )
         .unwrap()
@@ -1233,12 +1190,9 @@ async fn release_sse_requests_disable_compression_and_deliver_data_chunks() {
         json!({"http":{"url":url,"method":"GET","headers":[{"name":"Accept","value":"text/event-stream"},{"name":"Accept-Encoding","value":"gzip"}]}}),
     );
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let response = execute(
-        prepare(&c, &doc, None, NetworkSettings::default()).unwrap(),
-        Some(tx),
-    )
-    .await
-    .unwrap();
+    let response = execute(prepare(&c, &doc, None, direct_network()).unwrap(), Some(tx))
+        .await
+        .unwrap();
     assert_eq!(response.body, body);
     let wire = String::from_utf8(wire.await.unwrap())
         .unwrap()
@@ -1252,4 +1206,150 @@ async fn release_sse_requests_disable_compression_and_deliver_data_chunks() {
         }
     }
     assert_eq!(chunks, body);
+}
+
+#[tokio::test]
+async fn runner_stops_on_failure_and_cancels_during_delay() {
+    use apifuck_core::runner::{RunOptions, run};
+    use std::sync::{Arc, atomic::AtomicBool};
+    let (_dir, c) = project();
+    let (url, wire) = server(ok("{}")).await;
+    request(
+        &c,
+        &url,
+        json!({"runtime":{"scripts":[{"type":"tests","code":"test('failure', () => expect(false).to.equal(true));"}]}}),
+    );
+    let cancel = Arc::new(AtomicBool::new(false));
+    let report = run(
+        Collection::open(c.root()).unwrap(),
+        RunOptions::new(None, None, 2, 0, true),
+        direct_network(),
+        cancel,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.entries.len(), 1);
+    assert!(!report.passed());
+    wire.await.unwrap();
+
+    let (_dir, c) = project();
+    let (url, wire) = server(ok("{}")).await;
+    request(&c, &url, json!({}));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let job = tokio::spawn(run(
+        Collection::open(c.root()).unwrap(),
+        RunOptions::new(None, None, 2, 60_000, false),
+        direct_network(),
+        cancel.clone(),
+        Some(tx),
+    ));
+    tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    cancel.store(true, Ordering::Relaxed);
+    let report = tokio::time::timeout(Duration::from_secs(1), job)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(report.cancelled);
+    assert!(!report.passed());
+    assert_eq!(report.entries.len(), 1);
+    wire.await.unwrap();
+}
+
+#[tokio::test]
+async fn history_records_success_failure_and_response_limits_without_request_secrets() {
+    let (_dir, c) = project();
+    let body = "中文".repeat(10000);
+    let (url, wire) = server(ok(&body)).await;
+    let doc = request(&c, &format!("{url}/?token=hidden"), json!({}));
+    execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
+    wire.await.unwrap();
+    let entries = apifuck_core::history::load(c.root()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].status, Some(200));
+    assert!(entries[0].truncated);
+    assert!(entries[0].body_preview.len() <= 32 * 1024);
+    assert!(!entries[0].url.contains("hidden"));
+    let failed = Document::parse(
+        doc.path().to_owned(),
+        "info:\n  name: Fail\n  type: http\nhttp:\n  method: GET\n  url: '{{missing}}'\n".into(),
+    )
+    .unwrap();
+    assert!(
+        execute(prepare(&c, &failed, None, direct_network()).unwrap(), None)
+            .await
+            .is_err()
+    );
+    let entries = apifuck_core::history::load(c.root()).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(entries[0].error.is_some());
+    assert_eq!(entries[0].name, "Fail");
+}
+
+#[tokio::test]
+async fn cookie_jar_round_trip_redirects_explicit_override_and_disable() {
+    let (_dir, c) = project();
+    let (target, target_wire) = server(ok("{}")).await;
+    let (url, first_wire) = server(format!("HTTP/1.1 302 Found\r\nLocation: {target}/\r\nSet-Cookie: session=retained; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").into_bytes()).await;
+    let doc = request(&c, &url, json!({}));
+    execute(prepare(&c, &doc, None, direct_network()).unwrap(), None)
+        .await
+        .unwrap();
+    first_wire.await.unwrap();
+    assert!(
+        String::from_utf8(target_wire.await.unwrap())
+            .unwrap()
+            .contains("cookie: session=retained")
+    );
+    for (manual, enabled) in [(false, true), (true, true), (false, false)] {
+        let (url, wire) = server(ok("{}")).await;
+        let value = json!({"info":{"type":"http","name":"Cookies"},"http":{"method":"GET","url":url,"headers":if manual {json!([{"name":"Cookie","value":"manual=one"}])} else {json!([])}}});
+        let doc =
+            Document::parse("next.yml".into(), serde_yaml::to_string(&value).unwrap()).unwrap();
+        let mut network = direct_network();
+        network.cookie_jar = enabled;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        execute(prepare(&c, &doc, None, network).unwrap(), Some(tx))
+            .await
+            .unwrap();
+        let wire = wire.await.unwrap();
+        let text = String::from_utf8_lossy(&wire);
+        assert_eq!(text.contains("session=retained"), enabled && !manual);
+        assert_eq!(text.contains("manual=one"), manual);
+        let Event::Request { request } = rx.recv().await.unwrap() else {
+            panic!("missing sent request")
+        };
+        assert_sent_headers_match_wire(&request, &wire);
+    }
+}
+
+#[tokio::test]
+async fn regression_embedded_path_substitution_is_single_pass_and_path_only() {
+    let (_dir, collection) = project();
+    let (url, wire) = server(ok("{}")).await;
+    let doc = request(
+        &collection,
+        &url,
+        json!({"http":{"method":"GET","url":format!("{url}/{{id}}.json/{{suffix}}-{{id}}/:id/:identifier?literal={{id}}"),"params":[{"name":"id","value":"{suffix}","type":"path"},{"name":"suffix","value":"real","type":"path"},{"name":"identifier","value":"other","type":"path"}]}}),
+    );
+    execute(
+        prepare(&collection, &doc, None, direct_network()).unwrap(),
+        None,
+    )
+    .await
+    .unwrap();
+    let sent = String::from_utf8(wire.await.unwrap()).unwrap();
+    assert!(
+        sent.starts_with(
+            "GET /%7Bsuffix%7D.json/real-%7Bsuffix%7D/%7Bsuffix%7D/other?literal={id} "
+        ),
+        "{sent}"
+    );
 }

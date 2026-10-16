@@ -80,6 +80,8 @@ pub struct Response {
 #[derive(Clone)]
 pub struct Execution {
     pub(crate) root: PathBuf,
+    pub(crate) path: PathBuf,
+    pub(crate) name: String,
     pub(crate) directory: PathBuf,
     pub(crate) options: Value,
     pub(crate) request: Value,
@@ -317,12 +319,9 @@ pub fn prepare(
         );
         network.proxy = Some(url.to_string());
     }
-    ensure!(
-        collection.project().value()["config"]["clientCertificates"]
-            .as_array()
-            .is_none_or(Vec::is_empty),
-        "客户端证书尚未支持"
-    );
+    let mut tls_variables = env.clone();
+    merge_object(&mut tls_variables, &vars);
+    crate::tls::resolve_settings(collection, environment, &tls_variables, &mut network)?;
     if let Some(ms) = options["connectTimeoutMs"].as_u64() {
         network.connect_timeout_ms = ms;
     }
@@ -355,6 +354,8 @@ pub fn prepare(
     }
     Ok(Execution {
         root: collection.root().to_owned(),
+        path: document.path().to_owned(),
+        name: document.name().to_owned(),
         directory: document.path().parent().unwrap_or(Path::new("")).to_owned(),
         request,
         options,
@@ -437,7 +438,7 @@ pub fn interpolate(text: &str, variables: &Value) -> Result<String> {
     }
     expand(text, variables, re, &mut vec![])
 }
-fn interpolate_value(value: &mut Value, variables: &Value) -> Result<()> {
+pub(crate) fn interpolate_value(value: &mut Value, variables: &Value) -> Result<()> {
     match value {
         Value::String(s) => *s = interpolate(s, variables)?,
         Value::Array(items) => {
@@ -461,6 +462,7 @@ pub(crate) fn headers_and_url(request: &Value) -> Result<(url::Url, reqwest::hea
     use reqwest::header::{HeaderName, HeaderValue};
     let raw = request["url"].as_str().context("缺少 URL")?;
     let mut url = url::Url::parse(raw).context("请输入完整 URL，或使用 {{base_url}} 变量")?;
+    let mut path_parameters = BTreeMap::new();
     for parameter in request["params"]
         .as_array()
         .into_iter()
@@ -473,18 +475,39 @@ pub(crate) fn headers_and_url(request: &Value) -> Result<(url::Url, reqwest::hea
         )
         .collect::<String>()
         .replace('+', "%20");
+        path_parameters.entry(key).or_insert(encoded);
+    }
+    if !path_parameters.is_empty() {
+        static PATH_TEMPLATE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let template = PATH_TEMPLATE
+            .get_or_init(|| regex::Regex::new(r"(?i:%7b)([^{}]*?)(?i:%7d)|\{([^{}]*)\}").unwrap());
+        let lookup = |name: &str| {
+            percent_encoding::percent_decode_str(name)
+                .decode_utf8()
+                .ok()
+                .and_then(|name| path_parameters.get(name.as_ref()).cloned())
+        };
         let path = url
             .path()
             .split('/')
             .map(|segment| {
-                if segment == format!(":{key}")
-                    || segment == format!("{{{key}}}")
-                    || segment == format!("%7B{key}%7D")
-                {
-                    encoded.clone()
-                } else {
-                    segment.to_owned()
+                // Colon placeholders remain whole-segment only. Brace templates can
+                // appear next to literal text, as in OpenAPI /reports/{id}.json.
+                if let Some(value) = segment.strip_prefix(':').and_then(lookup) {
+                    return value;
                 }
+                // Scan the original segment once: braces in an inserted parameter
+                // value must never become a second parameter substitution.
+                template
+                    .replace_all(segment, |captures: &regex::Captures<'_>| {
+                        let name = captures
+                            .get(1)
+                            .or_else(|| captures.get(2))
+                            .unwrap()
+                            .as_str();
+                        lookup(name).unwrap_or_else(|| captures[0].to_owned())
+                    })
+                    .into_owned()
             })
             .collect::<Vec<_>>()
             .join("/");
@@ -551,6 +574,7 @@ pub(crate) fn headers_and_url(request: &Value) -> Result<(url::Url, reqwest::hea
                     );
                 }
             }
+            "oauth2" => bail!("OAuth 令牌尚未解析；代码导出暂不支持 OAuth 2.0"),
             other => bail!("此版本尚未实现认证类型：{other}"),
         }
     }
@@ -570,7 +594,10 @@ pub(crate) fn headers_and_url(request: &Value) -> Result<(url::Url, reqwest::hea
     }
     Ok((url, headers))
 }
-pub(crate) fn http_client(settings: &NetworkSettings) -> Result<reqwest::Client> {
+pub(crate) fn http_client(
+    settings: &NetworkSettings,
+    target: &url::Url,
+) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_millis(settings.connect_timeout_ms))
         .danger_accept_invalid_certs(settings.allow_invalid_certificates)
@@ -586,7 +613,7 @@ pub(crate) fn http_client(settings: &NetworkSettings) -> Result<reqwest::Client>
             builder = builder.no_proxy();
         }
     }
-    Ok(builder.build()?)
+    Ok(crate::tls::configure_http(builder, settings, target)?.build()?)
 }
 pub(crate) fn asset_path(execution: &Execution, path: &str) -> PathBuf {
     let p = Path::new(path);
@@ -606,7 +633,7 @@ pub async fn request_builder(execution: &Execution) -> Result<reqwest::RequestBu
     if network.forward_authorization_header {
         network.follow_redirects = false;
     }
-    let client = http_client(&network)?;
+    let client = http_client(&network, &url)?;
     let mut builder = client
         .request(
             reqwest::Method::from_bytes(
@@ -832,6 +859,21 @@ async fn send_request(
             }
         }
     }
+    if execution.settings.cookie_jar && !request.headers().contains_key(reqwest::header::COOKIE) {
+        let root = execution.root.clone();
+        let environment = execution.environment.clone();
+        let url = request.url().clone();
+        if let Some(value) = tokio::task::spawn_blocking(move || {
+            crate::cookies::header(&root, environment.as_deref(), &url)
+        })
+        .await??
+        {
+            request.headers_mut().insert(
+                reqwest::header::COOKIE,
+                reqwest::header::HeaderValue::from_str(&value)?,
+            );
+        }
+    }
     let replayable = request.try_clone().is_some();
     finalize_request(&mut request)?;
     let head = RequestHead::new(
@@ -844,10 +886,56 @@ async fn send_request(
     // Receiving response headers proves this hop was sent, even if reading its
     // body later fails or is cancelled. Connection failures have no sent head.
     emit(events, Event::Request { request: head });
+    if execution.settings.cookie_jar {
+        let root = execution.root.clone();
+        let environment = execution.environment.clone();
+        let url = response.url().clone();
+        let cookies: Vec<_> = response
+            .headers()
+            .get_all(reqwest::header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok().map(str::to_owned))
+            .collect();
+        if let Err(error) = tokio::task::spawn_blocking(move || {
+            crate::cookies::store(&root, environment.as_deref(), &url, &cookies)
+        })
+        .await?
+        {
+            emit(
+                events,
+                Event::Error {
+                    message: format!("Cookie jar 保存失败：{error:#}"),
+                },
+            );
+        }
+    }
+
     Ok((response, replayable, headers))
 }
 pub(crate) async fn execute_with_variables(
     mut execution: Execution,
+    events: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
+) -> Result<(Response, Value)> {
+    let start = Instant::now();
+    let mut result = execute_inner(&mut execution, events.clone()).await;
+    if let Err(error) = crate::history::record(
+        &execution,
+        result.as_ref().ok().map(|(response, _)| response),
+        result.as_ref().err(),
+        start.elapsed().as_millis(),
+    )
+    .await
+    {
+        let message = format!("请求历史保存失败：{error:#}");
+        if let Ok((response, _)) = &mut result {
+            response.logs.push(message.clone());
+        }
+        emit(&events, Event::Error { message });
+    }
+    result
+}
+async fn execute_inner(
+    execution: &mut Execution,
     events: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
 ) -> Result<(Response, Value)> {
     ensure!(!execution.websocket, "请使用 WebSocket 会话执行此请求");
@@ -872,7 +960,22 @@ pub(crate) async fn execute_with_variables(
     };
     let future = async {
         let start = Instant::now();
+        crate::oauth::apply(execution).await?;
         let mut current = execution.clone();
+        // OAuth custom token headers are materialized as API Key headers. Keep
+        // their authentication role even after auth is removed on the first hop.
+        let credential_header = if current.request["auth"]["type"] == "apikey"
+            && current.request["auth"]["placement"] != "query"
+        {
+            Some(reqwest::header::HeaderName::from_bytes(
+                current.request["auth"]["key"]
+                    .as_str()
+                    .context("API Key 缺少 key")?
+                    .as_bytes(),
+            )?)
+        } else {
+            None
+        };
         let (mut response, mut replayable, mut sent_headers) =
             send_request(&current, &events).await?;
         if execution.settings.follow_redirects {
@@ -903,12 +1006,7 @@ pub(crate) async fn execute_with_variables(
                     None if !execution.settings.forward_authorization_header => break,
                     None => bail!("无效的重定向地址"),
                 };
-                let cross_origin = if execution.settings.forward_authorization_header {
-                    next.origin() != response.url().origin()
-                } else {
-                    next.host_str() != response.url().host_str()
-                        || next.port_or_known_default() != response.url().port_or_known_default()
-                };
+                let cross_origin = next.origin() != response.url().origin();
                 let (_, mut headers) = headers_and_url(&current.request)?;
                 // URL userinfo is converted into Basic auth by RequestBuilder.
                 // Carry the actual header forward before applying redirect policy.
@@ -916,10 +1014,14 @@ pub(crate) async fn execute_with_variables(
                     headers.insert(reqwest::header::AUTHORIZATION, auth.clone());
                 }
                 let forwarded_headers = headers.iter().filter(|(name, _)| {
-                    (**name != reqwest::header::HOST || !execution.settings.forward_authorization_header) && (!cross_origin ||
-                        (!matches!(name.as_str(), "cookie" | "cookie2" | "proxy-authorization" | "www-authenticate") &&
-                        (**name != reqwest::header::AUTHORIZATION || execution.settings.forward_authorization_header)))
-                }).map(|(name,value)|json!({"name":name.as_str(),"value":String::from_utf8_lossy(value.as_bytes())})).collect::<Vec<_>>();
+                    let authentication = **name == reqwest::header::AUTHORIZATION
+                        || credential_header.as_ref() == Some(*name);
+                    (**name != reqwest::header::HOST || !execution.settings.forward_authorization_header)
+                        && (!cross_origin || (
+                            !matches!(name.as_str(), "cookie" | "cookie2" | "proxy-authorization" | "www-authenticate")
+                                && (!authentication || execution.settings.forward_authorization_header)
+                        ))
+                }).map(|(name, value)| json!({"name":name.as_str(),"value":String::from_utf8_lossy(value.as_bytes())})).collect::<Vec<_>>();
                 current.request["headers"] = json!(forwarded_headers);
                 if !(execution.settings.forward_authorization_header
                     || response.url().scheme() == "https" && next.scheme() == "http")
@@ -1111,10 +1213,10 @@ pub(crate) async fn execute_with_variables(
                     .then(|| base64::engine::general_purpose::STANDARD.encode(&bytes)),
                 elapsed_ms: elapsed,
                 bytes: bytes.len(),
-                logs: execution.report.logs,
-                tests: execution.report.tests,
+                logs: std::mem::take(&mut execution.report.logs),
+                tests: std::mem::take(&mut execution.report.tests),
             },
-            execution.report.variables,
+            std::mem::take(&mut execution.report.variables),
         ))
     };
     tokio::select! {

@@ -20,14 +20,14 @@ ApiFuck 保持 OpenCollection YAML 为主存储，复用固定版本的 Bruno �
 | 请求编辑 | Params/Headers/Vars/Assert 表格、认证/正文表单、Script/Tests/Docs/Source | 批量编辑等完整交互覆盖 |
 | HTTP/GraphQL | HTTP 执行，GraphQL Query/Variables 与 HTTP 传输 | GraphQL introspection 和 schema explorer |
 | 实时协议 | SSE 增量响应、取消、WebSocket 连接与消息 | gRPC；WebSocket 代理与跳过 TLS 校验 |
-| 认证 | Basic、Bearer、API Key、显式无认证/继承 | Digest、NTLM、WSSE、OAuth1/2、AWS SigV4 的执行 |
+| 认证 | Basic、Bearer、API Key、OAuth 2.0 客户端凭据/授权码 PKCE、显式无认证/继承 | Digest、NTLM、WSSE、OAuth 1、OAuth 隐式/密码授权、AWS SigV4 的执行 |
 | 变量 | 环境继承、本机覆盖、项目/目录/请求变量、静态 badge/tooltip、浮动补全 | 跨项目全局变量库、完整 Secret 编辑、外部 Secret、dotenv、动态变量体系 |
 | 脚本 | 同步 QuickJS Hook，`api`/`fuck` 和部分 `bru`/`req`/`res` 适配 | 完整 API、异步请求、Node/第三方模块、Bruno sandwich 顺序 |
 | 测试 | Chai test/expect/assert、AJV Draft-07、声明式断言和响应变量提取 | 上游全部断言和 actions 组合 |
-| 集合运行 | 核心顺序/迭代/延迟/取消/失败停止，共享运行变量 | 桌面入口、断点调试；WebSocket 在 runner 中跳过 |
-| 转换与导出 | Bru 请求/环境/目录转换，cURL 导入，四种语言代码导出 | OpenAPI/Postman/Insomnia/HAR 导入导出 |
+| 集合运行 | 核心与桌面数据驱动/迭代/延迟/取消/失败停止、运行变量和 JSON/JUnit/HTML 报告 | 并行运行、独立 CLI、断点调试；WebSocket 在 runner 中跳过 |
+| 转换与导出 | Bru 请求/环境/目录转换，OpenAPI/Postman 本地集合导入，cURL 导入，四种语言代码导出 | OpenAPI/Postman 导出，Insomnia/HAR/WSDL 导入；Postman 脚本需手动迁移 |
 | 编辑器 | 高亮、后台格式化、内置 LSP 语法诊断、Hook API 补全 | JS 类型检查、远程 schema 校验、完整 IDE 能力 |
-| 网络和记录 | 超时、响应大小限制、TLS 开关、基础代理配置 | mTLS、自定义 CA、代理绕过、Cookie jar、持久化请求历史、响应比较 |
+| 网络和记录 | 超时、响应大小限制、TLS 开关、基础代理配置、自定义 CA、PEM mTLS、按项目/环境的 Cookie jar、持久化执行历史 | PKCS#12/加密私钥、代理绕过、响应比较 |
 
 可导入、编辑或往返保留某字段，不代表执行引擎支持它。实际执行以 [execution.md](execution.md) 和 `crates/core/` 为准；不能将表单选项或上游文件存在当成功能已完成的证据。
 

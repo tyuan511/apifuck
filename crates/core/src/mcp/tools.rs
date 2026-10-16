@@ -37,7 +37,7 @@ pub fn list() -> &'static [Value] {
         add("import_curl", "Parse cURL into a new request. Never executes the shell command.", {let mut p=parent_name();p["command"]=text();p}, &["name","command"], false);
         add("convert_bru", "Convert a Bru/OpenCollection request, environment or folder in memory without writing files.", json!({"source":text(),"kind":{"enum":["request","folder","environment"]},"direction":{"enum":["import","export"]}}), &["source","kind","direction"], true);
         add("import_document", "Add validated OpenCollection YAML at a new relative path. Use convert_bru first for Bru input. Cannot overwrite existing files or internal app state.", json!({"path":text(),"source":text()}), &["path","source"], false);
-        add("run_collection", "Run saved HTTP/GraphQL requests through the core runner; returns a job ID. WebSockets are skipped.", json!({"environment":{"type":["string","null"]},"folder":{"type":"string"},"iterations":{"type":"integer","minimum":1,"maximum":10000},"delayMs":{"type":"integer","minimum":0,"maximum":60000},"stopOnFailure":{"type":"boolean"}}), &[], false);
+        add("run_collection", "Run saved HTTP/GraphQL requests through the core runner; returns a job ID. WebSockets are skipped.", json!({"environment":{"type":["string","null"]},"folder":{"type":"string"},"iterations":{"type":"integer","minimum":1,"maximum":10000},"delayMs":{"type":"integer","minimum":0,"maximum":60000},"stopOnFailure":{"type":"boolean"},"data":{"type":"array","maxItems":10000,"items":{"type":"object"}}}), &[], false);
         tools
     })
 }

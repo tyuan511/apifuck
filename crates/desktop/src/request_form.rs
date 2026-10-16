@@ -281,6 +281,11 @@ impl RequestForm {
                 ("placement", tr("添加位置")),
             ],
             "oauth2" => &[
+                ("flow", tr("授权流程")),
+                ("authorizationUrl", tr("授权地址")),
+                ("callbackUrl", tr("回调地址")),
+                ("refreshTokenUrl", tr("刷新令牌地址（可选）")),
+                ("credentialPlacement", tr("客户端凭据位置")),
                 ("accessTokenUrl", tr("访问令牌地址")),
                 ("clientId", tr("客户端 ID")),
                 ("clientSecret", tr("客户端密钥")),
@@ -289,9 +294,22 @@ impl RequestForm {
             _ => &[],
         };
         for (key, label) in fields {
-            let value = self.original[*key]
+            let source = if self.mode == "oauth2" && matches!(*key, "clientId" | "clientSecret") {
+                &self.original["credentials"][*key]
+            } else if *key == "credentialPlacement" {
+                &self.original["credentials"]["placement"]
+            } else {
+                &self.original[*key]
+            };
+            let value = source
                 .as_str()
-                .unwrap_or(if *key == "placement" { "header" } else { "" })
+                .unwrap_or(match *key {
+                    "placement" => "header",
+                    "credentialPlacement" => "body",
+                    "flow" => "client_credentials",
+                    "callbackUrl" => "http://127.0.0.1:0/oauth/callback",
+                    _ => "",
+                })
                 .to_owned();
             self.add_field(key, label, &value, window, cx);
         }
@@ -374,72 +392,89 @@ impl RequestForm {
         .detach();
     }
     fn fields_view(&self, window: &Window, cx: &mut Context<Self>) -> Form {
-        Form::new().children(self.fields.iter().map(|(key, label, input)| {
-            let options: Option<Vec<&'static str>> = match key.as_str() {
-                "placement" => Some(vec!["header", "query"]),
-                "followRedirects" | "encodeUrl" => Some(vec!["inherit", "true", "false"]),
-                _ => None,
-            };
-            let control = if let Some(options) = options {
-                let input = input.clone();
-                let weak = cx.entity().downgrade();
-                Button::new(SharedString::from(format!("field:{key}")))
-                    .icon(crate::icons::value_kind(&input.read(cx).value()))
-                    .outline()
-                    .justify_start()
-                    .label(mode_label(&input.read(cx).value()).to_owned())
-                    .dropdown_caret(true)
-                    .dropdown_menu(move |menu, _, _| {
-                        let mut menu = menu;
-                        for option in &options {
-                            let option = *option;
-                            let input = input.clone();
-                            let weak = weak.clone();
-                            menu = menu.item(
-                                PopupMenuItem::new(mode_label(option))
-                                    .icon(crate::icons::value_kind(option))
-                                    .on_click(move |_, window, cx| {
-                                        input.update(cx, |s, cx| s.set_value(option, window, cx));
-                                        let _ = weak.update(cx, |_, cx| {
-                                            cx.emit(Changed);
-                                            cx.notify();
-                                        });
-                                    }),
-                            );
-                        }
-                        menu
-                    })
-                    .into_any_element()
-            } else if key == "filePath" {
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(div().flex_1().child(Input::new(input)))
-                    .child(
-                        Button::new("browse-file")
-                            .icon(AppIcon::FolderOpen)
+        let authorization_code = self
+            .fields
+            .iter()
+            .find(|(key, _, _)| key == "flow")
+            .is_some_and(|(_, _, input)| input.read(cx).value() == "authorization_code");
+        Form::new().children(
+            self.fields
+                .iter()
+                .filter(|(key, _, _)| {
+                    authorization_code
+                        || !matches!(key.as_str(), "authorizationUrl" | "callbackUrl")
+                })
+                .map(|(key, label, input)| {
+                    let options: Option<Vec<&'static str>> = match key.as_str() {
+                        "placement" => Some(vec!["header", "query"]),
+                        "flow" => Some(vec!["client_credentials", "authorization_code"]),
+                        "credentialPlacement" => Some(vec!["body", "basic_auth_header"]),
+                        "followRedirects" | "encodeUrl" => Some(vec!["inherit", "true", "false"]),
+                        _ => None,
+                    };
+                    let control = if let Some(options) = options {
+                        let input = input.clone();
+                        let weak = cx.entity().downgrade();
+                        Button::new(SharedString::from(format!("field:{key}")))
+                            .icon(crate::icons::value_kind(&input.read(cx).value()))
                             .outline()
-                            .label(tr("选择文件…"))
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.choose_file(window, cx)),
-                            ),
-                    )
-                    .into_any_element()
-            } else {
-                crate::variable_input::input(
-                    input,
-                    Input::new(input)
-                        .when(matches!(key.as_str(), "password" | "clientSecret"), |i| {
-                            i.mask_toggle()
-                        }),
-                    &self.variables,
-                    window,
-                    cx,
-                )
-                .into_any_element()
-            };
-            Field::new().label(tr(label).to_owned()).child(control)
-        }))
+                            .justify_start()
+                            .label(mode_label(&input.read(cx).value()).to_owned())
+                            .dropdown_caret(true)
+                            .dropdown_menu(move |menu, _, _| {
+                                let mut menu = menu;
+                                for option in &options {
+                                    let option = *option;
+                                    let input = input.clone();
+                                    let weak = weak.clone();
+                                    menu = menu.item(
+                                        PopupMenuItem::new(mode_label(option))
+                                            .icon(crate::icons::value_kind(option))
+                                            .on_click(move |_, window, cx| {
+                                                input.update(cx, |s, cx| {
+                                                    s.set_value(option, window, cx)
+                                                });
+                                                let _ = weak.update(cx, |_, cx| {
+                                                    cx.emit(Changed);
+                                                    cx.notify();
+                                                });
+                                            }),
+                                    );
+                                }
+                                menu
+                            })
+                            .into_any_element()
+                    } else if key == "filePath" {
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(div().flex_1().child(Input::new(input)))
+                            .child(
+                                Button::new("browse-file")
+                                    .icon(AppIcon::FolderOpen)
+                                    .outline()
+                                    .label(tr("选择文件…"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.choose_file(window, cx)
+                                    })),
+                            )
+                            .into_any_element()
+                    } else {
+                        crate::variable_input::input(
+                            input,
+                            Input::new(input)
+                                .when(matches!(key.as_str(), "password" | "clientSecret"), |i| {
+                                    i.mask_toggle()
+                                }),
+                            &self.variables,
+                            window,
+                            cx,
+                        )
+                        .into_any_element()
+                    };
+                    Field::new().label(tr(label).to_owned()).child(control)
+                }),
+        )
     }
     fn raw_snapshot(&self, cx: &App) -> Value {
         json!({
@@ -559,6 +594,14 @@ impl RequestForm {
                         json!({})
                     };
                     value["type"] = json!(self.mode);
+                    if self.mode == "oauth2" {
+                        return oauth_form_value(
+                            value,
+                            self.fields.iter().map(|(key, _, field)| {
+                                (key.as_str(), field.read(cx).value().to_string())
+                            }),
+                        );
+                    }
                     for (key, _, field) in &self.fields {
                         value[key] = json!(field.read(cx).value().to_string());
                     }
@@ -700,7 +743,9 @@ impl Render for RequestForm {
                                 .dropdown_caret(true)
                                 .dropdown_menu(move |menu, _, _| {
                                     let mut menu = menu;
-                                    for mode in ["inherit", "none", "basic", "bearer", "apikey"] {
+                                    for mode in
+                                        ["inherit", "none", "basic", "bearer", "apikey", "oauth2"]
+                                    {
                                         let weak = weak.clone();
                                         menu = menu.item(
                                             PopupMenuItem::new(mode_label(mode))
@@ -834,6 +879,11 @@ fn mode_label(mode: &str) -> &str {
         "basic" => tr("基本认证"),
         "bearer" => tr("Bearer 令牌"),
         "apikey" => tr("API 密钥"),
+        "oauth2" => "OAuth 2.0",
+        "client_credentials" => tr("客户端凭据"),
+        "authorization_code" => tr("授权码 + PKCE"),
+        "body" => tr("请求正文"),
+        "basic_auth_header" => "Basic Authorization",
         "json" => "JSON",
         "text" => tr("文本"),
         "xml" => "XML",
@@ -841,5 +891,81 @@ fn mode_label(mode: &str) -> &str {
         "form-urlencoded" => tr("URL 编码表单"),
         "multipart-form" => tr("多部分表单"),
         _ => mode,
+    }
+}
+
+fn oauth_form_value<'a>(
+    mut value: Value,
+    fields: impl Iterator<Item = (&'a str, String)>,
+) -> Value {
+    for (key, text) in fields {
+        match key {
+            "clientId" | "clientSecret" => {
+                if !value["credentials"].is_object() {
+                    value["credentials"] = json!({});
+                }
+                value["credentials"][key] = json!(text);
+            }
+            "credentialPlacement" => {
+                if !value["credentials"].is_object() {
+                    value["credentials"] = json!({});
+                }
+                value["credentials"]["placement"] = json!(text);
+            }
+            _ => {
+                if text.is_empty() {
+                    value.as_object_mut().unwrap().remove(key);
+                } else {
+                    value[key] = json!(text);
+                }
+            }
+        }
+    }
+    for key in ["clientId", "clientSecret", "credentialPlacement"] {
+        value.as_object_mut().unwrap().remove(key);
+    }
+    if value["flow"] == "client_credentials" {
+        for key in ["authorizationUrl", "callbackUrl", "state", "pkce"] {
+            value.as_object_mut().unwrap().remove(key);
+        }
+        if let Some(extras) = value
+            .get_mut("additionalParameters")
+            .and_then(Value::as_object_mut)
+        {
+            extras.remove("authorizationRequest");
+        }
+    }
+    value
+}
+#[cfg(test)]
+mod oauth_tests {
+    use super::oauth_form_value;
+    use serde_json::json;
+    #[test]
+    fn oauth_form_matches_schema_and_keeps_nested_configuration() {
+        for flow in ["client_credentials", "authorization_code"] {
+            let value = oauth_form_value(
+                json!({"type":"oauth2","tokenConfig":{"placement":{"header":"Authorization"}}}),
+                [
+                    ("flow", flow),
+                    ("clientId", "client"),
+                    ("clientSecret", "secret"),
+                    ("credentialPlacement", "body"),
+                    ("accessTokenUrl", "https://example.com/token"),
+                    ("authorizationUrl", "https://example.com/authorize"),
+                    ("callbackUrl", "http://127.0.0.1:0/callback"),
+                ]
+                .into_iter()
+                .map(|(key, value)| (key, value.into())),
+            );
+            assert_eq!(value["credentials"]["clientId"], "client");
+            assert!(value.get("clientId").is_none());
+            let document = json!({"info":{"name":"OAuth","type":"http"},"http":{"method":"GET","url":"https://example.com","auth":value}});
+            apifuck_core::Document::parse(
+                "oauth.yml".into(),
+                serde_yaml::to_string(&document).unwrap(),
+            )
+            .unwrap();
+        }
     }
 }
